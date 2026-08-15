@@ -1,0 +1,30 @@
+node_modules
+dist
+build
+target
+coverage
+pnpm-lock.yaml
+Cargo.lock
+
+# FND-002 owns root tooling config and LokiAI Desktop UI's toolchain-adjacent
+# files, not the wider documentation/agent-role trees. Prettier's default
+# markdown/HTML/CSS coverage would otherwise reformat every file in these
+# normative/other-owner paths on any `format`/`format:check` run — excluded
+# deliberately, not by oversight. A future node that actually owns these paths
+# can narrow this list, not delete it wholesale.
+Docs/
+.claude/
+PromptForYou.md
+AGENTS.md
+CLAUDE.md
+
+# Within LokiAI Desktop UI, only reformat what FND-002 actually has a reason to
+# touch (its own new/edited config and source files) — not the entire existing
+# prototype, which stays byte-for-byte until a node that owns it decides to.
+LokiAI Desktop UI/README.md
+LokiAI Desktop UI/index.html
+LokiAI Desktop UI/src/components/common/MetricTile.tsx
+LokiAI Desktop UI/src/components/common/ToastContainer.tsx
+LokiAI Desktop UI/src/data/mockData.ts
+LokiAI Desktop UI/src/index.css
+LokiAI Desktop UI/src/main.tsx

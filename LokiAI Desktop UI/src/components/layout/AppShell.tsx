@@ -20,9 +20,7 @@ export const AppShell: React.FC<{ children: ReactNode }> = ({ children }) => {
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
         <TopBar />
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-[#010101] select-text">
-          <div className="max-w-7xl mx-auto w-full space-y-6">
-            {children}
-          </div>
+          <div className="max-w-7xl mx-auto w-full space-y-6">{children}</div>
         </main>
       </div>
 

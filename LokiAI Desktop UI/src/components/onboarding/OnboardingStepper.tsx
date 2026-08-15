@@ -61,8 +61,8 @@ export const OnboardingStepper: React.FC<OnboardingStepperProps> = ({ currentSte
                   isCompleted
                     ? 'bg-[#6B8C42]/20 border border-[#8AB55A] text-[#8AB55A]'
                     : isCurrent
-                    ? 'bg-[#0A0A08] border-2 border-[#8AB55A] text-[#E8D9A8] shadow-[0_0_12px_rgba(138,181,90,0.15)]'
-                    : 'bg-[#0A0A08] border border-[#23221C] text-[#8A8577]'
+                      ? 'bg-[#0A0A08] border-2 border-[#8AB55A] text-[#E8D9A8] shadow-[0_0_12px_rgba(138,181,90,0.15)]'
+                      : 'bg-[#0A0A08] border border-[#23221C] text-[#8A8577]'
                 }`}
               >
                 {isCompleted ? (
@@ -75,11 +75,7 @@ export const OnboardingStepper: React.FC<OnboardingStepperProps> = ({ currentSte
               <div className="mt-2 text-center">
                 <span
                   className={`block text-xs font-semibold font-sans ${
-                    isCurrent
-                      ? 'text-[#E8D9A8]'
-                      : isCompleted
-                      ? 'text-[#8AB55A]'
-                      : 'text-[#8A8577]'
+                    isCurrent ? 'text-[#E8D9A8]' : isCompleted ? 'text-[#8AB55A]' : 'text-[#8A8577]'
                   }`}
                 >
                   {step.label}

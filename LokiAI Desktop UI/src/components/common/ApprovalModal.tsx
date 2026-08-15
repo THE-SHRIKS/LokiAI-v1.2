@@ -1,17 +1,7 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
 import { SeverityBadge } from './SeverityBadge';
-import {
-  ShieldAlert,
-  Clock,
-  Cpu,
-  RotateCcw,
-  CheckCircle2,
-  XCircle,
-  X,
-  AlertTriangle,
-  FileCode2,
-} from 'lucide-react';
+import { ShieldAlert, Clock, Cpu, RotateCcw, CheckCircle2, X, AlertTriangle } from 'lucide-react';
 
 export const ApprovalModal: React.FC = () => {
   const { activeApprovalModal, setActiveApprovalModal, approveRequest, denyRequest } = useLoki();
@@ -71,19 +61,31 @@ export const ApprovalModal: React.FC = () => {
           {/* Top metadata grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-[10px] bg-[#0A0A08] border border-[#23221C]">
             <div>
-              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">Requesting Actor</span>
-              <span className="text-xs font-semibold text-[#E8D9A8] block">{activeApprovalModal.requestingActor.name}</span>
+              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">
+                Requesting Actor
+              </span>
+              <span className="text-xs font-semibold text-[#E8D9A8] block">
+                {activeApprovalModal.requestingActor.name}
+              </span>
             </div>
             <div>
-              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">Risk Level</span>
+              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">
+                Risk Level
+              </span>
               <SeverityBadge severity={activeApprovalModal.risk} />
             </div>
             <div>
-              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">Operation</span>
-              <span className="text-xs font-mono font-medium text-[#8AB55A] block">{activeApprovalModal.operationName}</span>
+              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">
+                Operation
+              </span>
+              <span className="text-xs font-mono font-medium text-[#8AB55A] block">
+                {activeApprovalModal.operationName}
+              </span>
             </div>
             <div>
-              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">Expiry Window</span>
+              <span className="text-[11px] text-[#8A8577] uppercase tracking-wider block mb-1">
+                Expiry Window
+              </span>
               <span className="text-xs font-mono text-[#E8D9A8] flex items-center gap-1">
                 <Clock className="w-3 h-3 text-[#8A8577]" />
                 {activeApprovalModal.remainingMinutes}m remaining
@@ -104,7 +106,9 @@ export const ApprovalModal: React.FC = () => {
                 >
                   <Cpu className="w-3.5 h-3.5 text-[#8AB55A]" />
                   <span>{name}</span>
-                  <span className="text-[10px] text-[#8A8577]">({activeApprovalModal.targetDeviceIds[idx]})</span>
+                  <span className="text-[10px] text-[#8A8577]">
+                    ({activeApprovalModal.targetDeviceIds[idx]})
+                  </span>
                 </div>
               ))}
             </div>
@@ -124,8 +128,12 @@ export const ApprovalModal: React.FC = () => {
           <div className="p-3 rounded-[8px] bg-[#23221C]/40 border border-[#23221C] flex gap-3 items-start">
             <AlertTriangle className="w-4 h-4 text-[#E8D9A8] shrink-0 mt-0.5" />
             <div>
-              <span className="text-xs font-semibold text-[#E8D9A8] block mb-0.5">Expected Hardware Downtime</span>
-              <p className="text-xs text-[#8A8577]">{activeApprovalModal.expectedEffectAndDowntime}</p>
+              <span className="text-xs font-semibold text-[#E8D9A8] block mb-0.5">
+                Expected Hardware Downtime
+              </span>
+              <p className="text-xs text-[#8A8577]">
+                {activeApprovalModal.expectedEffectAndDowntime}
+              </p>
             </div>
           </div>
 
@@ -168,19 +176,26 @@ export const ApprovalModal: React.FC = () => {
               <span className="text-xs font-semibold text-[#8AB55A] flex items-center gap-1.5 mb-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Post-Execution Verification
               </span>
-              <p className="text-xs text-[#8A8577] leading-relaxed">{activeApprovalModal.verificationPlan}</p>
+              <p className="text-xs text-[#8A8577] leading-relaxed">
+                {activeApprovalModal.verificationPlan}
+              </p>
             </div>
             <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C]">
               <span className="text-xs font-semibold text-[#E8D9A8] flex items-center gap-1.5 mb-1">
                 <RotateCcw className="w-3.5 h-3.5 text-[#8A8577]" /> Automated Rollback Plan
               </span>
-              <p className="text-xs text-[#8A8577] leading-relaxed">{activeApprovalModal.rollbackPlan}</p>
+              <p className="text-xs text-[#8A8577] leading-relaxed">
+                {activeApprovalModal.rollbackPlan}
+              </p>
             </div>
           </div>
 
           {/* Optional Approver Justification */}
           <div>
-            <label htmlFor="approval-justification" className="text-xs font-semibold text-[#8A8577] uppercase tracking-wider block mb-1.5">
+            <label
+              htmlFor="approval-justification"
+              className="text-xs font-semibold text-[#8A8577] uppercase tracking-wider block mb-1.5"
+            >
               Approver Audit Note (Optional)
             </label>
             <input

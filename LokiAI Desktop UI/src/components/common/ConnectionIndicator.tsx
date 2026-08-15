@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLoki } from '../../context/LokiContext';
-import { Activity, Radio, Cpu, ShieldCheck } from 'lucide-react';
+import { Activity, Radio } from 'lucide-react';
 
 export const ConnectionIndicator: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const { currentWorkspace, isLiveStreaming, setIsLiveStreaming } = useLoki();
@@ -31,15 +31,21 @@ export const ConnectionIndicator: React.FC<{ compact?: boolean }> = ({ compact =
           <span className="text-[#23221C]">|</span>
           <div className="flex items-center gap-1 text-[#8A8577] tabular-nums">
             <Radio className="w-3 h-3 text-[#8AB55A]" />
-            <span>{currentWorkspace.gatewaysOnlineCount}/{currentWorkspace.gatewaysTotalCount} Gateways</span>
+            <span>
+              {currentWorkspace.gatewaysOnlineCount}/{currentWorkspace.gatewaysTotalCount} Gateways
+            </span>
           </div>
           <span className="text-[#23221C]">|</span>
           <button
             onClick={() => setIsLiveStreaming(!isLiveStreaming)}
-            title={isLiveStreaming ? 'Click to pause visual streaming' : 'Click to resume live stream'}
+            title={
+              isLiveStreaming ? 'Click to pause visual streaming' : 'Click to resume live stream'
+            }
             className="flex items-center gap-1 text-[#8A8577] hover:text-[#E8D9A8] transition-colors"
           >
-            <Activity className={`w-3 h-3 ${isLiveStreaming ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`} />
+            <Activity
+              className={`w-3 h-3 ${isLiveStreaming ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`}
+            />
             <span>{isLiveStreaming ? 'Live' : 'Paused'}</span>
           </button>
         </>

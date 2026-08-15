@@ -1,21 +1,12 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
 import { OnboardingStepper } from '../../components/onboarding/OnboardingStepper';
-import {
-  Cpu,
-  Hammer,
-  ArrowRight,
-  ArrowLeft,
-  CheckCircle2,
-  Radio,
-  Layers,
-  Sparkles,
-} from 'lucide-react';
+import { Cpu, Hammer, ArrowRight, ArrowLeft } from 'lucide-react';
 
 export const DeviceChoiceView: React.FC = () => {
   const { onboardingState, updateOnboardingState, navigateToRoute } = useLoki();
   const [selectedChoice, setSelectedChoice] = useState<'existing' | 'scratch'>(
-    onboardingState.deviceChoice || 'existing'
+    onboardingState.deviceChoice || 'existing',
   );
 
   const handleContinue = () => {
@@ -28,7 +19,10 @@ export const DeviceChoiceView: React.FC = () => {
   };
 
   return (
-    <div id="device-choice-screen" className="w-full max-w-3xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="device-choice-screen"
+      className="w-full max-w-3xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="device" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -39,7 +33,8 @@ export const DeviceChoiceView: React.FC = () => {
           </div>
           <h1 className="text-xl font-bold text-[#E8D9A8]">Where are you starting?</h1>
           <p className="text-xs text-[#8A8577] mt-1.5 leading-relaxed">
-            Choose whether to discover and validate connected physical hardware now, or initialize your workspace to start coding firmware immediately.
+            Choose whether to discover and validate connected physical hardware now, or initialize
+            your workspace to start coding firmware immediately.
           </p>
         </div>
 
@@ -73,7 +68,8 @@ export const DeviceChoiceView: React.FC = () => {
                   I already have a device
                 </h3>
                 <p className="text-xs text-[#8A8577] mt-1 leading-relaxed">
-                  Discover and connect hardware that is currently attached to or reachable from this runtime daemon via USB, Serial, BLE, or Ethernet.
+                  Discover and connect hardware that is currently attached to or reachable from this
+                  runtime daemon via USB, Serial, BLE, or Ethernet.
                 </p>
               </div>
             </div>
@@ -111,7 +107,8 @@ export const DeviceChoiceView: React.FC = () => {
                   I’m building from scratch
                 </h3>
                 <p className="text-xs text-[#8A8577] mt-1 leading-relaxed">
-                  Create the workspace now and connect hardware when your project is ready. You can test builds and diagnostic agents immediately.
+                  Create the workspace now and connect hardware when your project is ready. You can
+                  test builds and diagnostic agents immediately.
                 </p>
               </div>
             </div>

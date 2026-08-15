@@ -1,27 +1,21 @@
 import React from 'react';
 import { useLoki } from '../../context/LokiContext';
-import {
-  User,
-  Shield,
-  Layers,
-  Key,
-  Radio,
-  ExternalLink,
-  X,
-  LogOut,
-  CheckCircle2,
-  Building,
-} from 'lucide-react';
+import { Key, ExternalLink, X, LogOut, Building } from 'lucide-react';
 
 interface AccountMenuModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+  // Optional, not wired by any call site yet (App.tsx, AppShell.tsx both mount
+  // this with no props) — this component has always rendered null in the
+  // shipped baseline. FND-002 only makes that existing, pre-existing gap type-
+  // check honestly; wiring real open/close state is separate UI-node work, not
+  // toolchain/workspace foundation.
+  isOpen?: boolean;
+  onClose?: () => void;
   initialTab?: 'profile' | 'organization' | 'plan' | 'runtime';
 }
 
 export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
-  isOpen,
-  onClose,
+  isOpen = false,
+  onClose = () => {},
   initialTab = 'profile',
 }) => {
   const { userSession, setIsLogoutModalOpen } = useLoki();
@@ -106,19 +100,27 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3 rounded bg-[#050505] border border-[#23221C]">
-                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">User ID</span>
+                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">
+                    User ID
+                  </span>
                   <span className="font-mono text-[#E8D9A8]">{userSession.id}</span>
                 </div>
                 <div className="p-3 rounded bg-[#050505] border border-[#23221C]">
-                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">Role</span>
+                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">
+                    Role
+                  </span>
                   <span className="font-semibold text-[#8AB55A]">{userSession.role}</span>
                 </div>
                 <div className="p-3 rounded bg-[#050505] border border-[#23221C]">
-                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">Token Expiration</span>
+                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">
+                    Token Expiration
+                  </span>
                   <span className="font-mono text-[#E8D9A8]">{userSession.tokenExpiresAt}</span>
                 </div>
                 <div className="p-3 rounded bg-[#050505] border border-[#23221C]">
-                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">Auth Handshake</span>
+                  <span className="text-[10px] text-[#8A8577] uppercase block mb-1 font-mono">
+                    Auth Handshake
+                  </span>
                   <span className="font-mono text-[#8AB55A]">PKCE Verified (mTLS)</span>
                 </div>
               </div>
@@ -131,7 +133,8 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
                   <span className="text-[10px] font-mono text-[#8AB55A]">2 Active Keys</span>
                 </div>
                 <p className="text-[#8A8577] text-[11px]">
-                  Keys loaded by Loki daemon for automated SWD flash and secure serial bridge verification.
+                  Keys loaded by Loki daemon for automated SWD flash and secure serial bridge
+                  verification.
                 </p>
               </div>
             </div>
@@ -145,8 +148,12 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
                     <Building className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="font-bold text-[#E8D9A8] text-sm">{userSession.organization}</div>
-                    <div className="text-[11px] text-[#8A8577] font-mono">Team: Hardware & Reliability Engineering</div>
+                    <div className="font-bold text-[#E8D9A8] text-sm">
+                      {userSession.organization}
+                    </div>
+                    <div className="text-[11px] text-[#8A8577] font-mono">
+                      Team: Hardware & Reliability Engineering
+                    </div>
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded bg-[#6B8C42]/20 border border-[#8AB55A]/40 text-[#8AB55A] font-mono text-[10px]">
@@ -157,7 +164,8 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
               <div className="p-3.5 rounded bg-[#050505] border border-[#23221C] space-y-2">
                 <div className="font-semibold text-[#E8D9A8]">Cluster Permissions</div>
                 <p className="text-[#8A8577] text-[11px]">
-                  All high-risk physical hardware operations (voltage override, flash overwrite) are logged to the immutable audit trail.
+                  All high-risk physical hardware operations (voltage override, flash overwrite) are
+                  logged to the immutable audit trail.
                 </p>
               </div>
             </div>
@@ -167,9 +175,13 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
             <div className="space-y-4">
               <div className="p-4 rounded bg-[#050505] border border-[#23221C] flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] uppercase font-mono text-[#8AB55A] font-bold">Active License</span>
+                  <span className="text-[10px] uppercase font-mono text-[#8AB55A] font-bold">
+                    Active License
+                  </span>
                   <h3 className="text-base font-bold text-[#E8D9A8]">{userSession.plan}</h3>
-                  <p className="text-[11px] text-[#8A8577] mt-0.5">Unlimited local daemons • 256 connected nodes • Multi-agent orchestration</p>
+                  <p className="text-[11px] text-[#8A8577] mt-0.5">
+                    Unlimited local daemons • 256 connected nodes • Multi-agent orchestration
+                  </p>
                 </div>
                 <a
                   href="https://lokiai.io/billing"
@@ -186,7 +198,8 @@ export const AccountMenuModal: React.FC<AccountMenuModalProps> = ({
           {activeTab === 'runtime' && (
             <div className="space-y-3">
               <p className="text-[#8A8577] text-[11px]">
-                Install local daemon binaries on other test bench machines, Raspberry Pis, or CI/CD hardware runners:
+                Install local daemon binaries on other test bench machines, Raspberry Pis, or CI/CD
+                hardware runners:
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[11px]">
                 <div className="p-3 rounded bg-[#050505] border border-[#23221C] flex items-center justify-between">

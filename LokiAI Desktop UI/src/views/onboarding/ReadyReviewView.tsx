@@ -3,30 +3,17 @@ import { useLoki } from '../../context/LokiContext';
 import { OnboardingStepper } from '../../components/onboarding/OnboardingStepper';
 import {
   Sparkles,
-  CheckCircle2,
   Briefcase,
   Bot,
   Cpu,
-  Radio,
   ShieldCheck,
   ArrowRight,
   ArrowLeft,
-  Settings,
   PlusCircle,
-  AlertCircle,
-  Clock,
-  Layers,
 } from 'lucide-react';
 
 export const ReadyReviewView: React.FC = () => {
-  const {
-    userSession,
-    onboardingState,
-    finishOnboarding,
-    navigateToRoute,
-    setCurrentSettingsTab,
-    addToast,
-  } = useLoki();
+  const { userSession, onboardingState, finishOnboarding, navigateToRoute, addToast } = useLoki();
 
   const [isOpening, setIsOpening] = useState(false);
 
@@ -46,7 +33,10 @@ export const ReadyReviewView: React.FC = () => {
   };
 
   return (
-    <div id="ready-review-screen" className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="ready-review-screen"
+      className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="ready" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -61,7 +51,8 @@ export const ReadyReviewView: React.FC = () => {
             </span>
             <h1 className="text-2xl font-bold text-[#E8D9A8] mt-1">LokiAI is ready</h1>
             <p className="text-xs text-[#8A8577] mt-1 max-w-md mx-auto">
-              Your desktop hardware control room is configured with active safety gates, agent bridges, and runtime telemetry.
+              Your desktop hardware control room is configured with active safety gates, agent
+              bridges, and runtime telemetry.
             </p>
           </div>
         </div>
@@ -81,8 +72,12 @@ export const ReadyReviewView: React.FC = () => {
                 {userSession?.avatarInitials || 'LR'}
               </div>
               <div className="min-w-0">
-                <div className="font-bold text-[#E8D9A8]">{userSession?.name || 'Laukik Rajput'}</div>
-                <div className="text-[11px] text-[#8A8577] font-mono truncate">{userSession?.email || 'laukikxrajput@gmail.com'}</div>
+                <div className="font-bold text-[#E8D9A8]">
+                  {userSession?.name || 'Laukik Rajput'}
+                </div>
+                <div className="text-[11px] text-[#8A8577] font-mono truncate">
+                  {userSession?.email || 'laukikxrajput@gmail.com'}
+                </div>
               </div>
             </div>
           </div>
@@ -98,7 +93,9 @@ export const ReadyReviewView: React.FC = () => {
               </span>
             </div>
             <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-              <div className="font-bold text-[#E8D9A8] font-mono">{onboardingState.workspace.name}</div>
+              <div className="font-bold text-[#E8D9A8] font-mono">
+                {onboardingState.workspace.name}
+              </div>
               <div className="text-[11px] text-[#8A8577] truncate mt-0.5">
                 {onboardingState.workspace.description || 'Hardware validation environment'}
               </div>
@@ -155,7 +152,8 @@ export const ReadyReviewView: React.FC = () => {
                 <div>
                   <div className="font-semibold text-[#E8D9A8]">Device will be connected later</div>
                   <div className="text-[11px] text-[#8A8577] font-mono mt-0.5">
-                    Target: {onboardingState.scratchProject.targetFamily} ({onboardingState.scratchProject.intendedConnector})
+                    Target: {onboardingState.scratchProject.targetFamily} (
+                    {onboardingState.scratchProject.intendedConnector})
                   </div>
                 </div>
               )}
@@ -174,7 +172,9 @@ export const ReadyReviewView: React.FC = () => {
             <span className="text-[#E8D9A8]">Balanced (Approval Gates)</span>
           </div>
           <div>
-            <span className="text-[10px] text-[#8A8577] uppercase block">Automatic Action Mode</span>
+            <span className="text-[10px] text-[#8A8577] uppercase block">
+              Automatic Action Mode
+            </span>
             <span className="text-[#8AB55A]">Standard Guardrails</span>
           </div>
         </div>

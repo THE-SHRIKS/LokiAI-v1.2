@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
-import { ShieldCheck, LogOut, Radio, User, ChevronDown, RefreshCw } from 'lucide-react';
+import { ShieldCheck, LogOut, ChevronDown } from 'lucide-react';
 
 export const OnboardingHeader: React.FC = () => {
-  const { authStatus, userSession, setIsLogoutModalOpen, activeAppRoute } = useLoki();
+  const { authStatus, userSession, setIsLogoutModalOpen } = useLoki();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
@@ -61,7 +61,9 @@ export const OnboardingHeader: React.FC = () => {
                 <div className="px-2.5 py-2 border-b border-[#23221C]">
                   <div className="font-semibold text-[#E8D9A8]">{userSession.name}</div>
                   <div className="text-[10px] font-mono text-[#8A8577]">{userSession.email}</div>
-                  <div className="text-[10px] text-[#8AB55A] mt-1 font-mono">{userSession.role}</div>
+                  <div className="text-[10px] text-[#8AB55A] mt-1 font-mono">
+                    {userSession.role}
+                  </div>
                 </div>
                 <div className="p-1">
                   <button

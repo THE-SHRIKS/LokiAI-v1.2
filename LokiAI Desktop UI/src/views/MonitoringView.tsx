@@ -1,25 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useLoki } from '../context/LokiContext';
 import { TelemetryChart } from '../components/common/TelemetryChart';
 import { LogViewer } from '../components/common/LogViewer';
 import { SeverityBadge } from '../components/common/SeverityBadge';
-import {
-  Activity,
-  Radio,
-  Sliders,
-  CheckCircle2,
-  AlertTriangle,
-  Play,
-  Pause,
-  PlusCircle,
-  Clock,
-  Layers,
-  Terminal,
-} from 'lucide-react';
+import { Radio, Sliders } from 'lucide-react';
 
 export const MonitoringView: React.FC = () => {
   const { watchers, monitoringRules, toggleRule, openInspector, logs } = useLoki();
-  const [selectedWatcherId, setSelectedWatcherId] = useState<string>(watchers[0]?.id || '');
 
   return (
     <div id="monitoring-view" className="space-y-6">
@@ -50,7 +37,8 @@ export const MonitoringView: React.FC = () => {
           </div>
 
           <p className="text-xs text-[#8A8577] leading-relaxed">
-            All 6 runtime hardware nodes emit 1Hz heartbeat telemetry with brownout and watchdog tracking.
+            All 6 runtime hardware nodes emit 1Hz heartbeat telemetry with brownout and watchdog
+            tracking.
           </p>
         </div>
 
@@ -63,7 +51,9 @@ export const MonitoringView: React.FC = () => {
                 Watcher & Hardware Interface Gateways
               </span>
             </div>
-            <span className="text-[11px] font-mono text-[#8A8577]">{watchers.length} Active Gateways</span>
+            <span className="text-[11px] font-mono text-[#8A8577]">
+              {watchers.length} Active Gateways
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -80,10 +70,14 @@ export const MonitoringView: React.FC = () => {
                   <span>Host / Host Gateway:</span> <span className="text-[#E8D9A8]">{w.host}</span>
                 </div>
                 <div className="flex justify-between text-[#8A8577]">
-                  <span>Nodes:</span> <span className="text-[#8AB55A]">{w.connectedDevicesCount} attached</span>
+                  <span>Nodes:</span>{' '}
+                  <span className="text-[#8AB55A]">{w.connectedDevicesCount} attached</span>
                 </div>
                 <div className="flex justify-between text-[#8A8577]">
-                  <span>Latency / Drop:</span> <span>{w.latencyMs}ms • {w.dropRatePerSec}/s drops</span>
+                  <span>Latency / Drop:</span>{' '}
+                  <span>
+                    {w.latencyMs}ms • {w.dropRatePerSec}/s drops
+                  </span>
                 </div>
               </div>
             ))}

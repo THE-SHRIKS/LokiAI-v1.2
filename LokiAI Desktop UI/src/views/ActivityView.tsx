@@ -1,21 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useLoki } from '../context/LokiContext';
 import { SeverityBadge } from '../components/common/SeverityBadge';
-import {
-  History,
-  Search,
-  Filter,
-  Download,
-  FileCode,
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  ExternalLink,
-  Layers,
-} from 'lucide-react';
+import { Search, Download } from 'lucide-react';
 
 export const ActivityView: React.FC = () => {
-  const { activityEvents, openInspector, navigateTo } = useLoki();
+  const { activityEvents, openInspector } = useLoki();
   const [query, setQuery] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
   const [resultFilter, setResultFilter] = useState<string>('ALL');
@@ -40,7 +29,9 @@ export const ActivityView: React.FC = () => {
   }, [activityEvents, riskFilter, resultFilter, query]);
 
   const handleExportJSON = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(filteredActivities, null, 2));
+    const dataStr =
+      'data:text/json;charset=utf-8,' +
+      encodeURIComponent(JSON.stringify(filteredActivities, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', `loki-activity-audit-${new Date().toISOString()}.json`);
@@ -134,7 +125,8 @@ export const ActivityView: React.FC = () => {
                       {act.actionSummary || act.summary}
                     </div>
                     <div className="text-[10px] text-[#8A8577]">
-                      {act.resourceType}: <strong className="text-[#E8D9A8] font-mono">{act.resourceName}</strong>
+                      {act.resourceType}:{' '}
+                      <strong className="text-[#E8D9A8] font-mono">{act.resourceName}</strong>
                     </div>
                   </td>
                   <td className="py-3 px-4">
@@ -146,8 +138,8 @@ export const ActivityView: React.FC = () => {
                         act.result === 'Success'
                           ? 'bg-[#6B8C42]/20 text-[#8AB55A]'
                           : act.result === 'Denied'
-                          ? 'bg-[#23221C] text-[#E8D9A8]'
-                          : 'bg-[#CC272E]/20 text-[#CC272E]'
+                            ? 'bg-[#23221C] text-[#E8D9A8]'
+                            : 'bg-[#CC272E]/20 text-[#CC272E]'
                       }`}
                     >
                       {act.result}

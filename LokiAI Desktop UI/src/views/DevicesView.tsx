@@ -1,29 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useLoki } from '../context/LokiContext';
-import { Device, DeviceFamily, ConnectorType } from '../types';
 import { StatusChip } from '../components/common/StatusChip';
 import { DeviceGraph } from '../components/common/DeviceGraph';
 import { LogViewer } from '../components/common/LogViewer';
-import {
-  Cpu,
-  Search,
-  Filter,
-  PlusCircle,
-  RotateCcw,
-  Play,
-  Terminal,
-  Activity,
-  ArrowLeft,
-  CheckCircle2,
-  AlertTriangle,
-  Radio,
-  FileCode,
-  Layers,
-  HardDrive,
-  Grid,
-  List,
-  ShieldCheck,
-} from 'lucide-react';
+import { Cpu, Search, PlusCircle, RotateCcw, Play, ArrowLeft, Grid, List } from 'lucide-react';
 
 export const DevicesView: React.FC = () => {
   const {
@@ -37,7 +17,6 @@ export const DevicesView: React.FC = () => {
     setIsDeployModalOpen,
     openInspector,
     logs,
-    incidents,
   } = useLoki();
 
   const [query, setQuery] = useState('');
@@ -68,7 +47,6 @@ export const DevicesView: React.FC = () => {
   // Device Detail Sub-View
   if (selectedDevice) {
     const deviceLogs = logs.filter((l) => l.sourceDevice === selectedDevice.name);
-    const deviceIncidents = incidents.filter((i) => i.affectedDeviceId === selectedDevice.id);
 
     return (
       <div id="device-detail-view" className="space-y-6">
@@ -84,7 +62,9 @@ export const DevicesView: React.FC = () => {
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-[#E8D9A8] font-mono">{selectedDevice.name}</h2>
+                <h2 className="text-base font-bold text-[#E8D9A8] font-mono">
+                  {selectedDevice.name}
+                </h2>
                 <StatusChip status={selectedDevice.status} />
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#0A0A08] border border-[#23221C] text-[#8AB55A]">
                   {selectedDevice.supportTier}
@@ -139,28 +119,44 @@ export const DevicesView: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Family & Architecture</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Family & Architecture
+                </span>
                 <span className="text-[#E8D9A8] font-bold">{selectedDevice.family}</span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Manufacturer & Board</span>
-                <span className="text-[#E8D9A8]">{selectedDevice.manufacturer} ({selectedDevice.boardRevision})</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Manufacturer & Board
+                </span>
+                <span className="text-[#E8D9A8]">
+                  {selectedDevice.manufacturer} ({selectedDevice.boardRevision})
+                </span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Physical Connector</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Physical Connector
+                </span>
                 <span className="text-[#8AB55A]">{selectedDevice.connector}</span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Transport Port / URI</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Transport Port / URI
+                </span>
                 <span className="text-[#E8D9A8]">{selectedDevice.transportPort}</span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Active Firmware</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Active Firmware
+                </span>
                 <span className="text-[#8AB55A] font-bold">{selectedDevice.firmwareVersion}</span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">Rollback Target</span>
-                <span className="text-[#E8D9A8]">{selectedDevice.previousFirmwareVersion || 'None'}</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5">
+                  Rollback Target
+                </span>
+                <span className="text-[#E8D9A8]">
+                  {selectedDevice.previousFirmwareVersion || 'None'}
+                </span>
               </div>
             </div>
 
@@ -189,7 +185,8 @@ export const DevicesView: React.FC = () => {
                 Continuous Health Check Assertions
               </span>
               <span className="text-[11px] font-mono text-[#8AB55A]">
-                {selectedDevice.healthChecks.filter((h) => h.status === 'Healthy').length}/{selectedDevice.healthChecks.length} Passed
+                {selectedDevice.healthChecks.filter((h) => h.status === 'Healthy').length}/
+                {selectedDevice.healthChecks.length} Passed
               </span>
             </div>
 
@@ -206,11 +203,15 @@ export const DevicesView: React.FC = () => {
                         {chk.category}
                       </span>
                     </div>
-                    {chk.details && <p className="text-[11px] text-[#CC272E] mt-0.5 font-mono">{chk.details}</p>}
+                    {chk.details && (
+                      <p className="text-[11px] text-[#CC272E] mt-0.5 font-mono">{chk.details}</p>
+                    )}
                   </div>
 
                   <div className="flex flex-col items-end font-mono">
-                    <span className={`font-bold ${chk.status === 'Healthy' ? 'text-[#8AB55A]' : 'text-[#CC272E]'}`}>
+                    <span
+                      className={`font-bold ${chk.status === 'Healthy' ? 'text-[#8AB55A]' : 'text-[#CC272E]'}`}
+                    >
                       {chk.measuredValue}
                     </span>
                     <span className="text-[10px] text-[#8A8577]">Target: {chk.threshold}</span>
@@ -222,8 +223,12 @@ export const DevicesView: React.FC = () => {
             {selectedDevice.rollbackEligible && (
               <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between font-mono text-xs">
                 <div>
-                  <span className="text-[#E8D9A8] font-semibold block">Rollback Safeguard Active</span>
-                  <span className="text-[#8A8577] text-[11px]">Previous validated: {selectedDevice.previousFirmwareVersion}</span>
+                  <span className="text-[#E8D9A8] font-semibold block">
+                    Rollback Safeguard Active
+                  </span>
+                  <span className="text-[#8A8577] text-[11px]">
+                    Previous validated: {selectedDevice.previousFirmwareVersion}
+                  </span>
                 </div>
                 <button
                   onClick={() => triggerRollback(selectedDevice.id)}
@@ -297,7 +302,9 @@ export const DevicesView: React.FC = () => {
             <button
               onClick={() => setViewMode('table')}
               className={`p-1.5 rounded-[4px] transition-colors ${
-                viewMode === 'table' ? 'bg-[#23221C] text-[#8AB55A]' : 'text-[#8A8577] hover:text-[#E8D9A8]'
+                viewMode === 'table'
+                  ? 'bg-[#23221C] text-[#8AB55A]'
+                  : 'text-[#8A8577] hover:text-[#E8D9A8]'
               }`}
               title="Table view"
             >
@@ -306,7 +313,9 @@ export const DevicesView: React.FC = () => {
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-[4px] transition-colors ${
-                viewMode === 'grid' ? 'bg-[#23221C] text-[#8AB55A]' : 'text-[#8A8577] hover:text-[#E8D9A8]'
+                viewMode === 'grid'
+                  ? 'bg-[#23221C] text-[#8AB55A]'
+                  : 'text-[#8A8577] hover:text-[#E8D9A8]'
               }`}
               title="Grid view"
             >
@@ -352,14 +361,18 @@ export const DevicesView: React.FC = () => {
                       <div className="font-bold text-[#E8D9A8] group-hover:text-[#8AB55A] transition-colors">
                         {dev.name}
                       </div>
-                      <div className="text-[10px] text-[#8A8577] truncate max-w-xs">{dev.hardwareId}</div>
+                      <div className="text-[10px] text-[#8A8577] truncate max-w-xs">
+                        {dev.hardwareId}
+                      </div>
                     </td>
                     <td className="py-3 px-4 font-medium">{dev.family}</td>
                     <td className="py-3 px-4 text-[#8A8577]">{dev.connector}</td>
                     <td className="py-3 px-4">
                       <StatusChip status={dev.status} />
                     </td>
-                    <td className="py-3 px-4 text-[#8AB55A] font-semibold">{dev.firmwareVersion}</td>
+                    <td className="py-3 px-4 text-[#8AB55A] font-semibold">
+                      {dev.firmwareVersion}
+                    </td>
                     <td className="py-3 px-4 text-[#8A8577]">{dev.gatewayName.split(' ')[0]}</td>
                     <td className="py-3 px-4 text-[#8A8577]">{dev.lastSeen}</td>
                     <td className="py-3 px-4 text-right">
@@ -403,10 +416,12 @@ export const DevicesView: React.FC = () => {
                   <span>Family:</span> <span className="text-[#E8D9A8]">{dev.family}</span>
                 </div>
                 <div className="flex justify-between text-[#8A8577]">
-                  <span>Firmware:</span> <span className="text-[#8AB55A]">{dev.firmwareVersion}</span>
+                  <span>Firmware:</span>{' '}
+                  <span className="text-[#8AB55A]">{dev.firmwareVersion}</span>
                 </div>
                 <div className="flex justify-between text-[#8A8577]">
-                  <span>Port:</span> <span className="text-[#E8D9A8] truncate max-w-[150px]">{dev.transportPort}</span>
+                  <span>Port:</span>{' '}
+                  <span className="text-[#E8D9A8] truncate max-w-[150px]">{dev.transportPort}</span>
                 </div>
               </div>
 

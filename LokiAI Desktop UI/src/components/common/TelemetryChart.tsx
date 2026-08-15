@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useLoki } from '../../context/LokiContext';
-import { Table, Activity, Filter, Eye, AlertTriangle } from 'lucide-react';
+import { Table, Activity, AlertTriangle } from 'lucide-react';
 
 interface TelemetryChartProps {
   deviceId?: string;
@@ -9,16 +9,41 @@ interface TelemetryChartProps {
 }
 
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({
-  deviceId,
+  // Not yet consumed by any caller (single shared telemetry stream today) —
+  // kept in the public prop shape for the per-device scoping that MON-001
+  // introduces; renamed to signal it's intentionally unused for now rather
+  // than silently dropped.
+  deviceId: _deviceId,
   title = 'Recorded Hardware Telemetry',
   className = '',
 }) => {
   const { telemetryHistory } = useLoki();
-  const [selectedMetric, setSelectedMetric] = useState<'voltage' | 'temperature' | 'cpuUsage' | 'watchdogMarginMs'>('voltage');
+  const [selectedMetric, setSelectedMetric] = useState<
+    'voltage' | 'temperature' | 'cpuUsage' | 'watchdogMarginMs'
+  >('voltage');
   const [timeRange, setTimeRange] = useState<'15m' | '1h' | '6h' | '24h'>('1h');
   const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
 
-  const metricConfig = {
+  interface MetricConfigEntry {
+    label: string;
+    unit: string;
+    min: number;
+    max: number;
+    // Mutually exclusive per metric (a brownout floor vs. a thermal/load
+    // ceiling) — both stay optional on the shared shape rather than each
+    // literal only declaring the one it uses.
+    thresholdLow?: number;
+    thresholdHigh?: number;
+    thresholdLabel: string;
+    color: string;
+    stroke: string;
+    fill: string;
+  }
+
+  const metricConfig: Record<
+    'voltage' | 'temperature' | 'cpuUsage' | 'watchdogMarginMs',
+    MetricConfigEntry
+  > = {
     voltage: {
       label: 'VCC Rail Voltage',
       unit: 'V',
@@ -119,7 +144,11 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     return `${linePath} L ${lastX} ${baselineY} L ${firstX} ${baselineY} Z`;
   }, [linePath, points, config]);
 
-  const thresholdY = config.thresholdLow ? yVal(config.thresholdLow) : config.thresholdHigh ? yVal(config.thresholdHigh) : null;
+  const thresholdY = config.thresholdLow
+    ? yVal(config.thresholdLow)
+    : config.thresholdHigh
+      ? yVal(config.thresholdHigh)
+      : null;
 
   return (
     <div
@@ -158,7 +187,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
                 key={r}
                 onClick={() => setTimeRange(r)}
                 className={`px-2 py-0.5 rounded-[4px] transition-all ${
-                  timeRange === r ? 'bg-[#6B8C42]/20 text-[#8AB55A] font-semibold' : 'text-[#8A8577] hover:text-[#E8D9A8]'
+                  timeRange === r
+                    ? 'bg-[#6B8C42]/20 text-[#8AB55A] font-semibold'
+                    : 'text-[#8A8577] hover:text-[#E8D9A8]'
                 }`}
               >
                 {r}
@@ -170,10 +201,16 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
           <button
             onClick={() => setViewMode(viewMode === 'chart' ? 'table' : 'chart')}
             className="p-1.5 rounded-[6px] bg-[#0A0A08] border border-[#23221C] text-[#8A8577] hover:text-[#E8D9A8] transition-colors"
-            title={viewMode === 'chart' ? 'Switch to accessible table view' : 'Switch to chart view'}
+            title={
+              viewMode === 'chart' ? 'Switch to accessible table view' : 'Switch to chart view'
+            }
             aria-label="Toggle table or chart view"
           >
-            {viewMode === 'chart' ? <Table className="w-3.5 h-3.5" /> : <Activity className="w-3.5 h-3.5" />}
+            {viewMode === 'chart' ? (
+              <Table className="w-3.5 h-3.5" />
+            ) : (
+              <Activity className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -183,7 +220,10 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         <div className="pt-3 relative overflow-hidden">
           <div className="flex items-center justify-between text-xs font-mono text-[#8A8577] mb-1">
             <span>
-              Latest: <strong className="text-[#E8D9A8]">{points[points.length - 1]?.[selectedMetric]} {config.unit}</strong>
+              Latest:{' '}
+              <strong className="text-[#E8D9A8]">
+                {points[points.length - 1]?.[selectedMetric]} {config.unit}
+              </strong>
             </span>
             <span className="text-[11px]">Source: Verified Runtime Gateway (1s sample rate)</span>
           </div>
@@ -196,9 +236,29 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
               aria-label={`${config.label} telemetry chart over time`}
             >
               {/* Grid Lines */}
-              <line x1={paddingLeft} y1={paddingTop} x2={svgWidth - paddingRight} y2={paddingTop} stroke="#23221C" strokeDasharray="3 3" />
-              <line x1={paddingLeft} y1={paddingTop + chartH / 2} x2={svgWidth - paddingRight} y2={paddingTop + chartH / 2} stroke="#23221C" strokeDasharray="3 3" />
-              <line x1={paddingLeft} y1={paddingTop + chartH} x2={svgWidth - paddingRight} y2={paddingTop + chartH} stroke="#23221C" />
+              <line
+                x1={paddingLeft}
+                y1={paddingTop}
+                x2={svgWidth - paddingRight}
+                y2={paddingTop}
+                stroke="#23221C"
+                strokeDasharray="3 3"
+              />
+              <line
+                x1={paddingLeft}
+                y1={paddingTop + chartH / 2}
+                x2={svgWidth - paddingRight}
+                y2={paddingTop + chartH / 2}
+                stroke="#23221C"
+                strokeDasharray="3 3"
+              />
+              <line
+                x1={paddingLeft}
+                y1={paddingTop + chartH}
+                x2={svgWidth - paddingRight}
+                y2={paddingTop + chartH}
+                stroke="#23221C"
+              />
 
               {/* Threshold Line overlay */}
               {thresholdY !== null && (
@@ -225,21 +285,48 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
               )}
 
               {/* Y-Axis Labels */}
-              <text x={paddingLeft - 8} y={paddingTop + 4} textAnchor="end" fill="#8A8577" className="text-[10px]">
-                {config.max}{config.unit}
+              <text
+                x={paddingLeft - 8}
+                y={paddingTop + 4}
+                textAnchor="end"
+                fill="#8A8577"
+                className="text-[10px]"
+              >
+                {config.max}
+                {config.unit}
               </text>
-              <text x={paddingLeft - 8} y={paddingTop + chartH / 2 + 4} textAnchor="end" fill="#8A8577" className="text-[10px]">
-                {((config.min + config.max) / 2).toFixed(1)}{config.unit}
+              <text
+                x={paddingLeft - 8}
+                y={paddingTop + chartH / 2 + 4}
+                textAnchor="end"
+                fill="#8A8577"
+                className="text-[10px]"
+              >
+                {((config.min + config.max) / 2).toFixed(1)}
+                {config.unit}
               </text>
-              <text x={paddingLeft - 8} y={paddingTop + chartH} textAnchor="end" fill="#8A8577" className="text-[10px]">
-                {config.min}{config.unit}
+              <text
+                x={paddingLeft - 8}
+                y={paddingTop + chartH}
+                textAnchor="end"
+                fill="#8A8577"
+                className="text-[10px]"
+              >
+                {config.min}
+                {config.unit}
               </text>
 
               {/* Area Fill */}
               <path d={areaPath} fill={config.fill} />
 
               {/* Series Line */}
-              <path d={linePath} fill="none" stroke={config.stroke} strokeWidth="2" strokeLinecap="round" />
+              <path
+                d={linePath}
+                fill="none"
+                stroke={config.stroke}
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
 
               {/* Data points & time markers */}
               {points.map((pt, idx) => {
@@ -261,7 +348,13 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
                     />
                     {/* Time ticks for selected points */}
                     {idx % Math.ceil(points.length / 5) === 0 && (
-                      <text x={x} y={svgHeight - 8} textAnchor="middle" fill="#8A8577" className="text-[10px]">
+                      <text
+                        x={x}
+                        y={svgHeight - 8}
+                        textAnchor="middle"
+                        fill="#8A8577"
+                        className="text-[10px]"
+                      >
                         {pt.timeLabel}
                       </text>
                     )}
@@ -278,7 +371,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
             <thead className="border-b border-[#23221C] text-[#8A8577] text-[11px]">
               <tr>
                 <th className="py-1.5 px-2">Timestamp</th>
-                <th className="py-1.5 px-2">{config.label} ({config.unit})</th>
+                <th className="py-1.5 px-2">
+                  {config.label} ({config.unit})
+                </th>
                 <th className="py-1.5 px-2">Status Condition</th>
               </tr>
             </thead>
@@ -290,7 +385,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
                 return (
                   <tr key={i} className="hover:bg-[#0A0A08]">
                     <td className="py-1.5 px-2 text-[#8A8577]">{p.timestamp}</td>
-                    <td className="py-1.5 px-2 font-semibold">{p[selectedMetric]} {config.unit}</td>
+                    <td className="py-1.5 px-2 font-semibold">
+                      {p[selectedMetric]} {config.unit}
+                    </td>
                     <td className="py-1.5 px-2">
                       {isViolation ? (
                         <span className="text-[#CC272E] font-medium flex items-center gap-1">

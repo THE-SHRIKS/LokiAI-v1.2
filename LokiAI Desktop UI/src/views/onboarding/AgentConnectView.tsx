@@ -7,16 +7,11 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
-  Terminal,
   ShieldAlert,
   ShieldCheck,
   RefreshCw,
   Copy,
   Check,
-  Sparkles,
-  Layers,
-  Cpu,
-  Info,
 } from 'lucide-react';
 
 interface AgentProviderDefinition {
@@ -112,7 +107,9 @@ export const AgentConnectView: React.FC = () => {
 
   const isConnected = (providerName: string) => {
     return onboardingState.connectedAgents.some(
-      (a) => a.name.toLowerCase().includes(providerName.toLowerCase()) || a.provider.toLowerCase().includes(providerName.toLowerCase())
+      (a) =>
+        a.name.toLowerCase().includes(providerName.toLowerCase()) ||
+        a.provider.toLowerCase().includes(providerName.toLowerCase()),
     );
   };
 
@@ -135,7 +132,9 @@ export const AgentConnectView: React.FC = () => {
       setIsConnecting(false);
 
       if (selectedDef.id === 'gravity' && !selectedDef.detected) {
-        setConnectError('Gravity runtime binary not detected at standard path. Ensure daemon is installed or use Claude Code/Codex.');
+        setConnectError(
+          'Gravity runtime binary not detected at standard path. Ensure daemon is installed or use Claude Code/Codex.',
+        );
         return;
       }
 
@@ -150,7 +149,7 @@ export const AgentConnectView: React.FC = () => {
       };
 
       const existingFiltered = onboardingState.connectedAgents.filter(
-        (a) => !a.name.includes(selectedDef.displayName)
+        (a) => !a.name.includes(selectedDef.displayName),
       );
 
       updateOnboardingState({
@@ -179,7 +178,10 @@ export const AgentConnectView: React.FC = () => {
   };
 
   return (
-    <div id="agent-connect-screen" className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="agent-connect-screen"
+      className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="agent" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -190,7 +192,8 @@ export const AgentConnectView: React.FC = () => {
           </div>
           <h1 className="text-xl font-bold text-[#E8D9A8]">Connect your coding agent</h1>
           <p className="text-xs text-[#8A8577] mt-1.5 leading-relaxed">
-            LokiAI gives your coding agent controlled access to device health, incidents, builds, deployments, tests, and verification.
+            LokiAI gives your coding agent controlled access to device health, incidents, builds,
+            deployments, tests, and verification.
           </p>
         </div>
 
@@ -232,8 +235,12 @@ export const AgentConnectView: React.FC = () => {
                         <Bot className="w-4 h-4" />
                       </div>
                       <div>
-                        <div className="font-bold text-xs text-[#E8D9A8]">{provider.displayName}</div>
-                        <div className="text-[10px] text-[#8A8577] font-mono">{provider.defaultModel}</div>
+                        <div className="font-bold text-xs text-[#E8D9A8]">
+                          {provider.displayName}
+                        </div>
+                        <div className="text-[10px] text-[#8A8577] font-mono">
+                          {provider.defaultModel}
+                        </div>
                       </div>
                     </div>
 
@@ -258,10 +265,12 @@ export const AgentConnectView: React.FC = () => {
             {/* Note on scoped security */}
             <div className="p-3 rounded-[8px] bg-[#050505] border border-[#23221C] text-[11px] text-[#8A8577] space-y-1">
               <div className="font-semibold text-[#E8D9A8] flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-[#8AB55A]" /> Zero-Unchecked Hardware Access
+                <ShieldCheck className="w-3.5 h-3.5 text-[#8AB55A]" /> Zero-Unchecked Hardware
+                Access
               </div>
               <p>
-                LokiAI strictly enforces that coding agents cannot bypass approval gates for physical resets or flash writes.
+                LokiAI strictly enforces that coding agents cannot bypass approval gates for
+                physical resets or flash writes.
               </p>
             </div>
           </div>
@@ -270,7 +279,9 @@ export const AgentConnectView: React.FC = () => {
           <div className="lg:col-span-7 p-5 rounded-[10px] bg-[#050505] border border-[#23221C] space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#23221C]">
               <div>
-                <h3 className="text-sm font-bold text-[#E8D9A8]">{selectedDef.displayName} Configuration</h3>
+                <h3 className="text-sm font-bold text-[#E8D9A8]">
+                  {selectedDef.displayName} Configuration
+                </h3>
                 <span className="text-[11px] font-mono text-[#8A8577]">
                   Protocol: <strong className="text-[#8AB55A]">{selectedDef.protocol}</strong>
                 </span>
@@ -323,7 +334,8 @@ export const AgentConnectView: React.FC = () => {
             <div className="p-3 rounded bg-[#0A0A08] border border-[#23221C] flex items-start gap-2.5 text-[11px] text-[#8A8577]">
               <ShieldAlert className="w-4 h-4 text-[#8AB55A] shrink-0 mt-0.5" />
               <span>
-                Dangerous operations (flash writes, power overrides, rollback triggers) will generate a cryptographic approval prompt in your TopBar.
+                Dangerous operations (flash writes, power overrides, rollback triggers) will
+                generate a cryptographic approval prompt in your TopBar.
               </span>
             </div>
 

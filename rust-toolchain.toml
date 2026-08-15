@@ -1,0 +1,6 @@
+# LokiAI Main v1.2 — pinned Rust toolchain (FND-002).
+# Matches Docs/TECH_STACK.md: "Rust 1.97.1 stable, edition 2024".
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "default"

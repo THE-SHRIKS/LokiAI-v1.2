@@ -40,30 +40,30 @@ The optimization target is verified throughput, not maximum simultaneous agents.
 
 ### Node types
 
-| Type | Purpose | Typical owner |
-|---|---|---|
-| `DECISION` | Resolve a product/architecture ambiguity | Architect + human |
-| `CONTRACT` | Define schema, API, IPC, trait, or state machine | Contract owner |
-| `IMPLEMENTATION` | Build one bounded behavior | Implementer |
-| `MIGRATION` | Move structure or persisted data safely | Implementer + integrator |
-| `VERIFICATION` | Prove acceptance/security/compatibility | Independent reviewer |
-| `HARDWARE` | Produce evidence from a physical target | Hardware operator + worker |
-| `INTEGRATION` | Combine ready outputs and run cross-boundary gates | Integrator |
-| `RELEASE` | Package, sign, and make a human release decision | Release owner |
+| Type             | Purpose                                            | Typical owner              |
+| ---------------- | -------------------------------------------------- | -------------------------- |
+| `DECISION`       | Resolve a product/architecture ambiguity           | Architect + human          |
+| `CONTRACT`       | Define schema, API, IPC, trait, or state machine   | Contract owner             |
+| `IMPLEMENTATION` | Build one bounded behavior                         | Implementer                |
+| `MIGRATION`      | Move structure or persisted data safely            | Implementer + integrator   |
+| `VERIFICATION`   | Prove acceptance/security/compatibility            | Independent reviewer       |
+| `HARDWARE`       | Produce evidence from a physical target            | Hardware operator + worker |
+| `INTEGRATION`    | Combine ready outputs and run cross-boundary gates | Integrator                 |
+| `RELEASE`        | Package, sign, and make a human release decision   | Release owner              |
 
 ### Edge types
 
-| Edge | Meaning |
-|---|---|
-| `depends_on` | Target cannot start until source is accepted |
-| `consumes` | Target reads the versioned artifact/contract from source |
-| `implements` | Code node implements a requirement or contract |
-| `validates` | Verification node proves a source node |
-| `reviews` | Independent assessment of a source node |
-| `owns` | Node has exclusive write ownership of a file/contract set |
-| `blocks` | Open decision/failure prevents target readiness |
-| `supersedes` | Accepted decision/task replaces an earlier one |
-| `produces` | Node emits an artifact/evidence required downstream |
+| Edge         | Meaning                                                   |
+| ------------ | --------------------------------------------------------- |
+| `depends_on` | Target cannot start until source is accepted              |
+| `consumes`   | Target reads the versioned artifact/contract from source  |
+| `implements` | Code node implements a requirement or contract            |
+| `validates`  | Verification node proves a source node                    |
+| `reviews`    | Independent assessment of a source node                   |
+| `owns`       | Node has exclusive write ownership of a file/contract set |
+| `blocks`     | Open decision/failure prevents target readiness           |
+| `supersedes` | Accepted decision/task replaces an earlier one            |
+| `produces`   | Node emits an artifact/evidence required downstream       |
 
 ### Status values
 
@@ -302,15 +302,16 @@ reviewer tasks may run in parallel when read-only.
 
 ## 10. Gates
 
-| Gate | Required evidence | Human? |
-|---|---|---|
-| G0 Intent | PRD/spec accepted; open decisions routed | Yes |
-| G1 Architecture | process, contracts, threat model, ADRs accepted | Yes for locked decisions |
-| G2 Node | task acceptance and node tests pass | No unless packet says so |
-| G3 Wave integration | integrated build, contract, integration, review pass | No |
-| G4 Security | release security matrix and independent review pass | Yes for residual risk |
-| G5 Hardware | required physical ESP32-S3 scenarios and recovery evidence pass | Yes/operator present |
-| G6 Release | signed artifacts, installer/update/rollback, traceability, release review | Yes |
+| Gate                       | Required evidence                                                                                                                                                                     | Human?                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| G0 Intent                  | PRD/spec accepted; open decisions routed                                                                                                                                              | Yes                                                                                                                       |
+| G1 Architecture            | process, contracts, threat model, ADRs accepted                                                                                                                                       | Yes for locked decisions                                                                                                  |
+| G2 Node                    | task acceptance and node tests pass                                                                                                                                                   | No unless packet says so                                                                                                  |
+| G3 Wave integration        | integrated build, contract, integration, review pass                                                                                                                                  | No                                                                                                                        |
+| **P1 Part One completion** | `P1-INT-001` accepted — every W0–W6 node integrated and proven working together (not just individually accepted), per `Docs/graph/TASK_GRAPH.md` section 4 "Part One completion gate" | **Yes** — human approval to begin Part Two (W7–W10) is separate from and not implied by `P1-INT-001` technical acceptance |
+| G4 Security                | release security matrix and independent review pass                                                                                                                                   | Yes for residual risk                                                                                                     |
+| G5 Hardware                | required physical ESP32-S3 scenarios and recovery evidence pass                                                                                                                       | Yes/operator present                                                                                                      |
+| G6 Release                 | signed artifacts, installer/update/rollback, traceability, release review                                                                                                             | Yes                                                                                                                       |
 
 No downstream gate erases a failure from an earlier gate.
 
@@ -324,3 +325,21 @@ No downstream gate erases a failure from an earlier gate.
 - Review the critical path after each wave.
 - Archive finished wave details outside the always-loaded rules so agent context
   remains lean.
+
+## 12. Program structure — Part One / Part Two
+
+Recorded 2026-08-15 by explicit human instruction; authoritative copy lives in
+`Docs/graph/TASK_GRAPH.md` section 1a. Part One is waves W0–W6 (core platform:
+foundation, contracts, Electron shell, Rust runtime/IPC, persistence, auth/
+onboarding services, connectors/enrollment, MCP/agent-run services, monitoring/
+incidents/notifications, jobs/policy/approvals, contained build executor,
+artifacts, device operations/deployment, cloud sync). Part Two is waves W7–W10
+(UI wiring, `INT-001` full integration, `SEC-001`/`SEC-002` independent review,
+packaging, `HIL-001`, release). The orchestrator plans and dispatches Part One
+continuously without pausing after each node (Section 6 Step 5–6 apply per node as
+usual, but do not wait for a human turn between nodes); it stops for a human
+decision only where `Docs/CONTEXT.md`'s `OQ-001`–`OQ-007`, a missing credential/
+environment, a physical device, or a named approval genuinely blocks the specific
+branch — independent ready branches keep moving. Part Two dispatch requires both
+`P1-INT-001` acceptance and a separate human go-ahead; do not infer the second from
+the first.

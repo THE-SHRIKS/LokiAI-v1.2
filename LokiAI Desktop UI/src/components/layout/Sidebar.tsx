@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
-import { PrimaryRoute, Workspace } from '../../types';
+import { PrimaryRoute } from '../../types';
 import {
   LayoutDashboard,
   Cpu,
@@ -13,12 +13,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  ShieldAlert,
   Radio,
   User,
-  ExternalLink,
   LogOut,
-  Layers,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -29,7 +26,6 @@ export const Sidebar: React.FC = () => {
     workspaces,
     setWorkspace,
     incidents,
-    approvals,
     deployments,
     userSession,
     setIsLogoutModalOpen,
@@ -41,7 +37,6 @@ export const Sidebar: React.FC = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   const activeIncidentsCount = incidents.filter((i) => i.status !== 'Resolved').length;
-  const pendingApprovalsCount = approvals.filter((a) => a.status === 'pending').length;
   const failedDeploymentsCount = deployments.filter((d) => d.phase === 'failed').length;
 
   const navItems: { id: PrimaryRoute; label: string; icon: any; badgeCount?: number }[] = [
@@ -90,7 +85,11 @@ export const Sidebar: React.FC = () => {
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label="Toggle sidebar collapse"
           >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            {isCollapsed ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronLeft className="w-4 h-4" />
+            )}
           </button>
         </div>
 
@@ -232,8 +231,12 @@ export const Sidebar: React.FC = () => {
           {isUserMenuOpen && (
             <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#0F0F0C] border border-[#23221C] rounded-[10px] shadow-2xl p-1.5 z-50 text-xs space-y-1 font-sans">
               <div className="px-2.5 py-1.5 border-b border-[#23221C] mb-1">
-                <div className="font-semibold text-[#E8D9A8]">{userSession?.name || 'Laukik Rajput'}</div>
-                <div className="text-[10px] text-[#8A8577] font-mono">{userSession?.role || 'Cluster Admin'}</div>
+                <div className="font-semibold text-[#E8D9A8]">
+                  {userSession?.name || 'Laukik Rajput'}
+                </div>
+                <div className="text-[10px] text-[#8A8577] font-mono">
+                  {userSession?.role || 'Cluster Admin'}
+                </div>
               </div>
               <button
                 id="open-account-settings-btn"

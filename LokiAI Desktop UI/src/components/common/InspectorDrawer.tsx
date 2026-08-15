@@ -10,11 +10,8 @@ import {
   Rocket,
   Activity,
   Layers,
-  FileCode,
   Copy,
   ExternalLink,
-  ShieldCheck,
-  CheckCircle2,
 } from 'lucide-react';
 
 export const InspectorDrawer: React.FC = () => {
@@ -93,11 +90,26 @@ export const InspectorDrawer: React.FC = () => {
                   Hardware Identity & Interface
                 </span>
                 <div className="p-3 rounded bg-[#0A0A08] border border-[#23221C] space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Family:</span> <span>{inspectorData.family}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Manufacturer:</span> <span>{inspectorData.manufacturer}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Hardware UID:</span> <span className="text-[10px] break-all">{inspectorData.hardwareId}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Port / URI:</span> <span>{inspectorData.transportPort}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Gateway:</span> <span>{inspectorData.gatewayName}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Family:</span>{' '}
+                    <span>{inspectorData.family}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Manufacturer:</span>{' '}
+                    <span>{inspectorData.manufacturer}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Hardware UID:</span>{' '}
+                    <span className="text-[10px] break-all">{inspectorData.hardwareId}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Port / URI:</span>{' '}
+                    <span>{inspectorData.transportPort}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Gateway:</span>{' '}
+                    <span>{inspectorData.gatewayName}</span>
+                  </div>
                 </div>
               </div>
 
@@ -106,9 +118,20 @@ export const InspectorDrawer: React.FC = () => {
                   Firmware & Rollback
                 </span>
                 <div className="p-3 rounded bg-[#0A0A08] border border-[#23221C] space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Active Version:</span> <span className="text-[#8AB55A] font-semibold">{inspectorData.firmwareVersion}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Rollback Target:</span> <span>{inspectorData.previousFirmwareVersion || 'None'}</span></div>
-                  <div className="flex justify-between"><span className="text-[#8A8577]">Rollback Status:</span> <span>{inspectorData.rollbackEligible ? 'Eligible' : 'Unavailable'}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Active Version:</span>{' '}
+                    <span className="text-[#8AB55A] font-semibold">
+                      {inspectorData.firmwareVersion}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Rollback Target:</span>{' '}
+                    <span>{inspectorData.previousFirmwareVersion || 'None'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#8A8577]">Rollback Status:</span>{' '}
+                    <span>{inspectorData.rollbackEligible ? 'Eligible' : 'Unavailable'}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -121,7 +144,10 @@ export const InspectorDrawer: React.FC = () => {
                 Configuration Diff
               </span>
               <div className="p-3 rounded bg-[#0A0A08] border border-[#23221C] font-mono text-xs space-y-2">
-                <div className="text-[#8A8577]">Parameter: <strong className="text-[#E8D9A8]">{inspectorData.beforeAfterDiff.key}</strong></div>
+                <div className="text-[#8A8577]">
+                  Parameter:{' '}
+                  <strong className="text-[#E8D9A8]">{inspectorData.beforeAfterDiff.key}</strong>
+                </div>
                 <div className="p-2 rounded bg-[#CC272E]/10 border border-[#CC272E]/30 text-[#CC272E]">
                   - {inspectorData.beforeAfterDiff.before}
                 </div>
@@ -139,7 +165,9 @@ export const InspectorDrawer: React.FC = () => {
                 Full Cryptographic & Data Contract Payload
               </span>
               <button
-                onClick={() => navigator.clipboard.writeText(JSON.stringify(inspectorData, null, 2))}
+                onClick={() =>
+                  navigator.clipboard.writeText(JSON.stringify(inspectorData, null, 2))
+                }
                 className="flex items-center gap-1 text-[11px] text-[#8A8577] hover:text-[#E8D9A8]"
               >
                 <Copy className="w-3 h-3" /> Copy JSON

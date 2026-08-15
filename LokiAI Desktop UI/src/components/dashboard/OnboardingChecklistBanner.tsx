@@ -1,16 +1,6 @@
 import React from 'react';
 import { useLoki } from '../../context/LokiContext';
-import {
-  CheckCircle2,
-  Circle,
-  X,
-  ArrowRight,
-  Bot,
-  Cpu,
-  ShieldCheck,
-  Activity,
-  Sliders,
-} from 'lucide-react';
+import { Circle, X, ArrowRight, Bot, Cpu, ShieldCheck, Activity, Sliders } from 'lucide-react';
 
 export const OnboardingChecklistBanner: React.FC = () => {
   const {
@@ -100,7 +90,6 @@ export const OnboardingChecklistBanner: React.FC = () => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {pendingItems.map((item) => {
-          const Icon = item.icon;
           return (
             <button
               key={item.id}

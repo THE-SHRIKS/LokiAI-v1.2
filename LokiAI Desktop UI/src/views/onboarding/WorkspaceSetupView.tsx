@@ -3,32 +3,29 @@ import { useLoki } from '../../context/LokiContext';
 import { OnboardingStepper } from '../../components/onboarding/OnboardingStepper';
 import {
   Briefcase,
-  Layers,
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
   AlertCircle,
   FolderGit2,
-  Shield,
 } from 'lucide-react';
 
 export const WorkspaceSetupView: React.FC = () => {
-  const {
-    onboardingState,
-    updateOnboardingState,
-    navigateToRoute,
-    workspaces,
-    addToast,
-  } = useLoki();
+  const { onboardingState, updateOnboardingState, navigateToRoute, workspaces, addToast } =
+    useLoki();
 
   const [mode, setMode] = useState<'create' | 'existing'>('create');
   const [name, setName] = useState(onboardingState.workspace.name || '');
   const [description, setDescription] = useState(onboardingState.workspace.description || '');
   const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>(
-    onboardingState.workspace.environment || 'development'
+    onboardingState.workspace.environment || 'development',
   );
-  const [repoPath, setRepoPath] = useState(onboardingState.workspace.repoPath || '~/firmware/loki-chamber-core');
-  const [connectRepoLater, setConnectRepoLater] = useState(onboardingState.workspace.connectRepoLater || false);
+  const [repoPath, setRepoPath] = useState(
+    onboardingState.workspace.repoPath || '~/firmware/loki-chamber-core',
+  );
+  const [connectRepoLater, setConnectRepoLater] = useState(
+    onboardingState.workspace.connectRepoLater || false,
+  );
   const [selectedExistingId, setSelectedExistingId] = useState(workspaces[0]?.id || '');
   const [nameError, setNameError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,7 +41,9 @@ export const WorkspaceSetupView: React.FC = () => {
         return false;
       }
       if (!/^[a-zA-Z0-9-_ ]+$/.test(name.trim())) {
-        setNameError('Workspace name may only contain alphanumeric characters, hyphens, and underscores.');
+        setNameError(
+          'Workspace name may only contain alphanumeric characters, hyphens, and underscores.',
+        );
         return false;
       }
     }
@@ -103,7 +102,10 @@ export const WorkspaceSetupView: React.FC = () => {
   };
 
   return (
-    <div id="workspace-setup-screen" className="w-full max-w-3xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="workspace-setup-screen"
+      className="w-full max-w-3xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="workspace" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -114,7 +116,8 @@ export const WorkspaceSetupView: React.FC = () => {
           </div>
           <h1 className="text-xl font-bold text-[#E8D9A8]">Set up your workspace</h1>
           <p className="text-xs text-[#8A8577] mt-1.5 leading-relaxed">
-            A workspace organizes your target hardware, coding agents, automated incident telemetry, firmware builds, and verification history.
+            A workspace organizes your target hardware, coding agents, automated incident telemetry,
+            firmware builds, and verification history.
           </p>
         </div>
 
@@ -200,9 +203,17 @@ export const WorkspaceSetupView: React.FC = () => {
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { id: 'development', label: 'Development', desc: 'Fast iterate • Auto-retry OTA' },
+                    {
+                      id: 'development',
+                      label: 'Development',
+                      desc: 'Fast iterate • Auto-retry OTA',
+                    },
                     { id: 'staging', label: 'Staging', desc: 'Pre-flight gates • 60s soak' },
-                    { id: 'production', label: 'Production', desc: 'Strict human approval required' },
+                    {
+                      id: 'production',
+                      label: 'Production',
+                      desc: 'Strict human approval required',
+                    },
                   ].map((env) => (
                     <button
                       key={env.id}
@@ -215,7 +226,9 @@ export const WorkspaceSetupView: React.FC = () => {
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs capitalize text-[#E8D9A8]">{env.label}</span>
+                        <span className="font-bold text-xs capitalize text-[#E8D9A8]">
+                          {env.label}
+                        </span>
                         {environment === env.id && (
                           <CheckCircle2 className="w-3.5 h-3.5 text-[#8AB55A]" />
                         )}
@@ -253,7 +266,8 @@ export const WorkspaceSetupView: React.FC = () => {
                       className="w-full px-3 py-2 rounded-[6px] bg-[#0A0A08] border border-[#23221C] text-xs text-[#E8D9A8] font-mono focus:border-[#8AB55A] focus:outline-none"
                     />
                     <span className="text-[10px] text-[#8A8577] font-mono mt-1 block">
-                      Local repo path where coding agents will perform diagnostic inspections and builds.
+                      Local repo path where coding agents will perform diagnostic inspections and
+                      builds.
                     </span>
                   </div>
                 )}
@@ -280,7 +294,9 @@ export const WorkspaceSetupView: React.FC = () => {
                     <div>
                       <div className="font-bold text-xs text-[#E8D9A8] font-mono">{ws.name}</div>
                       <div className="text-[10px] text-[#8A8577] font-mono">
-                        Environment: <span className="uppercase text-[#8AB55A]">{ws.environment}</span> • Region: {ws.region}
+                        Environment:{' '}
+                        <span className="uppercase text-[#8AB55A]">{ws.environment}</span> • Region:{' '}
+                        {ws.region}
                       </div>
                     </div>
                     {selectedExistingId === ws.id && (

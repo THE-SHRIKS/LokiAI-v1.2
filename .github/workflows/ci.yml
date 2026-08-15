@@ -1,0 +1,43 @@
+# LokiAI Main v1.2 — root CI (FND-002).
+#
+# NOTE (handoff transparency, not a claim of success): this workflow has not been
+# executed by a GitHub Actions runner as part of this node — there is no runner
+# available in this environment. Action versions below are pinned to major tags
+# believed current at authoring time but were not confirmed against the GitHub
+# Marketplace. Treat this file as unverified until its first real run, and record
+# that run's result rather than assuming this comment implies success.
+name: CI
+
+on:
+  push:
+    branches: [LokiAI-v1.2]
+  pull_request:
+    branches: [LokiAI-v1.2]
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+
+      - name: Enable Corepack and pin pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.21.0 --activate
+
+      - name: Set up Rust (rust-toolchain.toml pin)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.97.1'
+          components: rustfmt, clippy
+
+      - name: Install TS/JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify (format, lint, typecheck, test, cargo fmt/build/test)
+        run: pnpm run verify

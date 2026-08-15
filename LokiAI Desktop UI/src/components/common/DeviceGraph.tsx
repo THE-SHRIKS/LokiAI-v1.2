@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Device, DeviceRelationshipNode, DeviceRelationshipEdge } from '../../types';
-import { Network, Table, ZoomIn, ZoomOut, Maximize2, Cpu, Radio, Activity, Layers, ArrowRight } from 'lucide-react';
+import { Device, DeviceRelationshipNode } from '../../types';
+import { Network, Table, ZoomIn, ZoomOut, Maximize2, Cpu, Radio, Layers } from 'lucide-react';
 
 interface DeviceGraphProps {
   device: Device;
@@ -23,7 +23,10 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
 
   return (
-    <div id="device-relationship-graph" className="bg-[#050505] border border-[#23221C] rounded-[10px] p-4">
+    <div
+      id="device-relationship-graph"
+      className="bg-[#050505] border border-[#23221C] rounded-[10px] p-4"
+    >
       {/* Header Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#23221C]">
         <div className="flex items-center gap-2">
@@ -64,9 +67,15 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
           <button
             onClick={() => setViewMode(viewMode === 'graph' ? 'table' : 'graph')}
             className="p-1.5 rounded-[6px] bg-[#0A0A08] border border-[#23221C] text-[#8A8577] hover:text-[#E8D9A8] transition-colors"
-            title={viewMode === 'graph' ? 'Switch to accessible table' : 'Switch to interactive graph'}
+            title={
+              viewMode === 'graph' ? 'Switch to accessible table' : 'Switch to interactive graph'
+            }
           >
-            {viewMode === 'graph' ? <Table className="w-3.5 h-3.5" /> : <Network className="w-3.5 h-3.5" />}
+            {viewMode === 'graph' ? (
+              <Table className="w-3.5 h-3.5" />
+            ) : (
+              <Network className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -83,23 +92,25 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
               {/* Nodes layout representation */}
               <div className="flex flex-col items-center gap-4">
                 {/* Level 1: Gateway */}
-                {nodes.filter((n) => n.type === 'gateway').map((node) => (
-                  <div
-                    key={node.id}
-                    onClick={() => handleNodeClick(node)}
-                    className={`cursor-pointer px-4 py-2.5 rounded-[8px] border transition-all flex items-center gap-2.5 ${
-                      selectedNodeId === node.id
-                        ? 'bg-[#23221C] border-[#8AB55A] text-[#E8D9A8]'
-                        : 'bg-[#050505] border-[#23221C] text-[#8A8577] hover:border-[#8A8577]'
-                    }`}
-                  >
-                    <Radio className="w-4 h-4 text-[#8AB55A]" />
-                    <div className="text-left">
-                      <div className="text-xs font-semibold text-[#E8D9A8]">{node.name}</div>
-                      <div className="text-[10px] text-[#8A8577] font-mono">{node.details}</div>
+                {nodes
+                  .filter((n) => n.type === 'gateway')
+                  .map((node) => (
+                    <div
+                      key={node.id}
+                      onClick={() => handleNodeClick(node)}
+                      className={`cursor-pointer px-4 py-2.5 rounded-[8px] border transition-all flex items-center gap-2.5 ${
+                        selectedNodeId === node.id
+                          ? 'bg-[#23221C] border-[#8AB55A] text-[#E8D9A8]'
+                          : 'bg-[#050505] border-[#23221C] text-[#8A8577] hover:border-[#8A8577]'
+                      }`}
+                    >
+                      <Radio className="w-4 h-4 text-[#8AB55A]" />
+                      <div className="text-left">
+                        <div className="text-xs font-semibold text-[#E8D9A8]">{node.name}</div>
+                        <div className="text-[10px] text-[#8A8577] font-mono">{node.details}</div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
                 {/* Connector Arrow */}
                 <div className="flex flex-col items-center text-[#8A8577] text-[10px] font-mono">
@@ -107,23 +118,27 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
                 </div>
 
                 {/* Level 2: Device Node (Primary) */}
-                {nodes.filter((n) => n.type === 'device').map((node) => (
-                  <div
-                    key={node.id}
-                    onClick={() => handleNodeClick(node)}
-                    className={`cursor-pointer px-5 py-3 rounded-[10px] border transition-all flex items-center gap-3 shadow-md ${
-                      selectedNodeId === node.id
-                        ? 'bg-[#0A0A08] border-[#8AB55A] ring-1 ring-[#8AB55A]'
-                        : 'bg-[#050505] border-[#23221C] hover:border-[#8A8577]'
-                    }`}
-                  >
-                    <Cpu className="w-5 h-5 text-[#8AB55A]" />
-                    <div className="text-left">
-                      <div className="text-xs font-bold text-[#E8D9A8]">{node.name} (Primary Node)</div>
-                      <div className="text-[11px] text-[#8A8577] font-mono">{node.details}</div>
+                {nodes
+                  .filter((n) => n.type === 'device')
+                  .map((node) => (
+                    <div
+                      key={node.id}
+                      onClick={() => handleNodeClick(node)}
+                      className={`cursor-pointer px-5 py-3 rounded-[10px] border transition-all flex items-center gap-3 shadow-md ${
+                        selectedNodeId === node.id
+                          ? 'bg-[#0A0A08] border-[#8AB55A] ring-1 ring-[#8AB55A]'
+                          : 'bg-[#050505] border-[#23221C] hover:border-[#8A8577]'
+                      }`}
+                    >
+                      <Cpu className="w-5 h-5 text-[#8AB55A]" />
+                      <div className="text-left">
+                        <div className="text-xs font-bold text-[#E8D9A8]">
+                          {node.name} (Primary Node)
+                        </div>
+                        <div className="text-[11px] text-[#8A8577] font-mono">{node.details}</div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
                 {/* Connector Arrow */}
                 <div className="flex flex-col items-center text-[#8A8577] text-[10px] font-mono">
@@ -132,23 +147,25 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
 
                 {/* Level 3: Peripherals / Sensors / Bus / Project */}
                 <div className="flex flex-wrap justify-center gap-3 w-full">
-                  {nodes.filter((n) => n.type !== 'gateway' && n.type !== 'device').map((node) => (
-                    <div
-                      key={node.id}
-                      onClick={() => handleNodeClick(node)}
-                      className={`cursor-pointer px-3 py-2 rounded-[8px] border transition-all flex items-center gap-2 text-xs ${
-                        selectedNodeId === node.id
-                          ? 'bg-[#23221C] border-[#8AB55A] text-[#E8D9A8]'
-                          : 'bg-[#050505] border-[#23221C] text-[#8A8577] hover:border-[#8A8577]'
-                      }`}
-                    >
-                      <Layers className="w-3.5 h-3.5 text-[#8AB55A]" />
-                      <div>
-                        <div className="font-medium text-[#E8D9A8]">{node.name}</div>
-                        <div className="text-[10px] text-[#8A8577] font-mono">{node.details}</div>
+                  {nodes
+                    .filter((n) => n.type !== 'gateway' && n.type !== 'device')
+                    .map((node) => (
+                      <div
+                        key={node.id}
+                        onClick={() => handleNodeClick(node)}
+                        className={`cursor-pointer px-3 py-2 rounded-[8px] border transition-all flex items-center gap-2 text-xs ${
+                          selectedNodeId === node.id
+                            ? 'bg-[#23221C] border-[#8AB55A] text-[#E8D9A8]'
+                            : 'bg-[#050505] border-[#23221C] text-[#8A8577] hover:border-[#8A8577]'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5 text-[#8AB55A]" />
+                        <div>
+                          <div className="font-medium text-[#E8D9A8]">{node.name}</div>
+                          <div className="text-[10px] text-[#8A8577] font-mono">{node.details}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
             </div>
@@ -186,12 +203,17 @@ export const DeviceGraph: React.FC<DeviceGraphProps> = ({ device, onSelectNode }
                 <span className="text-[11px] font-semibold text-[#8A8577] uppercase tracking-wider block">
                   Connected Edge Links
                 </span>
-                {edges.filter((e) => e.source === selectedNode.id || e.target === selectedNode.id).map((e, idx) => (
-                  <div key={idx} className="p-2 rounded bg-[#050505] border border-[#23221C] text-[11px] font-mono text-[#8A8577]">
-                    <div className="text-[#E8D9A8] font-medium">{e.label}</div>
-                    <div>Protocol: {e.protocol}</div>
-                  </div>
-                ))}
+                {edges
+                  .filter((e) => e.source === selectedNode.id || e.target === selectedNode.id)
+                  .map((e, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2 rounded bg-[#050505] border border-[#23221C] text-[11px] font-mono text-[#8A8577]"
+                    >
+                      <div className="text-[#E8D9A8] font-medium">{e.label}</div>
+                      <div>Protocol: {e.protocol}</div>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

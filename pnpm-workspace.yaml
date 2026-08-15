@@ -1,0 +1,18 @@
+# LokiAI Main v1.2 — pnpm workspace membership (FND-002).
+#
+# The existing UI baseline stays at its current accepted path; FND-002 does not
+# perform the ARCHITECTURE.md section 11 mechanical move into apps/desktop. That
+# move is a distinct, later migration node so it is never mixed with a behavior
+# change in the same commit.
+#
+# packages/* and services/* are declared now so CTR-001, MCP-001, and later nodes
+# can add workspace members without editing this file again.
+packages:
+  - 'LokiAI Desktop UI'
+  - 'packages/*'
+  - 'services/*'
+
+# TECH_STACK.md section 5, rule 3: preinstall/postinstall scripts are denied
+# unless specifically reviewed and allowlisted. Leave empty until a dependency
+# is reviewed and proven to need its build script.
+onlyBuiltDependencies: []

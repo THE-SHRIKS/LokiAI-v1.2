@@ -1,33 +1,12 @@
 import React, { useState } from 'react';
 import { useLoki } from '../context/LokiContext';
-import { Incident } from '../types';
 import { SeverityBadge } from '../components/common/SeverityBadge';
 import { StatusChip } from '../components/common/StatusChip';
-import {
-  AlertOctagon,
-  Search,
-  Filter,
-  ArrowLeft,
-  ShieldCheck,
-  CheckCircle2,
-  Clock,
-  FileCode,
-  Terminal,
-  Activity,
-  Bot,
-  ExternalLink,
-  Layers,
-} from 'lucide-react';
+import { AlertOctagon, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 export const IncidentsView: React.FC = () => {
-  const {
-    incidents,
-    selectedIncidentId,
-    setSelectedIncidentId,
-    resolveIncident,
-    openInspector,
-    navigateTo,
-  } = useLoki();
+  const { incidents, selectedIncidentId, setSelectedIncidentId, resolveIncident, openInspector } =
+    useLoki();
 
   const [severityFilter, setSeverityFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -63,13 +42,20 @@ export const IncidentsView: React.FC = () => {
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono font-bold text-sm text-[#8AB55A]">{selectedIncident.id}</span>
+                <span className="font-mono font-bold text-sm text-[#8AB55A]">
+                  {selectedIncident.id}
+                </span>
                 <h2 className="text-base font-bold text-[#E8D9A8]">{selectedIncident.title}</h2>
                 <SeverityBadge severity={selectedIncident.severity} />
-                <StatusChip status={selectedIncident.status === 'Resolved' ? 'Resolved' : 'Running'} />
+                <StatusChip
+                  status={selectedIncident.status === 'Resolved' ? 'Resolved' : 'Running'}
+                />
               </div>
               <p className="text-xs text-[#8A8577] font-mono mt-0.5">
-                Target Node: <strong className="text-[#E8D9A8]">{selectedIncident.affectedDeviceName}</strong> • Opened: {selectedIncident.openedAt} • Assignee: {selectedIncident.assignedAgent || 'Unassigned'}
+                Target Node:{' '}
+                <strong className="text-[#E8D9A8]">{selectedIncident.affectedDeviceName}</strong> •
+                Opened: {selectedIncident.openedAt} • Assignee:{' '}
+                {selectedIncident.assignedAgent || 'Unassigned'}
               </p>
             </div>
           </div>
@@ -84,7 +70,11 @@ export const IncidentsView: React.FC = () => {
                     ? 'bg-[#8AB55A] text-[#010101] hover:bg-[#A8C878]'
                     : 'bg-[#23221C] text-[#8A8577] cursor-not-allowed'
                 }`}
-                title={!selectedIncident.verification.allPassed ? 'Cannot resolve until verification tests pass' : 'Mark incident resolved'}
+                title={
+                  !selectedIncident.verification.allPassed
+                    ? 'Cannot resolve until verification tests pass'
+                    : 'Mark incident resolved'
+                }
               >
                 <CheckCircle2 className="w-4 h-4" /> Resolve Incident
               </button>
@@ -107,7 +97,9 @@ export const IncidentsView: React.FC = () => {
         {isResolving && (
           <div className="p-4 rounded-[10px] bg-[#0A0A08] border border-[#8AB55A] space-y-3 font-mono text-xs animate-in fade-in">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-[#E8D9A8] font-sans">Confirm Incident Resolution</span>
+              <span className="font-bold text-[#E8D9A8] font-sans">
+                Confirm Incident Resolution
+              </span>
               <span className="text-[11px] text-[#8AB55A]">Verification assertions satisfied</span>
             </div>
             <textarea
@@ -146,16 +138,26 @@ export const IncidentsView: React.FC = () => {
 
             <div className="space-y-2">
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">Triggering Detection Rule</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">
+                  Triggering Detection Rule
+                </span>
                 <span className="text-[#CC272E] font-bold">{selectedIncident.triggeringRule}</span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">Hardware Signal Excerpt</span>
-                <span className="text-[#E8D9A8]">{selectedIncident.evidenceSnapshot?.rawSignalExcerpt}</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">
+                  Hardware Signal Excerpt
+                </span>
+                <span className="text-[#E8D9A8]">
+                  {selectedIncident.evidenceSnapshot?.rawSignalExcerpt}
+                </span>
               </div>
               <div className="p-2.5 rounded bg-[#0A0A08] border border-[#23221C]">
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">Active Firmware at Fault</span>
-                <span className="text-[#8AB55A] font-bold">{selectedIncident.evidenceSnapshot?.firmwareVersionAtTrigger}</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-0.5 font-sans">
+                  Active Firmware at Fault
+                </span>
+                <span className="text-[#8AB55A] font-bold">
+                  {selectedIncident.evidenceSnapshot?.firmwareVersionAtTrigger}
+                </span>
               </div>
             </div>
           </div>
@@ -174,21 +176,36 @@ export const IncidentsView: React.FC = () => {
             <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-[#E8D9A8]">Assigned Agent</span>
-                <span className="text-[11px] font-mono text-[#8AB55A]">{selectedIncident.assignedAgent || 'Unassigned'}</span>
+                <span className="text-[11px] font-mono text-[#8AB55A]">
+                  {selectedIncident.assignedAgent || 'Unassigned'}
+                </span>
               </div>
-              <p className="text-[#8A8577] leading-relaxed font-sans">{selectedIncident.investigation?.diagnosisSummary}</p>
+              <p className="text-[#8A8577] leading-relaxed font-sans">
+                {selectedIncident.investigation?.diagnosisSummary}
+              </p>
             </div>
 
             {/* Verification Check Status */}
             <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-2 font-mono">
               <div className="flex items-center justify-between font-sans">
-                <span className="font-semibold text-[#E8D9A8]">Mandatory Post-Fix Verification</span>
-                <span className={selectedIncident.verification?.allPassed ? 'text-[#8AB55A] font-bold' : 'text-[#E8D9A8]'}>
-                  {selectedIncident.verification?.allPassed ? 'PASSED (60s stable)' : 'PENDING OBSERVATION'}
+                <span className="font-semibold text-[#E8D9A8]">
+                  Mandatory Post-Fix Verification
+                </span>
+                <span
+                  className={
+                    selectedIncident.verification?.allPassed
+                      ? 'text-[#8AB55A] font-bold'
+                      : 'text-[#E8D9A8]'
+                  }
+                >
+                  {selectedIncident.verification?.allPassed
+                    ? 'PASSED (60s stable)'
+                    : 'PENDING OBSERVATION'}
                 </span>
               </div>
               <p className="text-[11px] text-[#8A8577]">
-                Brownout watchdog, heap allocation integrity, and thermal thresholds must pass continuous 60-second observation before resolution can be finalized.
+                Brownout watchdog, heap allocation integrity, and thermal thresholds must pass
+                continuous 60-second observation before resolution can be finalized.
               </p>
             </div>
           </div>
@@ -200,12 +217,17 @@ export const IncidentsView: React.FC = () => {
             <span className="text-xs font-semibold uppercase tracking-wider text-[#8A8577]">
               Incident Lifecycle Events
             </span>
-            <span className="text-[11px] font-mono text-[#8A8577]">{selectedIncident.timeline.length} events logged</span>
+            <span className="text-[11px] font-mono text-[#8A8577]">
+              {selectedIncident.timeline.length} events logged
+            </span>
           </div>
 
           <div className="space-y-2.5">
             {selectedIncident.timeline.map((item) => (
-              <div key={item.id} className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-1">
+              <div
+                key={item.id}
+                className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-1"
+              >
                 <div className="flex items-center justify-between font-mono text-[11px]">
                   <span className="font-semibold text-[#8AB55A] uppercase">{item.type}</span>
                   <span className="text-[#8A8577]">{item.timestamp}</span>
@@ -287,7 +309,9 @@ export const IncidentsView: React.FC = () => {
                     <div className="font-bold text-[#E8D9A8] group-hover:text-[#8AB55A] transition-colors">
                       {inc.id}: {inc.title}
                     </div>
-                    <div className="text-[10px] text-[#8A8577]">Assignee: {inc.assignedAgent || 'None'}</div>
+                    <div className="text-[10px] text-[#8A8577]">
+                      Assignee: {inc.assignedAgent || 'None'}
+                    </div>
                   </td>
                   <td className="py-3 px-4">
                     <SeverityBadge severity={inc.severity} />
@@ -295,7 +319,9 @@ export const IncidentsView: React.FC = () => {
                   <td className="py-3 px-4">
                     <StatusChip status={inc.status === 'Resolved' ? 'Resolved' : 'Running'} />
                   </td>
-                  <td className="py-3 px-4 font-semibold text-[#8AB55A]">{inc.affectedDeviceName}</td>
+                  <td className="py-3 px-4 font-semibold text-[#8AB55A]">
+                    {inc.affectedDeviceName}
+                  </td>
                   <td className="py-3 px-4 text-[#8A8577]">{inc.triggeringRule}</td>
                   <td className="py-3 px-4 text-[#8A8577]">{inc.openedAt}</td>
                   <td className="py-3 px-4 text-right">

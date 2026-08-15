@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useLoki } from '../context/LokiContext';
 import {
-  Settings,
   Building,
   Bot,
   Radio,
@@ -12,7 +11,6 @@ import {
   HardDrive,
   CheckCircle2,
   Save,
-  RefreshCw,
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -30,7 +28,6 @@ export const SettingsView: React.FC = () => {
 
   const [workspaceName, setWorkspaceName] = useState(currentWorkspace.name);
   const [environment, setEnvironment] = useState(currentWorkspace.environment);
-  const [region, setRegion] = useState(currentWorkspace.region);
 
   const handleSave = () => {
     addToast({
@@ -123,7 +120,9 @@ export const SettingsView: React.FC = () => {
               <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex justify-between items-center font-mono">
                 <div>
                   <span className="text-[#E8D9A8] font-bold block">Connected Runtime Daemon</span>
-                  <span className="text-[11px] text-[#8A8577]">{currentWorkspace.runtimeVersion} • 0.0.0.0:3000</span>
+                  <span className="text-[11px] text-[#8A8577]">
+                    {currentWorkspace.runtimeVersion} • 0.0.0.0:3000
+                  </span>
                 </div>
                 <span className="text-xs text-[#8AB55A] font-bold">ACTIVE</span>
               </div>
@@ -144,11 +143,26 @@ export const SettingsView: React.FC = () => {
 
               <div className="space-y-3 font-mono">
                 {[
-                  { name: 'Claude Code CLI Bridge', status: 'Connected', token: 'sk-ant-api03-verified-active' },
-                  { name: 'OpenAI Codex Specialist', status: 'Connected', token: 'sk-proj-loki-active' },
-                  { name: 'Cursor Agent RPC Connector', status: 'Connected', token: 'cur_bridge_local_token' },
+                  {
+                    name: 'Claude Code CLI Bridge',
+                    status: 'Connected',
+                    token: 'sk-ant-api03-verified-active',
+                  },
+                  {
+                    name: 'OpenAI Codex Specialist',
+                    status: 'Connected',
+                    token: 'sk-proj-loki-active',
+                  },
+                  {
+                    name: 'Cursor Agent RPC Connector',
+                    status: 'Connected',
+                    token: 'cur_bridge_local_token',
+                  },
                 ].map((item, idx) => (
-                  <div key={idx} className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between">
+                  <div
+                    key={idx}
+                    className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between"
+                  >
                     <div>
                       <div className="font-bold text-[#E8D9A8]">{item.name}</div>
                       <div className="text-[10px] text-[#8A8577]">{item.token}</div>
@@ -176,12 +190,27 @@ export const SettingsView: React.FC = () => {
 
               <div className="space-y-2.5 font-mono">
                 {[
-                  { op: 'Flash Firmware Release', risk: 'Critical', req: 'Operator Approval Required' },
+                  {
+                    op: 'Flash Firmware Release',
+                    risk: 'Critical',
+                    req: 'Operator Approval Required',
+                  },
                   { op: 'Hardware Safe Reboot', risk: 'Medium', req: 'Auto-approved in Staging' },
-                  { op: 'Clear Non-Volatile Flash / NVS', risk: 'Critical', req: 'Operator Approval Required' },
-                  { op: 'Direct Register Write (I2C/SPI)', risk: 'High', req: 'Operator Approval Required' },
+                  {
+                    op: 'Clear Non-Volatile Flash / NVS',
+                    risk: 'Critical',
+                    req: 'Operator Approval Required',
+                  },
+                  {
+                    op: 'Direct Register Write (I2C/SPI)',
+                    risk: 'High',
+                    req: 'Operator Approval Required',
+                  },
                 ].map((item, idx) => (
-                  <div key={idx} className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between">
+                  <div
+                    key={idx}
+                    className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between"
+                  >
                     <div>
                       <div className="font-bold text-[#E8D9A8]">{item.op}</div>
                       <div className="text-[10px] text-[#8A8577]">Risk Tier: {item.risk}</div>
@@ -201,7 +230,8 @@ export const SettingsView: React.FC = () => {
               <CheckCircle2 className="w-8 h-8 text-[#8AB55A] mx-auto" />
               <div className="text-sm font-bold text-[#E8D9A8]">Configuration Policy Active</div>
               <p className="text-xs text-[#8A8577] max-w-md mx-auto">
-                Cluster policies, heartbeat timeouts, retention schedules, and notification webhooks are currently enforced by Loki Runtime v1.2.
+                Cluster policies, heartbeat timeouts, retention schedules, and notification webhooks
+                are currently enforced by Loki Runtime v1.2.
               </p>
             </div>
           )}

@@ -1,19 +1,7 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
 import { ArtifactType, RolloutStrategy } from '../../types';
-import {
-  X,
-  Rocket,
-  ShieldCheck,
-  Cpu,
-  CheckCircle2,
-  AlertTriangle,
-  FileCode,
-  ArrowRight,
-  ArrowLeft,
-  Clock,
-  Layers,
-} from 'lucide-react';
+import { X, Rocket, ShieldCheck, AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react';
 
 export const NewDeploymentModal: React.FC = () => {
   const { isDeployModalOpen, setIsDeployModalOpen, devices, createDeployment } = useLoki();
@@ -23,7 +11,9 @@ export const NewDeploymentModal: React.FC = () => {
   const [releaseTag, setReleaseTag] = useState('v1.4.3-telemetry-hotfix');
   const [artifactType, setArtifactType] = useState<ArtifactType>('Firmware (.bin/.elf)');
   const [artifactVersion, setArtifactVersion] = useState('v1.4.3-patch');
-  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([devices[0]?.id || 'dev-esp32-01']);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([
+    devices[0]?.id || 'dev-esp32-01',
+  ]);
   const [rolloutStrategy, setRolloutStrategy] = useState<RolloutStrategy>('Canary (10% Fleet)');
   const [observationWindowSec, setObservationWindowSec] = useState(60);
   const [requirePreflight, setRequirePreflight] = useState(true);
@@ -32,7 +22,7 @@ export const NewDeploymentModal: React.FC = () => {
 
   const toggleDeviceSelection = (id: string) => {
     setSelectedDeviceIds((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id],
     );
   };
 
@@ -70,7 +60,14 @@ export const NewDeploymentModal: React.FC = () => {
                 Create & Deploy Hardware Release
               </h2>
               <p className="text-xs text-[#8A8577] font-mono">
-                Step {step} of 4: {step === 1 ? 'Select Artifact' : step === 2 ? 'Target Selection' : step === 3 ? 'Rollout & Verification' : 'Review & Authorize'}
+                Step {step} of 4:{' '}
+                {step === 1
+                  ? 'Select Artifact'
+                  : step === 2
+                    ? 'Target Selection'
+                    : step === 3
+                      ? 'Rollout & Verification'
+                      : 'Review & Authorize'}
               </p>
             </div>
           </div>
@@ -132,7 +129,9 @@ export const NewDeploymentModal: React.FC = () => {
               <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-[#8AB55A]" />
-                  <span className="font-mono text-xs text-[#E8D9A8]">Loki-Ed25519 Cryptographic Build Signature</span>
+                  <span className="font-mono text-xs text-[#E8D9A8]">
+                    Loki-Ed25519 Cryptographic Build Signature
+                  </span>
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#6B8C42]/20 text-[#8AB55A]">
                   Verified Digest
@@ -177,7 +176,9 @@ export const NewDeploymentModal: React.FC = () => {
                           className="accent-[#8AB55A] rounded"
                         />
                         <div>
-                          <div className="font-mono font-semibold text-xs text-[#E8D9A8]">{dev.name}</div>
+                          <div className="font-mono font-semibold text-xs text-[#E8D9A8]">
+                            {dev.name}
+                          </div>
                           <div className="text-[11px] text-[#8A8577] font-mono">
                             {dev.family} • {dev.transportPort} • Current: {dev.firmwareVersion}
                           </div>
@@ -202,7 +203,13 @@ export const NewDeploymentModal: React.FC = () => {
                   Rollout Strategy
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['All-at-Once', 'Canary (10% Fleet)', 'Rolling Batches (2x2)'] as RolloutStrategy[]).map((strat) => (
+                  {(
+                    [
+                      'All-at-Once',
+                      'Canary (10% Fleet)',
+                      'Rolling Batches (2x2)',
+                    ] as RolloutStrategy[]
+                  ).map((strat) => (
                     <button
                       key={strat}
                       type="button"
@@ -243,8 +250,12 @@ export const NewDeploymentModal: React.FC = () => {
 
               <div className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-semibold text-[#E8D9A8] block">Automated Hardware Preflight Checks</span>
-                  <span className="text-[11px] text-[#8A8577]">Assert header integrity, memory capacity, and transport ping before flashing.</span>
+                  <span className="text-xs font-semibold text-[#E8D9A8] block">
+                    Automated Hardware Preflight Checks
+                  </span>
+                  <span className="text-[11px] text-[#8A8577]">
+                    Assert header integrity, memory capacity, and transport ping before flashing.
+                  </span>
                 </div>
                 <input
                   type="checkbox"
@@ -264,17 +275,35 @@ export const NewDeploymentModal: React.FC = () => {
                   <span className="text-[#8A8577] font-semibold uppercase">Deployment Summary</span>
                   <span className="text-[#8AB55A] font-bold">{releaseTag}</span>
                 </div>
-                <div className="flex justify-between text-xs"><span className="text-[#8A8577]">Artifact:</span> <span>{artifactVersion} ({artifactType})</span></div>
-                <div className="flex justify-between text-xs"><span className="text-[#8A8577]">Target Nodes:</span> <span>{selectedDeviceIds.length} hardware unit(s)</span></div>
-                <div className="flex justify-between text-xs"><span className="text-[#8A8577]">Rollout Strategy:</span> <span>{rolloutStrategy}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-[#8A8577]">Observation Window:</span> <span>{observationWindowSec}s mandatory</span></div>
-                <div className="flex justify-between text-xs"><span className="text-[#8A8577]">Rollback Safeguard:</span> <span className="text-[#8AB55A]">Enabled (Cached verified fallback)</span></div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#8A8577]">Artifact:</span>{' '}
+                  <span>
+                    {artifactVersion} ({artifactType})
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#8A8577]">Target Nodes:</span>{' '}
+                  <span>{selectedDeviceIds.length} hardware unit(s)</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#8A8577]">Rollout Strategy:</span>{' '}
+                  <span>{rolloutStrategy}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#8A8577]">Observation Window:</span>{' '}
+                  <span>{observationWindowSec}s mandatory</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#8A8577]">Rollback Safeguard:</span>{' '}
+                  <span className="text-[#8AB55A]">Enabled (Cached verified fallback)</span>
+                </div>
               </div>
 
               <div className="p-3 rounded-[8px] bg-[#23221C]/40 border border-[#23221C] flex gap-2.5 items-start font-sans text-xs">
                 <AlertTriangle className="w-4 h-4 text-[#E8D9A8] shrink-0 mt-0.5" />
                 <span className="text-[#8A8577]">
-                  Deployment will acquire serial locks on target hardware nodes. Never mark deployment successful until post-flash observation passes.
+                  Deployment will acquire serial locks on target hardware nodes. Never mark
+                  deployment successful until post-flash observation passes.
                 </span>
               </div>
             </div>

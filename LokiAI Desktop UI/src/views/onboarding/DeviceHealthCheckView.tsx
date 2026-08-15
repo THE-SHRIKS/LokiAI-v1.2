@@ -7,14 +7,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  Clock,
   ArrowRight,
   ArrowLeft,
-  Cpu,
-  Terminal,
-  Activity,
-  Zap,
-  Info,
 } from 'lucide-react';
 
 interface CheckPhase {
@@ -26,7 +20,8 @@ interface CheckPhase {
 }
 
 export const DeviceHealthCheckView: React.FC = () => {
-  const { onboardingState, updateOnboardingState, navigateToRoute, addToast, addDiscoveredDevice } = useLoki();
+  const { onboardingState, updateOnboardingState, navigateToRoute, addDiscoveredDevice } =
+    useLoki();
 
   const targetDev = onboardingState.discoveredDevice || {
     id: 'disc-01',
@@ -39,20 +34,63 @@ export const DeviceHealthCheckView: React.FC = () => {
   };
 
   const initialPhases: CheckPhase[] = [
-    { id: '1', name: 'Identity Verification', description: 'Silicon chip signature & JTAG IDCODE validation', details: 'ESP32-S3 (WROOM-1 dual core LX7)', status: 'pending' },
-    { id: '2', name: 'Connection Validation', description: 'Transport ping, round-trip latency & packet loss check', details: 'Latency: 1.2ms • Drop rate: 0.0%', status: 'pending' },
-    { id: '3', name: 'Capability Discovery', description: 'Querying hardware control primitives & registers', details: 'flash, restart, telemetry, rollback active', status: 'pending' },
-    { id: '4', name: 'Firmware Identification', description: 'Bootloader hash & active firmware slot check', details: 'v2.1.0-factory-baseline (Valid SHA256)', status: 'pending' },
-    { id: '5', name: 'Heartbeat & Telemetry Response', description: 'Continuous 10Hz health stream watchdog verification', details: 'Watchdog margin: 388ms (Nominal)', status: 'pending' },
-    { id: '6', name: 'Available LokiAI Operations', description: 'Enforce agent sandbox boundaries and safety gates', details: '7/8 Operations permitted with approval gates', status: 'pending' },
-    { id: '7', name: 'Deployment & Rollback Support', description: 'Dual-partition A/B OTA flash storage test', details: 'OTA slot_0 active, slot_1 rollback ready', status: 'pending' },
+    {
+      id: '1',
+      name: 'Identity Verification',
+      description: 'Silicon chip signature & JTAG IDCODE validation',
+      details: 'ESP32-S3 (WROOM-1 dual core LX7)',
+      status: 'pending',
+    },
+    {
+      id: '2',
+      name: 'Connection Validation',
+      description: 'Transport ping, round-trip latency & packet loss check',
+      details: 'Latency: 1.2ms • Drop rate: 0.0%',
+      status: 'pending',
+    },
+    {
+      id: '3',
+      name: 'Capability Discovery',
+      description: 'Querying hardware control primitives & registers',
+      details: 'flash, restart, telemetry, rollback active',
+      status: 'pending',
+    },
+    {
+      id: '4',
+      name: 'Firmware Identification',
+      description: 'Bootloader hash & active firmware slot check',
+      details: 'v2.1.0-factory-baseline (Valid SHA256)',
+      status: 'pending',
+    },
+    {
+      id: '5',
+      name: 'Heartbeat & Telemetry Response',
+      description: 'Continuous 10Hz health stream watchdog verification',
+      details: 'Watchdog margin: 388ms (Nominal)',
+      status: 'pending',
+    },
+    {
+      id: '6',
+      name: 'Available LokiAI Operations',
+      description: 'Enforce agent sandbox boundaries and safety gates',
+      details: '7/8 Operations permitted with approval gates',
+      status: 'pending',
+    },
+    {
+      id: '7',
+      name: 'Deployment & Rollback Support',
+      description: 'Dual-partition A/B OTA flash storage test',
+      details: 'OTA slot_0 active, slot_1 rollback ready',
+      status: 'pending',
+    },
   ];
 
   const [phases, setPhases] = useState<CheckPhase[]>(initialPhases);
   const [isRunning, setIsRunning] = useState(true);
   const [customDeviceName, setCustomDeviceName] = useState(targetDev.name);
-  const [showTechDetails, setShowTechDetails] = useState(false);
-  const [overallOutcome, setOverallOutcome] = useState<'ready' | 'limited' | 'unhealthy' | 'running'>('running');
+  const [overallOutcome, setOverallOutcome] = useState<
+    'ready' | 'limited' | 'unhealthy' | 'running'
+  >('running');
 
   // Automated sequence runner
   useEffect(() => {
@@ -68,7 +106,7 @@ export const DeviceHealthCheckView: React.FC = () => {
             if (idx === stepIdx) return { ...p, status: 'passed' };
             if (idx === stepIdx + 1) return { ...p, status: 'running' };
             return p;
-          })
+          }),
         );
         currentIdx++;
       } else {
@@ -90,18 +128,28 @@ export const DeviceHealthCheckView: React.FC = () => {
       if (scenario === 'limited') {
         setPhases((prev) =>
           prev.map((p, idx) => {
-            if (idx === 6) return { ...p, status: 'warning', details: 'Single partition only (No A/B rollback)' };
+            if (idx === 6)
+              return {
+                ...p,
+                status: 'warning',
+                details: 'Single partition only (No A/B rollback)',
+              };
             return { ...p, status: 'passed' };
-          })
+          }),
         );
         setOverallOutcome('limited');
       } else if (scenario === 'unhealthy') {
         setPhases((prev) =>
           prev.map((p, idx) => {
-            if (idx === 4) return { ...p, status: 'failed', details: 'Watchdog timeout > 1200ms • Packet loss 14%' };
+            if (idx === 4)
+              return {
+                ...p,
+                status: 'failed',
+                details: 'Watchdog timeout > 1200ms • Packet loss 14%',
+              };
             if (idx > 4) return { ...p, status: 'pending' };
             return { ...p, status: 'passed' };
-          })
+          }),
         );
         setOverallOutcome('unhealthy');
       } else {
@@ -116,8 +164,8 @@ export const DeviceHealthCheckView: React.FC = () => {
     // Add device to context
     addDiscoveredDevice({
       name: customDeviceName.trim() || targetDev.name,
-      family: targetDev.family as any,
-      connector: targetDev.connector as any,
+      family: targetDev.family,
+      connector: targetDev.connector,
       transportPort: targetDev.transportPort,
     });
 
@@ -126,7 +174,7 @@ export const DeviceHealthCheckView: React.FC = () => {
         ...targetDev,
         name: customDeviceName.trim() || targetDev.name,
         healthStatus: overallOutcome === 'ready' ? 'Healthy' : 'Degraded',
-        healthChecks: phases as any,
+        healthChecks: phases,
       },
       currentStep: 'ready',
     });
@@ -135,7 +183,10 @@ export const DeviceHealthCheckView: React.FC = () => {
   };
 
   return (
-    <div id="device-health-screen" className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="device-health-screen"
+      className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="device" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -147,7 +198,8 @@ export const DeviceHealthCheckView: React.FC = () => {
             </div>
             <h1 className="text-xl font-bold text-[#E8D9A8]">Checking device health</h1>
             <p className="text-xs text-[#8A8577] mt-1">
-              Target: <strong className="text-[#E8D9A8] font-mono">{targetDev.name}</strong> ({targetDev.family}) via {targetDev.transportPort}
+              Target: <strong className="text-[#E8D9A8] font-mono">{targetDev.name}</strong> (
+              {targetDev.family}) via {targetDev.transportPort}
             </p>
           </div>
 
@@ -183,33 +235,41 @@ export const DeviceHealthCheckView: React.FC = () => {
                   phase.status === 'passed'
                     ? 'bg-[#050505] border-[#23221C]'
                     : phase.status === 'running'
-                    ? 'bg-[#6B8C42]/10 border-[#8AB55A]'
-                    : phase.status === 'warning'
-                    ? 'bg-[#E8D9A8]/5 border-[#E8D9A8]/40'
-                    : phase.status === 'failed'
-                    ? 'bg-[#CC272E]/10 border-[#CC272E]/40'
-                    : 'bg-[#050505] border-[#23221C]/50 opacity-60'
+                      ? 'bg-[#6B8C42]/10 border-[#8AB55A]'
+                      : phase.status === 'warning'
+                        ? 'bg-[#E8D9A8]/5 border-[#E8D9A8]/40'
+                        : phase.status === 'failed'
+                          ? 'bg-[#CC272E]/10 border-[#CC272E]/40'
+                          : 'bg-[#050505] border-[#23221C]/50 opacity-60'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 font-mono text-[10px]">
-                    {phase.status === 'passed' && <CheckCircle2 className="w-4 h-4 text-[#8AB55A]" />}
-                    {phase.status === 'running' && <RefreshCw className="w-4 h-4 animate-spin text-[#8AB55A]" />}
-                    {phase.status === 'warning' && <AlertTriangle className="w-4 h-4 text-[#E8D9A8]" />}
+                    {phase.status === 'passed' && (
+                      <CheckCircle2 className="w-4 h-4 text-[#8AB55A]" />
+                    )}
+                    {phase.status === 'running' && (
+                      <RefreshCw className="w-4 h-4 animate-spin text-[#8AB55A]" />
+                    )}
+                    {phase.status === 'warning' && (
+                      <AlertTriangle className="w-4 h-4 text-[#E8D9A8]" />
+                    )}
                     {phase.status === 'failed' && <XCircle className="w-4 h-4 text-[#CC272E]" />}
-                    {phase.status === 'pending' && <span className="text-[#8A8577]">{idx + 1}</span>}
+                    {phase.status === 'pending' && (
+                      <span className="text-[#8A8577]">{idx + 1}</span>
+                    )}
                   </div>
 
                   <div className="min-w-0">
                     <div className="font-semibold text-[#E8D9A8] flex items-center gap-2">
                       <span>{phase.name}</span>
                       {phase.status === 'passed' && (
-                        <span className="text-[10px] text-[#8AB55A] font-mono font-normal">Passed</span>
+                        <span className="text-[10px] text-[#8AB55A] font-mono font-normal">
+                          Passed
+                        </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-[#8A8577] truncate">
-                      {phase.description}
-                    </div>
+                    <div className="text-[11px] text-[#8A8577] truncate">{phase.description}</div>
                   </div>
                 </div>
 
@@ -219,8 +279,8 @@ export const DeviceHealthCheckView: React.FC = () => {
                       phase.status === 'failed'
                         ? 'text-[#CC272E]'
                         : phase.status === 'warning'
-                        ? 'text-[#E8D9A8]'
-                        : 'text-[#8A8577]'
+                          ? 'text-[#E8D9A8]'
+                          : 'text-[#8A8577]'
                     }
                   >
                     {phase.details}
@@ -234,10 +294,14 @@ export const DeviceHealthCheckView: React.FC = () => {
         {/* Device Naming & Association Form after check completes */}
         {!isRunning && overallOutcome !== 'unhealthy' && (
           <div className="p-4 rounded-[8px] bg-[#050505] border border-[#23221C] space-y-3 animate-in fade-in">
-            <div className="text-xs font-semibold text-[#E8D9A8]">Workspace Hardware Association</div>
+            <div className="text-xs font-semibold text-[#E8D9A8]">
+              Workspace Hardware Association
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-[11px] text-[#8A8577] mb-1">Friendly Device Identifier</label>
+                <label className="block text-[11px] text-[#8A8577] mb-1">
+                  Friendly Device Identifier
+                </label>
                 <input
                   type="text"
                   value={customDeviceName}
@@ -258,7 +322,9 @@ export const DeviceHealthCheckView: React.FC = () => {
 
         {/* Prototype Edge Simulation Buttons */}
         <div className="p-3 rounded-[8px] bg-[#050505] border border-[#23221C] space-y-1.5 text-xs">
-          <span className="text-[10px] font-mono uppercase text-[#8A8577]">Simulate Health Scenarios:</span>
+          <span className="text-[10px] font-mono uppercase text-[#8A8577]">
+            Simulate Health Scenarios:
+          </span>
           <div className="flex flex-wrap gap-2 text-[11px] font-mono">
             <button
               onClick={() => handleRetry('ready')}
@@ -309,7 +375,9 @@ export const DeviceHealthCheckView: React.FC = () => {
               disabled={isRunning || overallOutcome === 'unhealthy'}
               className="flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#8AB55A] text-[#010101] hover:bg-[#A8C878] text-xs font-bold transition-colors disabled:opacity-40 shadow-sm"
             >
-              <span>{overallOutcome === 'limited' ? 'Continue with limitations' : 'Continue to Review'}</span>
+              <span>
+                {overallOutcome === 'limited' ? 'Continue with limitations' : 'Continue to Review'}
+              </span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

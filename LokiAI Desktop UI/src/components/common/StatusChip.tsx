@@ -1,19 +1,6 @@
 import React from 'react';
 import { GlobalStatus } from '../../types';
-import {
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  Clock,
-  Play,
-  ShieldAlert,
-  Search,
-  RotateCcw,
-  Ban,
-  HelpCircle,
-  Wifi,
-  WifiOff,
-} from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ShieldAlert, RotateCcw, HelpCircle } from 'lucide-react';
 
 interface StatusChipProps {
   status: GlobalStatus;
@@ -21,7 +8,11 @@ interface StatusChipProps {
   showIcon?: boolean;
 }
 
-export const StatusChip: React.FC<StatusChipProps> = ({ status, className = '', showIcon = true }) => {
+export const StatusChip: React.FC<StatusChipProps> = ({
+  status,
+  className = '',
+  showIcon = true,
+}) => {
   const getStatusConfig = (s: GlobalStatus) => {
     switch (s) {
       case 'Healthy':

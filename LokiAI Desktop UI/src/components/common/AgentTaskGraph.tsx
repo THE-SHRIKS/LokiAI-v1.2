@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TaskNode } from '../../types';
-import { GitBranch, CheckCircle2, Clock, XCircle, ArrowDown, Bot, ShieldCheck } from 'lucide-react';
+import { GitBranch, CheckCircle2, Clock, XCircle, ArrowDown, Bot } from 'lucide-react';
 
 interface AgentTaskGraphProps {
   taskTree: TaskNode[];
@@ -110,11 +110,15 @@ export const AgentTaskGraph: React.FC<AgentTaskGraphProps> = ({ taskTree, onSele
               <span className="text-[11px] font-semibold text-[#8A8577] uppercase tracking-wider">
                 Task Inputs & Result
               </span>
-              <span className="text-[10px] font-mono text-[#8AB55A] capitalize">{selectedNode.status}</span>
+              <span className="text-[10px] font-mono text-[#8AB55A] capitalize">
+                {selectedNode.status}
+              </span>
             </div>
 
             <div>
-              <span className="text-xs font-bold text-[#E8D9A8] font-sans block">{selectedNode.label}</span>
+              <span className="text-xs font-bold text-[#E8D9A8] font-sans block">
+                {selectedNode.label}
+              </span>
               <span className="text-[11px] text-[#8A8577]">Role: {selectedNode.agentRole}</span>
             </div>
 
@@ -127,7 +131,9 @@ export const AgentTaskGraph: React.FC<AgentTaskGraphProps> = ({ taskTree, onSele
 
             {selectedNode.outputSummary && (
               <div>
-                <span className="text-[10px] text-[#8A8577] uppercase block mb-1">Execution Summary:</span>
+                <span className="text-[10px] text-[#8A8577] uppercase block mb-1">
+                  Execution Summary:
+                </span>
                 <div className="p-2 rounded bg-[#010101] border border-[#23221C] text-[11px] text-[#8AB55A] leading-relaxed">
                   {selectedNode.outputSummary}
                 </div>

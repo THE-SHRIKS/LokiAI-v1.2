@@ -1,22 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useLoki } from '../context/LokiContext';
 import { Deployment } from '../types';
 import { StatusChip } from '../components/common/StatusChip';
 import { LogViewer } from '../components/common/LogViewer';
-import {
-  Rocket,
-  PlusCircle,
-  ArrowLeft,
-  ShieldCheck,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
-  Clock,
-  HardDrive,
-  FileCode,
-  Layers,
-  Terminal,
-} from 'lucide-react';
+import { Rocket, PlusCircle, ArrowLeft } from 'lucide-react';
 
 export const DeploymentsView: React.FC = () => {
   const {
@@ -26,7 +13,6 @@ export const DeploymentsView: React.FC = () => {
     setIsDeployModalOpen,
     openInspector,
     logs,
-    triggerRollback,
   } = useLoki();
 
   const selectedDeployment = deployments.find((d) => d.id === selectedDeploymentId);
@@ -44,13 +30,13 @@ export const DeploymentsView: React.FC = () => {
 
   if (selectedDeployment) {
     const deploymentLogs = logs.filter(
-      (l) => l.correlationJobId === selectedDeployment.id || l.service === 'deployment_engine'
+      (l) => l.correlationJobId === selectedDeployment.id || l.service === 'deployment_engine',
     );
 
     const currentPhaseIndex = phases.indexOf(selectedDeployment.phase);
     const avgProgress = Math.round(
       selectedDeployment.deviceResults.reduce((acc, d) => acc + d.progressPct, 0) /
-        (selectedDeployment.deviceResults.length || 1)
+        (selectedDeployment.deviceResults.length || 1),
     );
 
     return (
@@ -67,14 +53,24 @@ export const DeploymentsView: React.FC = () => {
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono font-bold text-sm text-[#8AB55A]">{selectedDeployment.id}</span>
-                <h2 className="text-base font-bold text-[#E8D9A8]">{selectedDeployment.releaseTag}</h2>
+                <span className="font-mono font-bold text-sm text-[#8AB55A]">
+                  {selectedDeployment.id}
+                </span>
+                <h2 className="text-base font-bold text-[#E8D9A8]">
+                  {selectedDeployment.releaseTag}
+                </h2>
                 <StatusChip
-                  status={selectedDeployment.phase === 'completed' || selectedDeployment.phase === 'verified' ? 'Completed' : 'Running'}
+                  status={
+                    selectedDeployment.phase === 'completed' ||
+                    selectedDeployment.phase === 'verified'
+                      ? 'Completed'
+                      : 'Running'
+                  }
                 />
               </div>
               <p className="text-xs text-[#8A8577] font-mono mt-0.5">
-                Artifact: {selectedDeployment.artifactVersion} ({selectedDeployment.artifactType}) • Scope: {selectedDeployment.targetFleetScope}
+                Artifact: {selectedDeployment.artifactVersion} ({selectedDeployment.artifactType}) •
+                Scope: {selectedDeployment.targetFleetScope}
               </p>
             </div>
           </div>
@@ -113,8 +109,8 @@ export const DeploymentsView: React.FC = () => {
                     isCurrent
                       ? 'bg-[#23221C] border-[#8AB55A] text-[#8AB55A] ring-1 ring-[#8AB55A]/50 font-bold'
                       : isPast
-                      ? 'bg-[#0A0A08] border-[#23221C] text-[#E8D9A8]'
-                      : 'bg-[#050505] border-[#23221C] text-[#8A8577]'
+                        ? 'bg-[#0A0A08] border-[#23221C] text-[#E8D9A8]'
+                        : 'bg-[#050505] border-[#23221C] text-[#8A8577]'
                   }`}
                 >
                   <div className="text-[10px] text-[#8A8577] mb-1">Step {idx + 1}</div>
@@ -144,7 +140,9 @@ export const DeploymentsView: React.FC = () => {
               >
                 <div>
                   <div className="font-bold text-[#E8D9A8]">{dev.deviceName}</div>
-                  <div className="text-[10px] text-[#8A8577]">{dev.deviceId} • Stage: {dev.currentStage}</div>
+                  <div className="text-[10px] text-[#8A8577]">
+                    {dev.deviceId} • Stage: {dev.currentStage}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -154,7 +152,9 @@ export const DeploymentsView: React.FC = () => {
                       style={{ width: `${dev.progressPct}%` }}
                     ></div>
                   </div>
-                  <span className="w-12 text-right font-bold text-[#E8D9A8]">{dev.progressPct}%</span>
+                  <span className="w-12 text-right font-bold text-[#E8D9A8]">
+                    {dev.progressPct}%
+                  </span>
                   <StatusChip status={dev.status === 'Completed' ? 'Completed' : 'Running'} />
                 </div>
               </div>
@@ -163,7 +163,10 @@ export const DeploymentsView: React.FC = () => {
         </div>
 
         {/* Deployment Logs */}
-        <LogViewer logs={deploymentLogs} title={`Deployment Engine Logs (${selectedDeployment.id})`} />
+        <LogViewer
+          logs={deploymentLogs}
+          title={`Deployment Engine Logs (${selectedDeployment.id})`}
+        />
       </div>
     );
   }
@@ -223,7 +226,8 @@ export const DeploymentsView: React.FC = () => {
                     <div className="text-[10px] text-[#8A8577]">{dep.id}</div>
                   </td>
                   <td className="py-3 px-4 font-semibold text-[#8AB55A]">
-                    {dep.artifactVersion} <span className="text-[#8A8577] font-normal">({dep.artifactType})</span>
+                    {dep.artifactVersion}{' '}
+                    <span className="text-[#8A8577] font-normal">({dep.artifactType})</span>
                   </td>
                   <td className="py-3 px-4 text-[#8A8577]">{dep.targetFleetScope}</td>
                   <td className="py-3 px-4">

@@ -282,7 +282,14 @@ export interface AgentRun {
   taskTree: TaskNode[];
   timeline: {
     id: string;
-    type: 'instruction' | 'agent_summary' | 'file_change' | 'tool_request' | 'approval' | 'job_result' | 'verification';
+    type:
+      | 'instruction'
+      | 'agent_summary'
+      | 'file_change'
+      | 'tool_request'
+      | 'approval'
+      | 'job_result'
+      | 'verification';
     timestamp: string;
     title: string;
     description: string;
@@ -350,7 +357,15 @@ export interface LogEntry {
 export interface IncidentTimelineEvent {
   id: string;
   timestamp: string;
-  type: 'detection' | 'evidence_collected' | 'agent_assigned' | 'operation_approved' | 'patch_deployed' | 'observation' | 'verification_passed' | 'resolved';
+  type:
+    | 'detection'
+    | 'evidence_collected'
+    | 'agent_assigned'
+    | 'operation_approved'
+    | 'patch_deployed'
+    | 'observation'
+    | 'verification_passed'
+    | 'resolved';
   title: string;
   actor: string;
   details: string;
@@ -406,7 +421,8 @@ export interface Incident {
   };
 }
 
-export type ArtifactType = 'Firmware (.bin/.elf)' | 'Device Config (.json)' | 'Edge AI Model (.tflite)' | 'App Container';
+export type ArtifactType =
+  'Firmware (.bin/.elf)' | 'Device Config (.json)' | 'Edge AI Model (.tflite)' | 'App Container';
 export type RolloutStrategy = 'All-at-Once' | 'Canary (10% Fleet)' | 'Rolling Batches (2x2)';
 
 export interface PreflightCheck {
@@ -421,7 +437,16 @@ export interface PreflightCheck {
 export interface DeploymentDeviceResult {
   deviceId: string;
   deviceName: string;
-  status: 'Queued' | 'Preflight' | 'Transferring' | 'Flashing' | 'Rebooting' | 'Verifying' | 'Completed' | 'Failed' | 'Rolled back';
+  status:
+    | 'Queued'
+    | 'Preflight'
+    | 'Transferring'
+    | 'Flashing'
+    | 'Rebooting'
+    | 'Verifying'
+    | 'Completed'
+    | 'Failed'
+    | 'Rolled back';
   progressPct: number;
   currentStage: string;
   error?: string;
@@ -444,7 +469,18 @@ export interface Deployment {
     avatarLabel: string;
   };
   rolloutStrategy: RolloutStrategy;
-  phase: 'queued' | 'preflight' | 'transferring' | 'flashing' | 'rebooting' | 'testing' | 'observing' | 'verified' | 'completed' | 'failed' | 'rolled_back';
+  phase:
+    | 'queued'
+    | 'preflight'
+    | 'transferring'
+    | 'flashing'
+    | 'rebooting'
+    | 'testing'
+    | 'observing'
+    | 'verified'
+    | 'completed'
+    | 'failed'
+    | 'rolled_back';
   preflightChecks: PreflightCheck[];
   deviceResults: DeploymentDeviceResult[];
   observationWindowSec: number;

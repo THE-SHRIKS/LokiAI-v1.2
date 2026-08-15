@@ -1,0 +1,25 @@
+# LokiAI Main v1.2 — Cargo workspace root (FND-002).
+#
+# No crates exist yet. RUN-001 (crates/loki-runtime), CON-001
+# (crates/loki-connectors-sdk), and later nodes add members here as they land —
+# each stays a single-writer addition to this list, not a rewrite of it.
+[workspace]
+resolver = "2"
+members = []
+
+[workspace.package]
+version = "1.2.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "UNLICENSED"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"
+
+[profile.dev]
+opt-level = 0
+debug = true

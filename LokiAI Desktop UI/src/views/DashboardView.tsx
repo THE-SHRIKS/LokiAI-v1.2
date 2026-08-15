@@ -13,11 +13,6 @@ import {
   ShieldAlert,
   Clock,
   ArrowRight,
-  CheckCircle2,
-  AlertTriangle,
-  Play,
-  Terminal,
-  Activity,
   PlusCircle,
 } from 'lucide-react';
 
@@ -40,9 +35,13 @@ export const DashboardView: React.FC = () => {
   const degradedDevices = devices.filter((d) => d.status === 'Degraded').length;
   const unhealthyDevices = devices.filter((d) => d.status === 'Unhealthy').length;
 
-  const runningAgents = agentRuns.filter((a) => a.phase !== 'complete' && a.phase !== 'failed').length;
+  const runningAgents = agentRuns.filter(
+    (a) => a.phase !== 'complete' && a.phase !== 'failed',
+  ).length;
   const activeIncidents = incidents.filter((i) => i.status !== 'Resolved');
-  const criticalIncidents = incidents.filter((i) => i.severity === 'Critical' && i.status !== 'Resolved');
+  const criticalIncidents = incidents.filter(
+    (i) => i.severity === 'Critical' && i.status !== 'Resolved',
+  );
 
   const pendingApprovals = approvals.filter((a) => a.status === 'pending');
 
@@ -54,13 +53,16 @@ export const DashboardView: React.FC = () => {
           <div className="w-2.5 h-2.5 rounded-full bg-[#8AB55A] animate-pulse"></div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-[#E8D9A8] font-mono">{currentWorkspace.name}</h2>
+              <h2 className="text-sm font-bold text-[#E8D9A8] font-mono">
+                {currentWorkspace.name}
+              </h2>
               <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#0A0A08] border border-[#23221C] text-[#8AB55A]">
                 {currentWorkspace.environment}
               </span>
             </div>
             <p className="text-xs text-[#8A8577] mt-0.5">
-              Region: {currentWorkspace.region} • Sync: <span className="text-[#E8D9A8] font-mono">{lastSyncTime}</span>
+              Region: {currentWorkspace.region} • Sync:{' '}
+              <span className="text-[#E8D9A8] font-mono">{lastSyncTime}</span>
             </p>
           </div>
         </div>
@@ -72,7 +74,9 @@ export const DashboardView: React.FC = () => {
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-[8px] bg-[#23221C] border border-[#8AB55A] text-xs font-semibold text-[#E8D9A8] hover:bg-[#38362D] transition-colors"
             >
               <ShieldAlert className="w-3.5 h-3.5 text-[#8AB55A]" />
-              <span>Review {pendingApprovals.length} Approval{pendingApprovals.length > 1 ? 's' : ''}</span>
+              <span>
+                Review {pendingApprovals.length} Approval{pendingApprovals.length > 1 ? 's' : ''}
+              </span>
             </button>
           ) : (
             <button
@@ -105,7 +109,9 @@ export const DashboardView: React.FC = () => {
           value={devices.length}
           subValue={`${healthyDevices} healthy, ${degradedDevices + unhealthyDevices} attention`}
           icon={<Cpu className="w-4 h-4" />}
-          statusColor={unhealthyDevices > 0 ? 'destructive' : degradedDevices > 0 ? 'warning' : 'olive'}
+          statusColor={
+            unhealthyDevices > 0 ? 'destructive' : degradedDevices > 0 ? 'warning' : 'olive'
+          }
           badge="6 Nodes"
           onClick={() => navigateTo('devices')}
         />
@@ -123,16 +129,26 @@ export const DashboardView: React.FC = () => {
           id="tile-incidents"
           label="Open Incidents"
           value={activeIncidents.length}
-          subValue={criticalIncidents.length > 0 ? `${criticalIncidents.length} Critical` : '0 Critical'}
+          subValue={
+            criticalIncidents.length > 0 ? `${criticalIncidents.length} Critical` : '0 Critical'
+          }
           icon={<AlertOctagon className="w-4 h-4" />}
-          statusColor={criticalIncidents.length > 0 ? 'destructive' : activeIncidents.length > 0 ? 'warning' : 'olive'}
+          statusColor={
+            criticalIncidents.length > 0
+              ? 'destructive'
+              : activeIncidents.length > 0
+                ? 'warning'
+                : 'olive'
+          }
           badge="Newest: 18m"
           onClick={() => navigateTo('incidents')}
         />
         <MetricTile
           id="tile-deployments"
           label="Deployments"
-          value={deployments.filter((d) => d.phase === 'observing' || d.phase === 'flashing').length}
+          value={
+            deployments.filter((d) => d.phase === 'observing' || d.phase === 'flashing').length
+          }
           subValue="1 Observing, 2 Verified"
           icon={<Rocket className="w-4 h-4" />}
           statusColor="olive"
@@ -167,15 +183,22 @@ export const DashboardView: React.FC = () => {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-[#E8D9A8]">Approval Required: {appr.operationName}</span>
+                    <span className="text-xs font-bold text-[#E8D9A8]">
+                      Approval Required: {appr.operationName}
+                    </span>
                     <SeverityBadge severity={appr.risk} />
                     <span className="text-[10px] font-mono text-[#8A8577] flex items-center gap-1">
                       <Clock className="w-3 h-3" /> {appr.remainingMinutes}m left
                     </span>
                   </div>
                   <p className="text-xs text-[#8A8577] mt-0.5 line-clamp-1">
-                    Requested by <strong className="text-[#E8D9A8]">{appr.requestingActor.name}</strong> for target{' '}
-                    <strong className="text-[#E8D9A8] font-mono">{appr.targetDeviceNames.join(', ')}</strong>: {appr.reason}
+                    Requested by{' '}
+                    <strong className="text-[#E8D9A8]">{appr.requestingActor.name}</strong> for
+                    target{' '}
+                    <strong className="text-[#E8D9A8] font-mono">
+                      {appr.targetDeviceNames.join(', ')}
+                    </strong>
+                    : {appr.reason}
                   </p>
                 </div>
               </div>
@@ -200,16 +223,22 @@ export const DashboardView: React.FC = () => {
             >
               <div className="flex items-start gap-3 min-w-0">
                 <div className="p-1.5 rounded-[6px] bg-[#050505] border border-[#23221C] text-[#E8D9A8] shrink-0 mt-0.5">
-                  <AlertOctagon className={`w-4 h-4 ${inc.severity === 'Critical' ? 'text-[#CC272E]' : 'text-[#E8D9A8]'}`} />
+                  <AlertOctagon
+                    className={`w-4 h-4 ${inc.severity === 'Critical' ? 'text-[#CC272E]' : 'text-[#E8D9A8]'}`}
+                  />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-[#E8D9A8]">{inc.id}: {inc.title}</span>
+                    <span className="font-mono text-xs font-bold text-[#E8D9A8]">
+                      {inc.id}: {inc.title}
+                    </span>
                     <SeverityBadge severity={inc.severity} />
                     <StatusChip status={inc.status === 'Verifying' ? 'Verifying' : 'Running'} />
                   </div>
                   <p className="text-xs text-[#8A8577] mt-0.5">
-                    Affected: <span className="text-[#E8D9A8] font-mono">{inc.affectedDeviceName}</span> • Opened: {inc.openedAt} • Assignee: {inc.assignedAgent || 'Unassigned'}
+                    Affected:{' '}
+                    <span className="text-[#E8D9A8] font-mono">{inc.affectedDeviceName}</span> •
+                    Opened: {inc.openedAt} • Assignee: {inc.assignedAgent || 'Unassigned'}
                   </p>
                 </div>
               </div>
@@ -256,12 +285,16 @@ export const DashboardView: React.FC = () => {
                   className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] hover:border-[#8AB55A]/30 transition-all cursor-pointer space-y-1.5"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs text-[#E8D9A8] line-clamp-1">{run.taskTitle}</span>
+                    <span className="font-semibold text-xs text-[#E8D9A8] line-clamp-1">
+                      {run.taskTitle}
+                    </span>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#23221C] text-[#8AB55A]">
                       {run.provider}
                     </span>
                   </div>
-                  <p className="text-xs text-[#8A8577] line-clamp-1 font-sans">{run.operationalSummary}</p>
+                  <p className="text-xs text-[#8A8577] line-clamp-1 font-sans">
+                    {run.operationalSummary}
+                  </p>
                   <div className="flex items-center justify-between text-[11px] font-mono text-[#8A8577] pt-1">
                     <span className="capitalize text-[#8AB55A]">Phase: {run.phase}</span>
                     <span>Elapsed: {Math.round(run.elapsedSeconds / 60)}m</span>

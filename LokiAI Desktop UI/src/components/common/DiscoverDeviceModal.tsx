@@ -1,27 +1,36 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
-import { DeviceFamily, ConnectorType } from '../../types';
-import { X, Cpu, Search, CheckCircle2, RefreshCw, Radio, Layers, HardDrive } from 'lucide-react';
+import type { DeviceFamily, ConnectorType } from '../../types';
+import { X, Cpu, CheckCircle2, RefreshCw, Radio, HardDrive } from 'lucide-react';
+
+interface ScannedPort {
+  port: string;
+  deviceType: string;
+  detectedChip: string;
+  baud: string;
+  family: DeviceFamily;
+  connector: ConnectorType;
+}
 
 export const DiscoverDeviceModal: React.FC = () => {
   const { isAddDeviceModalOpen, setIsAddDeviceModalOpen, addDiscoveredDevice } = useLoki();
   const [isScanning, setIsScanning] = useState(false);
-  const [scannedPorts, setScannedPorts] = useState([
+  const [scannedPorts] = useState<ScannedPort[]>([
     {
       port: '/dev/ttyUSB1',
       deviceType: 'ESP32-S3 (WROOM-1)',
       detectedChip: 'ESP32-S3 (QFN56)',
       baud: '115200',
-      family: 'ESP32-S3' as DeviceFamily,
-      connector: 'USB-CDC Serial' as ConnectorType,
+      family: 'ESP32-S3',
+      connector: 'USB-CDC Serial',
     },
     {
       port: 'SWD-Probe-STLINKV3-004',
       deviceType: 'STM32-H7 Series Cortex-M7',
       detectedChip: 'STM32H743ZI Rev V',
       baud: '4000 kHz SWD',
-      family: 'STM32-H7' as DeviceFamily,
-      connector: 'SWD / JTAG Probe' as ConnectorType,
+      family: 'STM32-H7',
+      connector: 'SWD / JTAG Probe',
     },
   ]);
 
@@ -69,7 +78,9 @@ export const DiscoverDeviceModal: React.FC = () => {
               <Cpu className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-[#E8D9A8]">Discover & Pair Hardware Node</h2>
+              <h2 className="text-base font-semibold text-[#E8D9A8]">
+                Discover & Pair Hardware Node
+              </h2>
               <p className="text-xs text-[#8A8577] font-mono">Loki Runtime Bus & Probe Scanner</p>
             </div>
           </div>
@@ -94,7 +105,9 @@ export const DiscoverDeviceModal: React.FC = () => {
               disabled={isScanning}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] bg-[#23221C] text-[#E8D9A8] hover:bg-[#38362D] transition-colors font-mono"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-[#8AB55A]' : ''}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-[#8AB55A]' : ''}`}
+              />
               {isScanning ? 'Scanning Buses...' : 'Rescan Ports'}
             </button>
           </div>
@@ -121,9 +134,13 @@ export const DiscoverDeviceModal: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <HardDrive className={`w-4 h-4 ${isSelected ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`} />
+                      <HardDrive
+                        className={`w-4 h-4 ${isSelected ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`}
+                      />
                       <div>
-                        <div className="font-mono font-semibold text-xs text-[#E8D9A8]">{item.deviceType}</div>
+                        <div className="font-mono font-semibold text-xs text-[#E8D9A8]">
+                          {item.deviceType}
+                        </div>
                         <div className="text-[11px] text-[#8A8577] font-mono">
                           Port: {item.port} • Baud: {item.baud}
                         </div>

@@ -1,6 +1,0 @@
-{
-  "name": "LokiAI Main",
-  "description": "Production-grade hardware operations control room for connecting devices, monitoring health, observing AI agents, managing incidents, and deploying firmware.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

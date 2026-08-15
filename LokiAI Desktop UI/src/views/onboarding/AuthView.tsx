@@ -1,17 +1,6 @@
 import React, { useState } from 'react';
 import { useLoki } from '../../context/LokiContext';
-import {
-  ExternalLink,
-  ShieldCheck,
-  Radio,
-  Key,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Cpu,
-  CheckCircle2,
-  Terminal,
-} from 'lucide-react';
+import { ExternalLink, ShieldCheck, Radio, Key, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const AuthView: React.FC = () => {
   const { startBrowserAuth, addToast, completeBrowserAuth } = useLoki();
@@ -45,7 +34,10 @@ export const AuthView: React.FC = () => {
   };
 
   return (
-    <div id="auth-screen" className="w-full max-w-xl mx-auto py-8 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="auth-screen"
+      className="w-full max-w-xl mx-auto py-8 px-4 font-sans animate-in fade-in duration-200"
+    >
       {/* Central Card */}
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
         {/* Brand Icon & Version */}
@@ -90,8 +82,11 @@ export const AuthView: React.FC = () => {
         <div className="p-3.5 rounded-[8px] bg-[#050505] border border-[#23221C] flex items-start gap-3 text-xs text-[#8A8577] leading-relaxed">
           <ShieldCheck className="w-5 h-5 text-[#8AB55A] shrink-0 mt-0.5" />
           <div>
-            <strong className="text-[#E8D9A8] block mb-0.5">Cryptographic Loopback Handshake</strong>
-            Authentication completes securely in your browser using PKCE. Once confirmed, an encrypted session token is delivered directly to this local desktop runtime.
+            <strong className="text-[#E8D9A8] block mb-0.5">
+              Cryptographic Loopback Handshake
+            </strong>
+            Authentication completes securely in your browser using PKCE. Once confirmed, an
+            encrypted session token is delivered directly to this local desktop runtime.
           </div>
         </div>
 
@@ -120,7 +115,11 @@ export const AuthView: React.FC = () => {
             <span className="flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-[#8AB55A]" /> Having trouble signing in?
             </span>
-            {showTroubleshooting ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {showTroubleshooting ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
           </button>
 
           {showTroubleshooting && (
@@ -128,8 +127,9 @@ export const AuthView: React.FC = () => {
               <div className="text-[11px] text-[#8A8577] space-y-1">
                 <p className="text-[#E8D9A8] font-semibold">Manual Authorization Token</p>
                 <p>
-                  If your browser blocked localhost callback redirects, generate a personal token from{' '}
-                  <span className="text-[#8AB55A] font-mono">lokiai.io/settings/tokens</span> and paste it below:
+                  If your browser blocked localhost callback redirects, generate a personal token
+                  from <span className="text-[#8AB55A] font-mono">lokiai.io/settings/tokens</span>{' '}
+                  and paste it below:
                 </p>
               </div>
 
@@ -166,7 +166,8 @@ export const AuthView: React.FC = () => {
 
       {/* Security Footer Note */}
       <div className="mt-6 text-center text-[11px] text-[#8A8577] max-w-sm mx-auto">
-        LokiAI Main never stores cloud account passwords locally. All desktop-to-device telemetry is encrypted with local mTLS certificates.
+        LokiAI Main never stores cloud account passwords locally. All desktop-to-device telemetry is
+        encrypted with local mTLS certificates.
       </div>
     </div>
   );

@@ -1,26 +1,9 @@
 import React, { useState } from 'react';
 import { useLoki } from '../context/LokiContext';
-import { AgentRun, AgentProvider } from '../types';
+import { AgentProvider } from '../types';
 import { AgentTaskGraph } from '../components/common/AgentTaskGraph';
-import { StatusChip } from '../components/common/StatusChip';
 import { SeverityBadge } from '../components/common/SeverityBadge';
-import {
-  Bot,
-  Search,
-  Filter,
-  StopCircle,
-  Play,
-  FileCode,
-  GitBranch,
-  ShieldAlert,
-  ArrowLeft,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  ExternalLink,
-  Layers,
-  Terminal,
-} from 'lucide-react';
+import { Bot, StopCircle, Play, FileCode, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export const AgentsView: React.FC = () => {
   const {
@@ -43,7 +26,12 @@ export const AgentsView: React.FC = () => {
   const selectedRun = agentRuns.find((r) => r.id === selectedAgentRunId);
 
   // Provider summary stats
-  const providers: { name: AgentProvider; model: string; sessions: number; status: 'Online' | 'Active' }[] = [
+  const providers: {
+    name: AgentProvider;
+    model: string;
+    sessions: number;
+    status: 'Online' | 'Active';
+  }[] = [
     { name: 'Claude Code', model: 'claude-3-7-sonnet', sessions: 2, status: 'Active' },
     { name: 'OpenAI Codex', model: 'gpt-4o-hardware-specialist', sessions: 1, status: 'Active' },
     { name: 'Cursor CLI', model: 'cursor-agent-v2', sessions: 1, status: 'Online' },
@@ -67,7 +55,9 @@ export const AgentsView: React.FC = () => {
   };
 
   if (selectedRun) {
-    const runApproval = approvals.find((a) => a.associatedAgentRunId === selectedRun.id && a.status === 'pending');
+    const runApproval = approvals.find(
+      (a) => a.associatedAgentRunId === selectedRun.id && a.status === 'pending',
+    );
     const totalTokens = selectedRun.tokenUsage?.total || 0;
 
     return (
@@ -93,7 +83,12 @@ export const AgentsView: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-[#8A8577] font-mono mt-0.5">
-                Session ID: {selectedRun.id} • Repo: <span className="text-[#E8D9A8]">{selectedRun.repository}#{selectedRun.branch}</span> • Elapsed: {Math.round(selectedRun.elapsedSeconds / 60)}m ({totalTokens.toLocaleString()} tokens)
+                Session ID: {selectedRun.id} • Repo:{' '}
+                <span className="text-[#E8D9A8]">
+                  {selectedRun.repository}#{selectedRun.branch}
+                </span>{' '}
+                • Elapsed: {Math.round(selectedRun.elapsedSeconds / 60)}m (
+                {totalTokens.toLocaleString()} tokens)
               </p>
             </div>
           </div>
@@ -133,11 +128,19 @@ export const AgentsView: React.FC = () => {
               <ShieldAlert className="w-5 h-5 text-[#8AB55A] shrink-0 mt-0.5" />
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#E8D9A8]">Agent Paused: Awaiting Security Authorization</span>
+                  <span className="text-xs font-bold text-[#E8D9A8]">
+                    Agent Paused: Awaiting Security Authorization
+                  </span>
                   <SeverityBadge severity={runApproval.risk} />
                 </div>
                 <p className="text-xs text-[#8A8577] mt-0.5">
-                  The agent is requesting high-risk operation <strong className="text-[#E8D9A8] font-mono">{runApproval.operationName}</strong> on <strong className="text-[#E8D9A8] font-mono">{runApproval.targetDeviceNames.join(', ')}</strong>.
+                  The agent is requesting high-risk operation{' '}
+                  <strong className="text-[#E8D9A8] font-mono">{runApproval.operationName}</strong>{' '}
+                  on{' '}
+                  <strong className="text-[#E8D9A8] font-mono">
+                    {runApproval.targetDeviceNames.join(', ')}
+                  </strong>
+                  .
                 </p>
               </div>
             </div>
@@ -162,7 +165,9 @@ export const AgentsView: React.FC = () => {
               <span className="text-xs font-semibold uppercase tracking-wider text-[#8A8577]">
                 Modified Firmware & Driver Code
               </span>
-              <span className="text-[11px] text-[#8A8577]">{selectedRun.changedFiles.length} files</span>
+              <span className="text-[11px] text-[#8A8577]">
+                {selectedRun.changedFiles.length} files
+              </span>
             </div>
 
             <div className="space-y-2">
@@ -190,12 +195,17 @@ export const AgentsView: React.FC = () => {
               <span className="text-xs font-semibold uppercase tracking-wider text-[#8A8577]">
                 Task Execution Timeline
               </span>
-              <span className="text-[11px] font-mono text-[#8A8577]">{selectedRun.timeline.length} events</span>
+              <span className="text-[11px] font-mono text-[#8A8577]">
+                {selectedRun.timeline.length} events
+              </span>
             </div>
 
             <div className="space-y-3">
               {selectedRun.timeline.map((event) => (
-                <div key={event.id} className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-1">
+                <div
+                  key={event.id}
+                  className="p-3 rounded-[8px] bg-[#0A0A08] border border-[#23221C] space-y-1"
+                >
                   <div className="flex items-center justify-between font-mono text-[11px]">
                     <span className="font-semibold text-[#8AB55A] uppercase">{event.type}</span>
                     <span className="text-[#8A8577]">{event.timestamp}</span>
@@ -291,9 +301,15 @@ export const AgentsView: React.FC = () => {
                       {run.phase}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-[#8A8577]">{run.repository}#{run.branch}</td>
-                  <td className="py-3 px-4 text-[#8A8577]">{(run.tokenUsage?.total || 0).toLocaleString()}</td>
-                  <td className="py-3 px-4 text-[#8A8577]">{Math.round(run.elapsedSeconds / 60)}m</td>
+                  <td className="py-3 px-4 text-[#8A8577]">
+                    {run.repository}#{run.branch}
+                  </td>
+                  <td className="py-3 px-4 text-[#8A8577]">
+                    {(run.tokenUsage?.total || 0).toLocaleString()}
+                  </td>
+                  <td className="py-3 px-4 text-[#8A8577]">
+                    {Math.round(run.elapsedSeconds / 60)}m
+                  </td>
                   <td className="py-3 px-4 text-right">
                     <button
                       onClick={(e) => {

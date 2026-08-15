@@ -3,10 +3,8 @@ import { useLoki } from '../../context/LokiContext';
 import {
   RefreshCw,
   CheckCircle2,
-  AlertTriangle,
   Radio,
   ExternalLink,
-  XCircle,
   Clock,
   ArrowRight,
   ShieldCheck,
@@ -14,7 +12,7 @@ import {
 } from 'lucide-react';
 
 export const AuthWaitingView: React.FC = () => {
-  const { completeBrowserAuth, cancelBrowserAuth, addToast, userSession } = useLoki();
+  const { completeBrowserAuth, cancelBrowserAuth, addToast } = useLoki();
 
   const [state, setState] = useState<
     'waiting' | 'success' | 'expired' | 'network_error' | 'already_linked'
@@ -83,7 +81,8 @@ export const AuthWaitingView: React.FC = () => {
                   Finish signing in through your browser
                 </h1>
                 <p className="text-xs text-[#8A8577] mt-1">
-                  Waiting for secure callback confirmation from <span className="text-[#E8D9A8]">auth.lokiai.io</span>
+                  Waiting for secure callback confirmation from{' '}
+                  <span className="text-[#E8D9A8]">auth.lokiai.io</span>
                 </p>
               </div>
             </div>
@@ -176,9 +175,7 @@ export const AuthWaitingView: React.FC = () => {
               <span className="text-[10px] font-mono uppercase tracking-widest text-[#8AB55A]">
                 Handshake Verified
               </span>
-              <h2 className="text-lg font-bold text-[#E8D9A8] mt-1">
-                Account connected
-              </h2>
+              <h2 className="text-lg font-bold text-[#E8D9A8] mt-1">Account connected</h2>
               <p className="text-xs text-[#8A8577] mt-1">
                 Connected to LokiAI Main Desktop Runtime
               </p>
@@ -191,7 +188,9 @@ export const AuthWaitingView: React.FC = () => {
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-[#E8D9A8]">Laukik Rajput</div>
                 <div className="text-[11px] text-[#8A8577] font-mono">laukikxrajput@gmail.com</div>
-                <div className="text-[10px] text-[#8AB55A] font-mono mt-0.5">Enterprise Fleet • Cluster Admin</div>
+                <div className="text-[10px] text-[#8AB55A] font-mono mt-0.5">
+                  Enterprise Fleet • Cluster Admin
+                </div>
               </div>
             </div>
 
@@ -240,7 +239,8 @@ export const AuthWaitingView: React.FC = () => {
             <div>
               <h2 className="text-base font-bold text-[#E8D9A8]">Network Unavailable</h2>
               <p className="text-xs text-[#8A8577] mt-1">
-                Unable to contact auth.lokiai.io. Check your network or firewall rules for port 18492.
+                Unable to contact auth.lokiai.io. Check your network or firewall rules for port
+                18492.
               </p>
             </div>
             <div className="flex gap-2 justify-center pt-2">
@@ -269,7 +269,8 @@ export const AuthWaitingView: React.FC = () => {
             <div>
               <h2 className="text-base font-bold text-[#E8D9A8]">Account Already Connected</h2>
               <p className="text-xs text-[#8A8577] mt-1">
-                This runtime daemon is already paired with <strong className="text-[#E8D9A8]">laukikxrajput@gmail.com</strong>.
+                This runtime daemon is already paired with{' '}
+                <strong className="text-[#E8D9A8]">laukikxrajput@gmail.com</strong>.
               </p>
             </div>
             <button

@@ -1,8 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
 import {
   PrimaryRoute,
-  AuthRoute,
-  OnboardingRoute,
   AppRoute,
   AuthStatus,
   UserSession,
@@ -154,7 +159,10 @@ interface LokiContextType {
   inspectorOpen: boolean;
   inspectorType: 'device' | 'agent' | 'incident' | 'deployment' | 'activity' | 'rule' | null;
   inspectorData: any;
-  openInspector: (type: 'device' | 'agent' | 'incident' | 'deployment' | 'activity' | 'rule', data: any) => void;
+  openInspector: (
+    type: 'device' | 'agent' | 'incident' | 'deployment' | 'activity' | 'rule',
+    data: any,
+  ) => void;
   closeInspector: () => void;
 
   // Modals
@@ -266,7 +274,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [onboardingState]);
 
   // Workspaces & Routing
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(mockWorkspaces);
+  const [workspaces] = useState<Workspace[]>(mockWorkspaces);
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(mockWorkspaces[0]);
   const [currentRoute, setCurrentRoute] = useState<PrimaryRoute>('dashboard');
   const [currentSettingsTab, setCurrentSettingsTab] = useState<SettingsTab>('workspace');
@@ -277,9 +285,9 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [incidents, setIncidents] = useState<Incident[]>(mockIncidents);
   const [deployments, setDeployments] = useState<Deployment[]>(mockDeployments);
   const [monitoringRules, setMonitoringRules] = useState<MonitoringRule[]>(mockMonitoringRules);
-  const [watchers, setWatchers] = useState<WatcherHealth[]>(mockWatchers);
+  const [watchers] = useState<WatcherHealth[]>(mockWatchers);
   const [telemetryHistory, setTelemetryHistory] = useState<TelemetryPoint[]>(mockTelemetryHistory);
-  const [logs, setLogs] = useState<LogEntry[]>(mockBoundedLogs);
+  const [logs] = useState<LogEntry[]>(mockBoundedLogs);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>(mockApprovals);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>(mockActivityEvents);
 
@@ -292,7 +300,9 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Inspector Drawer
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [inspectorType, setInspectorType] = useState<'device' | 'agent' | 'incident' | 'deployment' | 'activity' | 'rule' | null>(null);
+  const [inspectorType, setInspectorType] = useState<
+    'device' | 'agent' | 'incident' | 'deployment' | 'activity' | 'rule' | null
+  >(null);
   const [inspectorData, setInspectorData] = useState<any>(null);
 
   // Modals
@@ -326,7 +336,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setInspectorData(data);
       setInspectorOpen(true);
     },
-    []
+    [],
   );
 
   const closeInspector = useCallback(() => {
@@ -336,40 +346,22 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   // Unified Navigation Action
-  const navigateToRoute = useCallback(
-    (route: AppRoute, entityId?: string, tab?: SettingsTab) => {
-      setActiveAppRoute(route);
+  const navigateToRoute = useCallback((route: AppRoute, entityId?: string, tab?: SettingsTab) => {
+    setActiveAppRoute(route);
 
-      // If it's a primary dashboard route, keep currentRoute in sync
-      const dashboardRoutes: PrimaryRoute[] = [
-        'dashboard',
-        'devices',
-        'agents',
-        'incidents',
-        'deployments',
-        'monitoring',
-        'settings',
-        'activity',
-      ];
-      if (dashboardRoutes.includes(route as PrimaryRoute)) {
-        setCurrentRoute(route as PrimaryRoute);
-        if (tab) setCurrentSettingsTab(tab);
-        if (entityId) {
-          if (route === 'devices') setSelectedDeviceId(entityId);
-          if (route === 'agents') setSelectedAgentRunId(entityId);
-          if (route === 'incidents') setSelectedIncidentId(entityId);
-          if (route === 'deployments') setSelectedDeploymentId(entityId);
-          if (route === 'activity') setSelectedActivityId(entityId);
-        }
-      }
-    },
-    []
-  );
-
-  const navigateTo = useCallback(
-    (route: PrimaryRoute, entityId?: string, tab?: SettingsTab) => {
-      setActiveAppRoute(route);
-      setCurrentRoute(route);
+    // If it's a primary dashboard route, keep currentRoute in sync
+    const dashboardRoutes: PrimaryRoute[] = [
+      'dashboard',
+      'devices',
+      'agents',
+      'incidents',
+      'deployments',
+      'monitoring',
+      'settings',
+      'activity',
+    ];
+    if (dashboardRoutes.includes(route as PrimaryRoute)) {
+      setCurrentRoute(route as PrimaryRoute);
       if (tab) setCurrentSettingsTab(tab);
       if (entityId) {
         if (route === 'devices') setSelectedDeviceId(entityId);
@@ -378,9 +370,21 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (route === 'deployments') setSelectedDeploymentId(entityId);
         if (route === 'activity') setSelectedActivityId(entityId);
       }
-    },
-    []
-  );
+    }
+  }, []);
+
+  const navigateTo = useCallback((route: PrimaryRoute, entityId?: string, tab?: SettingsTab) => {
+    setActiveAppRoute(route);
+    setCurrentRoute(route);
+    if (tab) setCurrentSettingsTab(tab);
+    if (entityId) {
+      if (route === 'devices') setSelectedDeviceId(entityId);
+      if (route === 'agents') setSelectedAgentRunId(entityId);
+      if (route === 'incidents') setSelectedIncidentId(entityId);
+      if (route === 'deployments') setSelectedDeploymentId(entityId);
+      if (route === 'activity') setSelectedActivityId(entityId);
+    }
+  }, []);
 
   // Auth Operations
   const startBrowserAuth = () => {
@@ -453,7 +457,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const timeLabel = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}:${String(now.getUTCSeconds()).padStart(2, '0')}`;
 
       // Simulate subtle telemetry variation
-      const latestVoltage = Number((3.30 + (Math.random() * 0.04 - 0.02)).toFixed(2));
+      const latestVoltage = Number((3.3 + (Math.random() * 0.04 - 0.02)).toFixed(2));
       const latestTemp = Number((48.0 + (Math.random() * 0.6 - 0.3)).toFixed(1));
       const latestCpu = Number((34.0 + (Math.random() * 3.0 - 1.5)).toFixed(1));
 
@@ -497,13 +501,16 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               observationElapsedSec: nextElapsed,
               deviceResults: dep.deviceResults.map((dr) => ({
                 ...dr,
-                progressPct: Math.min(98, Math.round((nextElapsed / dep.observationWindowSec) * 100)),
+                progressPct: Math.min(
+                  98,
+                  Math.round((nextElapsed / dep.observationWindowSec) * 100),
+                ),
                 currentStage: `Observing: ${nextElapsed}/${dep.observationWindowSec}s elapsed`,
               })),
             };
           }
           return dep;
-        })
+        }),
       );
     }, 3000);
 
@@ -517,7 +524,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Update approval state
     setApprovals((prev) =>
-      prev.map((appr) => (appr.id === approvalId ? { ...appr, status: 'approved' } : appr))
+      prev.map((appr) => (appr.id === approvalId ? { ...appr, status: 'approved' } : appr)),
     );
 
     // If associated with an agent run, advance agent run
@@ -532,12 +539,12 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               requestedOperations: run.requestedOperations.map((op) =>
                 op.approvalId === approvalId
                   ? { ...op, state: 'executing', executionJobId: `job-${Date.now()}` }
-                  : op
+                  : op,
               ),
             };
           }
           return run;
-        })
+        }),
       );
     }
 
@@ -578,7 +585,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!targetApproval) return;
 
     setApprovals((prev) =>
-      prev.map((appr) => (appr.id === approvalId ? { ...appr, status: 'denied' } : appr))
+      prev.map((appr) => (appr.id === approvalId ? { ...appr, status: 'denied' } : appr)),
     );
 
     if (targetApproval.associatedAgentRunId) {
@@ -590,12 +597,12 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               phase: 'waiting',
               lastEvent: 'Operation denied by user. Agent awaiting revised instructions.',
               requestedOperations: run.requestedOperations.map((op) =>
-                op.approvalId === approvalId ? { ...op, state: 'rejected' } : op
+                op.approvalId === approvalId ? { ...op, state: 'rejected' } : op,
               ),
             };
           }
           return run;
-        })
+        }),
       );
     }
 
@@ -694,7 +701,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setIncidents((prev) =>
-      prev.map((item) => (item.id === incidentId ? { ...item, status: 'Resolved' } : item))
+      prev.map((item) => (item.id === incidentId ? { ...item, status: 'Resolved' } : item)),
     );
 
     const newAct: ActivityEvent = {
@@ -735,7 +742,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const toggleRule = (ruleId: string) => {
     setMonitoringRules((prev) =>
-      prev.map((r) => (r.id === ruleId ? { ...r, enabled: !r.enabled } : r))
+      prev.map((r) => (r.id === ruleId ? { ...r, enabled: !r.enabled } : r)),
     );
     const rule = monitoringRules.find((r) => r.id === ruleId);
     if (rule) {
@@ -762,8 +769,22 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       rolloutStrategy: newDepData.rolloutStrategy || 'All-at-Once',
       phase: 'preflight',
       preflightChecks: [
-        { id: 'pf-new-1', name: 'Binary Integrity Check', category: 'Binary', status: 'passed', measured: 'Valid Header', target: 'Valid' },
-        { id: 'pf-new-2', name: 'Transport Connection Test', category: 'Transport', status: 'passed', measured: 'Ping < 5ms', target: '< 20ms' },
+        {
+          id: 'pf-new-1',
+          name: 'Binary Integrity Check',
+          category: 'Binary',
+          status: 'passed',
+          measured: 'Valid Header',
+          target: 'Valid',
+        },
+        {
+          id: 'pf-new-2',
+          name: 'Transport Connection Test',
+          category: 'Transport',
+          status: 'passed',
+          measured: 'Ping < 5ms',
+          target: '< 20ms',
+        },
       ],
       deviceResults: (newDepData.targetDeviceIds || ['dev-esp32-01']).map((id) => ({
         deviceId: id,
@@ -815,7 +836,14 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       firmwareVersion: 'v1.0.0-factory',
       configVersion: 'default-config',
       appVersion: 'app-node-v1',
-      capabilities: ['read_logs', 'restart', 'flash_firmware', 'ota_update', 'rollback', 'voltage_sense'],
+      capabilities: [
+        'read_logs',
+        'restart',
+        'flash_firmware',
+        'ota_update',
+        'rollback',
+        'voltage_sense',
+      ],
       healthChecks: [
         {
           id: 'new-chk-1',
@@ -831,7 +859,7 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       activeDeploymentsCount: 0,
       rollbackEligible: false,
       metrics: {
-        voltage: 3.30,
+        voltage: 3.3,
         temperature: 38.5,
         cpuUsage: 12.0,
         heapFreeKB: 250,
@@ -839,11 +867,28 @@ export const LokiProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         watchdogMarginMs: 500,
       },
       relationshipNodes: [
-        { id: 'gw-chamber-01', name: 'Chamber Core Gateway A', type: 'gateway', status: 'Healthy', details: 'Loki Runtime Socket v1.2.4' },
-        { id: `dev-${Date.now().toString().slice(-4)}`, name: deviceData.name || 'NEW-HARDWARE-NODE', type: 'device', status: 'Healthy', details: 'Active Node' },
+        {
+          id: 'gw-chamber-01',
+          name: 'Chamber Core Gateway A',
+          type: 'gateway',
+          status: 'Healthy',
+          details: 'Loki Runtime Socket v1.2.4',
+        },
+        {
+          id: `dev-${Date.now().toString().slice(-4)}`,
+          name: deviceData.name || 'NEW-HARDWARE-NODE',
+          type: 'device',
+          status: 'Healthy',
+          details: 'Active Node',
+        },
       ],
       relationshipEdges: [
-        { source: 'gw-chamber-01', target: `dev-${Date.now().toString().slice(-4)}`, label: 'Transport Link', protocol: 'Loki Protocol' },
+        {
+          source: 'gw-chamber-01',
+          target: `dev-${Date.now().toString().slice(-4)}`,
+          label: 'Transport Link',
+          protocol: 'Loki Protocol',
+        },
       ],
     };
 

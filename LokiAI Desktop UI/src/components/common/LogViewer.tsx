@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { LogEntry } from '../../types';
-import { Terminal, Search, Filter, Copy, Check, Pause, Play } from 'lucide-react';
+import { Terminal, Search, Copy, Check, Pause, Play } from 'lucide-react';
 
 interface LogViewerProps {
   logs: LogEntry[];
@@ -18,7 +18,9 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   className = '',
 }) => {
   const [query, setQuery] = useState('');
-  const [levelFilter, setLevelFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL'>('ALL');
+  const [levelFilter, setLevelFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL'>(
+    'ALL',
+  );
   const [isPaused, setIsPaused] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -45,7 +47,9 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   }, [logs, sourceFilter, levelFilter, query]);
 
   const handleCopy = () => {
-    const text = filteredLogs.map((l) => `${l.timestamp} [${l.level}] ${l.sourceDevice} (${l.service}): ${l.message}`).join('\n');
+    const text = filteredLogs
+      .map((l) => `${l.timestamp} [${l.level}] ${l.sourceDevice} (${l.service}): ${l.message}`)
+      .join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -67,13 +71,18 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   };
 
   return (
-    <div id="log-viewer-container" className={`bg-[#050505] border border-[#23221C] rounded-[10px] p-4 ${className}`}>
+    <div
+      id="log-viewer-container"
+      className={`bg-[#050505] border border-[#23221C] rounded-[10px] p-4 ${className}`}
+    >
       {/* Top Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#23221C] mb-3">
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-[#8AB55A]" />
           <h4 className="text-xs font-semibold uppercase tracking-wider text-[#E8D9A8]">{title}</h4>
-          <span className="text-[11px] font-mono text-[#8A8577]">({filteredLogs.length} events)</span>
+          <span className="text-[11px] font-mono text-[#8A8577]">
+            ({filteredLogs.length} events)
+          </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -113,7 +122,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({
             title={isPaused ? 'Resume streaming' : 'Pause visual stream'}
             aria-label="Toggle log pause"
           >
-            {isPaused ? <Play className="w-3.5 h-3.5 text-[#8AB55A]" /> : <Pause className="w-3.5 h-3.5" />}
+            {isPaused ? (
+              <Play className="w-3.5 h-3.5 text-[#8AB55A]" />
+            ) : (
+              <Pause className="w-3.5 h-3.5" />
+            )}
           </button>
 
           {/* Copy Button */}
@@ -123,7 +136,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({
             title="Copy logs to clipboard"
             aria-label="Copy logs"
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-[#8AB55A]" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-[#8AB55A]" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -140,9 +157,14 @@ export const LogViewer: React.FC<LogViewerProps> = ({
           </div>
         ) : (
           filteredLogs.map((log) => (
-            <div key={log.id} className="flex items-start gap-2 hover:bg-[#0A0A08] p-1 rounded transition-colors group">
+            <div
+              key={log.id}
+              className="flex items-start gap-2 hover:bg-[#0A0A08] p-1 rounded transition-colors group"
+            >
               <span className="text-[#8A8577] text-[11px] shrink-0">{log.timestamp}</span>
-              <span className={`px-1 rounded bg-[#0A0A08] border border-[#23221C] text-[10px] shrink-0 ${getLevelColor(log.level)}`}>
+              <span
+                className={`px-1 rounded bg-[#0A0A08] border border-[#23221C] text-[10px] shrink-0 ${getLevelColor(log.level)}`}
+              >
                 {log.level}
               </span>
               <span className="text-[#8A8577] text-[11px] shrink-0">[{log.sourceDevice}]</span>

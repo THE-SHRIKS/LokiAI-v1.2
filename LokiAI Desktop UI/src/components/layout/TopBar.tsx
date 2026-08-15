@@ -1,15 +1,7 @@
 import React from 'react';
 import { useLoki } from '../../context/LokiContext';
 import { ConnectionIndicator } from '../common/ConnectionIndicator';
-import {
-  Search,
-  ShieldAlert,
-  Bell,
-  PlusCircle,
-  Cpu,
-  Rocket,
-  RefreshCw,
-} from 'lucide-react';
+import { Search, ShieldAlert, Cpu, Rocket } from 'lucide-react';
 
 export const TopBar: React.FC = () => {
   const {
@@ -20,7 +12,6 @@ export const TopBar: React.FC = () => {
     setIsCommandPaletteOpen,
     setIsDeployModalOpen,
     setIsAddDeviceModalOpen,
-    lastSyncTime,
   } = useLoki();
 
   const pendingApprovals = approvals.filter((a) => a.status === 'pending');
@@ -102,7 +93,9 @@ export const TopBar: React.FC = () => {
           }`}
           title="Review Pending Security Approvals"
         >
-          <ShieldAlert className={`w-3.5 h-3.5 ${pendingApprovals.length > 0 ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`} />
+          <ShieldAlert
+            className={`w-3.5 h-3.5 ${pendingApprovals.length > 0 ? 'text-[#8AB55A]' : 'text-[#8A8577]'}`}
+          />
           <span className="hidden sm:inline">Approvals</span>
           {pendingApprovals.length > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-[#8AB55A] text-[#010101] font-mono text-[10px] font-bold">

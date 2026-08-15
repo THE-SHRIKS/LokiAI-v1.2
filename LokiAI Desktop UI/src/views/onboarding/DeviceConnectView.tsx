@@ -5,18 +5,12 @@ import { DeviceFamily, ConnectorType } from '../../types';
 import {
   Cpu,
   RefreshCw,
-  CheckCircle2,
   Usb,
-  Radio,
   Wifi,
   Bluetooth,
   ArrowRight,
   ArrowLeft,
   Settings2,
-  AlertTriangle,
-  Layers,
-  Search,
-  ShieldCheck,
 } from 'lucide-react';
 
 interface DiscoveredHardware {
@@ -81,7 +75,7 @@ const mockDiscoveredDevices: DiscoveredHardware[] = [
 ];
 
 export const DeviceConnectView: React.FC = () => {
-  const { onboardingState, updateOnboardingState, navigateToRoute, addToast } = useLoki();
+  const { updateOnboardingState, navigateToRoute, addToast } = useLoki();
 
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredList, setDiscoveredList] = useState<DiscoveredHardware[]>(mockDiscoveredDevices);
@@ -91,8 +85,7 @@ export const DeviceConnectView: React.FC = () => {
   const [manualFamily, setManualFamily] = useState<DeviceFamily>('ESP32-S3');
   const [manualConnector, setManualConnector] = useState<ConnectorType>('USB-CDC Serial');
 
-  const selectedDevice =
-    discoveredList.find((d) => d.id === selectedDeviceId) || discoveredList[0];
+  const selectedDevice = discoveredList.find((d) => d.id === selectedDeviceId) || discoveredList[0];
 
   const handleScan = () => {
     setIsScanning(true);
@@ -124,13 +117,55 @@ export const DeviceConnectView: React.FC = () => {
         supportTier: selectedDevice.supportTier,
         healthStatus: 'Healthy',
         healthChecks: [
-          { id: 'hc-1', name: 'Identity Verification', description: 'Silicon chip signature match & JTAG IDCODE', status: 'pending', details: selectedDevice.chipId },
-          { id: 'hc-2', name: 'Connection Validation', description: 'Transport ping, round-trip latency & packet loss', status: 'pending', details: `${selectedDevice.transportPort} (0.8ms latency)` },
-          { id: 'hc-3', name: 'Capability Discovery', description: 'Querying supported control primitives (reboot, logs, flash)', status: 'pending', details: '6 capabilities queried' },
-          { id: 'hc-4', name: 'Firmware Identification', description: 'Bootloader hash & active image slot verification', status: 'pending', details: 'v1.4.0-release' },
-          { id: 'hc-5', name: 'Heartbeat / Telemetry Response', description: 'Continuous 10Hz health stream watchdog check', status: 'pending', details: 'Watchdog margin: 388ms' },
-          { id: 'hc-6', name: 'Available LokiAI Operations', description: 'Verify agent sandbox execution boundaries', status: 'pending', details: 'Full diagnostic & OTA scope' },
-          { id: 'hc-7', name: 'Deployment & Rollback Support', description: 'Dual-bank flash partition table validation', status: 'pending', details: 'A/B Partitioning Active' },
+          {
+            id: 'hc-1',
+            name: 'Identity Verification',
+            description: 'Silicon chip signature match & JTAG IDCODE',
+            status: 'pending',
+            details: selectedDevice.chipId,
+          },
+          {
+            id: 'hc-2',
+            name: 'Connection Validation',
+            description: 'Transport ping, round-trip latency & packet loss',
+            status: 'pending',
+            details: `${selectedDevice.transportPort} (0.8ms latency)`,
+          },
+          {
+            id: 'hc-3',
+            name: 'Capability Discovery',
+            description: 'Querying supported control primitives (reboot, logs, flash)',
+            status: 'pending',
+            details: '6 capabilities queried',
+          },
+          {
+            id: 'hc-4',
+            name: 'Firmware Identification',
+            description: 'Bootloader hash & active image slot verification',
+            status: 'pending',
+            details: 'v1.4.0-release',
+          },
+          {
+            id: 'hc-5',
+            name: 'Heartbeat / Telemetry Response',
+            description: 'Continuous 10Hz health stream watchdog check',
+            status: 'pending',
+            details: 'Watchdog margin: 388ms',
+          },
+          {
+            id: 'hc-6',
+            name: 'Available LokiAI Operations',
+            description: 'Verify agent sandbox execution boundaries',
+            status: 'pending',
+            details: 'Full diagnostic & OTA scope',
+          },
+          {
+            id: 'hc-7',
+            name: 'Deployment & Rollback Support',
+            description: 'Dual-bank flash partition table validation',
+            status: 'pending',
+            details: 'A/B Partitioning Active',
+          },
         ],
       },
     });
@@ -163,7 +198,10 @@ export const DeviceConnectView: React.FC = () => {
   };
 
   return (
-    <div id="device-connect-screen" className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200">
+    <div
+      id="device-connect-screen"
+      className="w-full max-w-4xl mx-auto py-4 px-4 font-sans animate-in fade-in duration-200"
+    >
       <OnboardingStepper currentStep="device" />
 
       <div className="p-8 rounded-[12px] bg-[#0A0A08] border border-[#23221C] shadow-2xl space-y-6">
@@ -187,7 +225,9 @@ export const DeviceConnectView: React.FC = () => {
             disabled={isScanning}
             className="flex items-center gap-2 px-3.5 py-1.5 rounded-[8px] bg-[#050505] border border-[#23221C] hover:border-[#8AB55A]/50 text-xs font-semibold text-[#E8D9A8] transition-colors"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#8AB55A] ${isScanning ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 text-[#8AB55A] ${isScanning ? 'animate-spin' : ''}`}
+            />
             <span>{isScanning ? 'Scanning bus...' : 'Scan for devices'}</span>
           </button>
         </div>
@@ -246,13 +286,16 @@ export const DeviceConnectView: React.FC = () => {
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-[#E8D9A8] font-mono">{dev.name}</span>
+                        <span className="font-bold text-xs text-[#E8D9A8] font-mono">
+                          {dev.name}
+                        </span>
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#0A0A08] border border-[#23221C] text-[#8AB55A] font-mono">
                           {dev.family}
                         </span>
                       </div>
                       <div className="text-[11px] text-[#8A8577] font-mono mt-0.5 truncate">
-                        Port: <strong className="text-[#E8D9A8]">{dev.transportPort}</strong> • Connector: {dev.connector}
+                        Port: <strong className="text-[#E8D9A8]">{dev.transportPort}</strong> •
+                        Connector: {dev.connector}
                       </div>
                     </div>
                   </div>
@@ -288,7 +331,10 @@ export const DeviceConnectView: React.FC = () => {
               <Settings2 className="w-3.5 h-3.5" /> Configure custom port / IP connection manually
             </button>
           ) : (
-            <form onSubmit={handleAddManual} className="p-4 rounded-[8px] bg-[#050505] border border-[#23221C] space-y-3 animate-in fade-in">
+            <form
+              onSubmit={handleAddManual}
+              className="p-4 rounded-[8px] bg-[#050505] border border-[#23221C] space-y-3 animate-in fade-in"
+            >
               <div className="flex items-center justify-between text-xs font-semibold text-[#E8D9A8]">
                 <span>Manual Hardware Connector</span>
                 <button

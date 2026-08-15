@@ -9,7 +9,6 @@ import {
   Bot,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
 } from 'lucide-react';
 
 export const LogoutModal: React.FC = () => {
@@ -29,11 +28,9 @@ export const LogoutModal: React.FC = () => {
   if (!isLogoutModalOpen) return null;
 
   const activeDeployments = deployments.filter(
-    (d) => d.phase !== 'completed' && d.phase !== 'verified' && d.phase !== 'failed'
+    (d) => d.phase !== 'completed' && d.phase !== 'verified' && d.phase !== 'failed',
   );
-  const activeAgentRuns = agentRuns.filter(
-    (a) => a.phase !== 'complete' && a.phase !== 'failed'
-  );
+  const activeAgentRuns = agentRuns.filter((a) => a.phase !== 'complete' && a.phase !== 'failed');
 
   const handleLogoutAction = (testFailureMode?: 'fail_api' | 'expired_session') => {
     setIsProcessing(true);
@@ -42,7 +39,9 @@ export const LogoutModal: React.FC = () => {
     setTimeout(() => {
       if (testFailureMode === 'fail_api') {
         setIsProcessing(false);
-        setErrorScenario('Cloud authentication service unreachable (HTTP 503). Local session can still be cleared safely.');
+        setErrorScenario(
+          'Cloud authentication service unreachable (HTTP 503). Local session can still be cleared safely.',
+        );
         addToast({
           type: 'error',
           title: 'Remote Revocation Warning',
@@ -110,7 +109,8 @@ export const LogoutModal: React.FC = () => {
               Signing out disconnects this desktop interface from your account.
             </p>
             <p className="text-[#8A8577] text-[11px]">
-              It does <strong>not</strong> stop the LokiAI Runtime, interrupt active OTA deployments, disconnect hardware gateways, or terminate background agent tasks.
+              It does <strong>not</strong> stop the LokiAI Runtime, interrupt active OTA
+              deployments, disconnect hardware gateways, or terminate background agent tasks.
             </p>
           </div>
 
@@ -144,9 +144,7 @@ export const LogoutModal: React.FC = () => {
                   <Bot className="w-3.5 h-3.5 text-[#8AB55A]" /> Agent Sessions
                 </span>
                 <span className="text-[#E8D9A8]">
-                  {activeAgentRuns.length > 0
-                    ? `${activeAgentRuns.length} Running`
-                    : 'Preserved'}
+                  {activeAgentRuns.length > 0 ? `${activeAgentRuns.length} Running` : 'Preserved'}
                 </span>
               </div>
 
@@ -165,7 +163,8 @@ export const LogoutModal: React.FC = () => {
               <AlertTriangle className="w-4 h-4 text-[#CC272E] shrink-0 mt-0.5" />
               <div className="text-[11px] leading-tight">
                 <span className="font-bold text-[#CC272E]">Active deployment in progress:</span>{' '}
-                {activeDeployments[0].releaseTag}. Hardware update will complete in background daemon.
+                {activeDeployments[0].releaseTag}. Hardware update will complete in background
+                daemon.
               </div>
             </div>
           )}
@@ -188,7 +187,8 @@ export const LogoutModal: React.FC = () => {
 
           {/* Clear Scope Distinction */}
           <div className="text-[11px] text-[#8A8577] border-t border-[#23221C] pt-2">
-            <span className="text-[#8AB55A] font-semibold">Scope of Action:</span> This will revoke the active desktop interface session token and return to the sign-in screen.
+            <span className="text-[#8AB55A] font-semibold">Scope of Action:</span> This will revoke
+            the active desktop interface session token and return to the sign-in screen.
           </div>
         </div>
 
