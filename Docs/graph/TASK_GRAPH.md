@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0 accepted 2026-08-15; FND-001 packet drafted, not dispatched**  
+Status: **G0 accepted 2026-08-15; FND-001 accepted — repo initialized, baseline committed and pushed to `origin/LokiAI-v1.2`. Stopped per "Part One only"; FND-002 undispatched.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-15**
 
@@ -154,7 +154,7 @@ Waves are readiness groups, not permission to ignore graph edges.
 | ID | Type | Outcome | Depends on | Exit evidence | Status |
 |---|---|---|---|---|---|
 | G0 | DECISION | Human accepts PRD, spec, Electron/Rust/MCP boundaries, scope, and open-decision routing | — | Accepted docs or recorded changes | accepted |
-| FND-001 | MIGRATION | Git repository initialized with protected baseline, ignore rules, ownership, and current UI snapshot | G0 | clean reproducible baseline; no secret/generated content | proposed |
+| FND-001 | MIGRATION | Git repository initialized with protected baseline, ignore rules, ownership, and current UI snapshot | G0 | clean reproducible baseline; no secret/generated content | accepted |
 | FND-002 | IMPLEMENTATION | Accept and pin the `TECH_STACK.md` matrix; establish TypeScript/pnpm and Cargo workspaces, root commands, CI, formatting/lint/test config, dependency policy, and prototype dependency cleanup | FND-001 | clean reproducible install/check/build and packaged smoke on supported Windows; component/license record | proposed |
 | CTR-001 | CONTRACT | Versioned shared IDs, envelopes, errors, state enums, IPC DTOs, MCP schemas, connector capability schemas | FND-001, G0 | TypeScript/Rust contract validation and compatibility fixtures | proposed |
 | CLD-001 | CONTRACT | Accepted cloud identity/workspace/runtime/enrollment/policy/audit/artifact/notification contracts and signed fixtures | CTR-001, OQ-002 | contract schemas plus success/error/revocation/version fixtures accepted by cloud owner | blocked |
@@ -326,4 +326,39 @@ new_or_changed_risks: OQ-001 (ESP32-S3 SKU), OQ-002 (cloud/auth contracts), OQ-0
   remain open per Docs/CONTEXT.md and continue to block only their named descendant
   nodes/branches per TASK_GRAPH.md section 5; no new risk introduced by this
   acceptance alone.
+```
+
+```text
+node_id: FND-001
+from: ready
+to: accepted
+timestamp: 2026-08-15T11:01:01Z (commit); force-push correction below at a later
+  timestamp on the same date (real wall-clock time not re-queried for the
+  correction step)
+actor: orchestrator (Claude Code), executing under explicit human approval recorded
+  in Docs/graph/tasks/FND-001.md Section 10
+starting_revision: pre-Git filesystem snapshot, 2026-08-15 (no .git existed)
+result_revision: e5a75c3a06dc1f73c486eb7e4bac4c20b71b5b47 (branch LokiAI-v1.2, tree
+  69ba2b2d8c989161a31c25706ee428223bed1229), pushed to
+  https://github.com/The-Shriks/LokiAI-v1.2
+evidence: Docs/graph/handoffs/FND-001-1.md (worker handoff); git log/status/
+  ls-remote output quoted in that handoff; branch name, remote, PromptForYou.md
+  exclusion, and one-time push all per explicit human instruction.
+reason: FND-001 packet accepted, dispatched, and executed to completion this turn
+  per human approval. All Section 7/8 acceptance and verification criteria in
+  Docs/graph/tasks/FND-001.md passed. Correction: the first pushed commit
+  (0ad5a7f0c1d5e71acbffb2b1b6d984bede7229fd) included a "Co-Authored-By: Claude"
+  trailer that GitHub rendered as a second co-author on the commit; the human
+  flagged this as looking like an unauthorized second account and asked for a
+  single-author commit. The commit message (not its file content — tree hash
+  unchanged: 69ba2b2d8c989161a31c25706ee428223bed1229) was amended to remove the
+  trailer, producing e5a75c3, and force-pushed with `--force-with-lease` guarded
+  against the exact prior known remote SHA, with explicit human approval for that
+  specific force-push. No new GitHub account or repository was created at any
+  point; only the pre-existing empty remote the human named was used.
+unblocked_nodes: FND-002 (Monorepo/build foundation) is now dependency-ready but
+  remains undispatched — human instruction scoped this turn to FND-001 only
+  ("Part One"); no further node was started.
+new_or_changed_risks: none beyond those already tracked under G0's status-update
+  record above.
 ```

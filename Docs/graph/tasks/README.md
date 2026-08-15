@@ -29,8 +29,8 @@ silently editing a worker's contract.
 | Node | Packet | State | Reason |
 |---|---|---|---|
 | G0 | n/a (DECISION node; no worker packet) | accepted 2026-08-15 | Human product/release owner accepted PRD, spec, and locked architecture in chat; recorded in `../TASK_GRAPH.md` section 8 status-update record |
-| FND-001 | [`FND-001.md`](FND-001.md) | drafted, not dispatched | Predecessor G0 accepted; packet prepared per human instruction; Git initialization withheld pending explicit approval to execute |
-| FND-001 descendants | not created | dependency pending | FND-001 has not been accepted (not yet dispatched or completed) |
+| FND-001 | [`FND-001.md`](FND-001.md) | accepted 2026-08-15 | Repo initialized on branch `LokiAI-v1.2`, baseline committed and pushed to `https://github.com/The-Shriks/LokiAI-v1.2`. Handoff: [`../handoffs/FND-001-1.md`](../handoffs/FND-001-1.md) |
+| FND-002 and other FND-001 descendants | not created | dependency pending | FND-001 is accepted, so FND-002 is now dependency-ready, but human instruction scoped this turn to FND-001 only — no further packet has been created or dispatched |
 
 ## Naming and handoff
 
