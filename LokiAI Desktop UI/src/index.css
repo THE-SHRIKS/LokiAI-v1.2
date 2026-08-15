@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --void-black: #010101;
+    --chamber-panel: #050505;
+    --chamber-panel-alt: #0A0A08;
+    --panel-header: #090909;
+    --popover: #0F0F0C;
+    --proof-cream: #E8D9A8;
+    --muted-cream: #8A8577;
+    --validation-olive: #6B8C42;
+    --olive-bright: #8AB55A;
+    --olive-glow: #A8C878;
+    --chamber-border: #23221C;
+    --destructive: #CC272E;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  body {
+    background-color: var(--void-black);
+    color: var(--proof-cream);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Tabular numbers for all metrics, hex, timers, versions */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #23221C;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #38362D;
+}
+
+/* Restrained pulse for live telemetry indicators */
+@keyframes subtle-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.96);
+  }
+}
+
+.live-pulse {
+  animation: subtle-pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse {
+    animation: none;
+  }
+}
