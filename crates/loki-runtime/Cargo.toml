@@ -1,0 +1,82 @@
+# LokiAI Main v1.2 — loki-runtime (RUN-001).
+#
+# Standalone process skeleton for the Rust runtime described in
+# Docs/ARCHITECTURE.md §3.2: startup, structured JSON diagnostics, a health
+# mechanism, and graceful shutdown, with module boundaries later nodes
+# (RUN-002 IPC, DAT-001 storage, JOB-001 jobs, CON-001+ connectors) extend.
+# See Docs/graph/tasks/RUN-001.md for exact scope/forbidden-scope.
+#
+# This is a library+binary crate by Cargo convention (src/lib.rs +
+# src/main.rs, no explicit [lib]/[[bin]] tables needed): the library holds
+# every testable module, main.rs is a thin process entry point, and
+# tests/*.rs black-box-tests the compiled binary directly.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state) rather than added for
+# convenience. Docs/TECH_STACK.md §5.1 requires exact versions in production
+# manifests, so direct dependencies are pinned with `=`; Cargo.lock is
+# committed on top of that for full reproducibility.
+[package]
+name = "loki-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 Rust runtime process (hardware/job/durable-execution authority boundary)."
+
+[dependencies]
+# Async runtime — Docs/TECH_STACK.md's "Async/diagnostics" row names Tokio
+# explicitly. License: MIT. Maintainer: the tokio-rs project (also publishes
+# `tracing`/`tracing-subscriber` below); the de facto standard async runtime,
+# under active release. Features are limited to what this node actually
+# uses:
+#   - rt-multi-thread: the executor. Multi-thread (not current-thread) now so
+#     later nodes (e.g. RUN-002's IPC listener) can add concurrent I/O
+#     without a runtime-flavor rewrite.
+#   - macros: `tokio::select!`, used by the run/shutdown race in
+#     `src/runtime.rs` and by `#[tokio::test]` in this crate's unit tests.
+#     (`main` itself stays a plain sync `fn` — see `src/main.rs` — so a
+#     malformed CLI argument is rejected before any async runtime exists.)
+#   - signal: Windows console-control-handler support
+#     (pulls `windows-sys/Win32_System_Console`) for Ctrl-C/Ctrl-Break/close/
+#     shutdown/logoff — this *is* "a signal-handling crate appropriate for
+#     Windows": Tokio's own `signal` feature already provides fully
+#     async-integrated Windows console-control events, so a second crate
+#     (e.g. `ctrlc`) would only duplicate it and would fail AGENTS.md rule 11
+#     ("no dependency merely for convenience").
+#   - time: `tokio::time::interval` (heartbeat) and `tokio::time::timeout`
+#     (tests; bounds wait time so a broken test hangs loudly, not silently).
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+
+# Structured, span-based diagnostics API — named directly in
+# Docs/TECH_STACK.md's "Async/diagnostics" row. License: MIT, tokio-rs
+# project.
+tracing = "=0.1.44"
+
+# Subscriber that turns `tracing` events into the JSON log lines Deliverable
+# 3 requires. License: MIT, tokio-rs project. Features:
+#   - json: structured JSON output (transitively brings in tracing-serde,
+#     serde, and serde_json — see the dev-dependency note below).
+#   - env-filter: RUST_LOG-configurable verbosity so operators can raise the
+#     log level without a rebuild.
+# The default `SystemTime` timer (UTC RFC 3339, no extra crate) is used as
+# published, so the optional "time"/"chrono" formatting features are not
+# enabled.
+tracing-subscriber = { version = "=0.3.23", features = ["json", "env-filter"] }
+
+# Generates the per-run correlation ID (Deliverable 3; AGENTS.md rule 5:
+# "Use stable IDs ... and correlation IDs"). License: Apache-2.0 OR MIT,
+# uuid-rs project — the canonical Rust UUID implementation. Only the "v4"
+# feature (random UUIDs) is enabled.
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+[dev-dependencies]
+# Used only by tests/*.rs to parse this crate's own JSON log-line output, so
+# the structured-logging deliverable is verified by actually parsing valid
+# JSON rather than by brittle substring matching. Not used by production
+# code/the shipped binary. Adds no new crate to the build graph: it is
+# already a transitive dependency of tracing-subscriber's "json" feature
+# above; this only makes the already-compiled crate directly usable from
+# tests. License: MIT OR Apache-2.0, serde-rs project.
+serde_json = "=1.0.151"
