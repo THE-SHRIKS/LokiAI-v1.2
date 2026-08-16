@@ -206,14 +206,14 @@ which half of the program (Section 1a) a wave belongs to.
 | G0      | DECISION       | Human accepts PRD, spec, Electron/Rust/MCP boundaries, scope, and open-decision routing                                                                                                        | —               | Accepted docs or recorded changes                                                                        | accepted |
 | FND-001 | MIGRATION      | Git repository initialized with protected baseline, ignore rules, ownership, and current UI snapshot                                                                                           | G0              | clean reproducible baseline; no secret/generated content                                                 | accepted |
 | FND-002 | IMPLEMENTATION | Accept and pin the `TECH_STACK.md` matrix; establish TypeScript/pnpm and Cargo workspaces, root commands, CI, formatting/lint/test config, dependency policy, and prototype dependency cleanup | FND-001 | clean reproducible install/check/build and packaged smoke on supported Windows; component/license record | accepted (packaged smoke deferred — no Electron shell exists yet; that's DSK-001) |
-| CTR-001 | CONTRACT       | Versioned shared IDs, envelopes, errors, state enums, IPC DTOs, MCP schemas, connector capability schemas                                                                                      | FND-001, G0     | TypeScript/Rust contract validation and compatibility fixtures                                           | proposed |
+| CTR-001 | CONTRACT       | Versioned shared IDs, envelopes, errors, state enums, IPC DTOs, MCP schemas, connector capability schemas                                                                                      | FND-001, G0     | TypeScript/Rust contract validation and compatibility fixtures                                           | accepted (TS side only; Rust codegen deferred per packet; JSON-Schema-vs-zod deviation flagged for human review — see handoff) |
 | CLD-001 | CONTRACT       | Accepted cloud identity/workspace/runtime/enrollment/policy/audit/artifact/notification contracts and signed fixtures                                                                          | CTR-001, OQ-002 | contract schemas plus success/error/revocation/version fixtures accepted by cloud owner                  | blocked  |
 
 ### Desktop, authentication, and persistence
 
 | ID       | Type           | Outcome                                                                                                                         | Depends on                 | Exit evidence                                                    | Status   |
 | -------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------- | -------- |
-| DSK-001  | IMPLEMENTATION | Existing UI runs in a packaged secure Electron shell with single-instance and truthful app lifecycle                            | FND-002                    | Electron config/security tests and packaged smoke run            | proposed |
+| DSK-001  | IMPLEMENTATION | Existing UI runs in a packaged secure Electron shell with single-instance and truthful app lifecycle                            | FND-002                    | Electron config/security tests and packaged smoke run            | accepted (packaged smoke run real and verified; `pnpm run electron:package` itself not yet reproducible — app proven via `npx` path instead, see handoff §7a) |
 | DSK-002  | CONTRACT       | Minimal typed preload API and event subscription bridge with validation/sender checks                                           | CTR-001, DSK-001           | IPC contract tests; forbidden generic access tests               | proposed |
 | DAT-001  | IMPLEMENTATION | Runtime-owned SQLite schema, migrations, repositories, outbox/inbox, integrity/backup primitives                                | FND-002, CTR-001           | migration/restart/corruption/transaction tests                   | proposed |
 | DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and attribution/support decision | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked  |
@@ -224,7 +224,7 @@ which half of the program (Section 1a) a wave belongs to.
 
 | ID      | Type           | Outcome                                                                                                                  | Depends on                 | Exit evidence                                                       | Status   |
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------- | -------- |
-| RUN-001 | IMPLEMENTATION | Rust runtime executable with health, structured diagnostics, graceful shutdown, and module boundaries                    | FND-002                    | startup/shutdown/crash/error tests                                  | proposed |
+| RUN-001 | IMPLEMENTATION | Rust runtime executable with health, structured diagnostics, graceful shutdown, and module boundaries                    | FND-002                    | startup/shutdown/crash/error tests                                  | accepted |
 | RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | proposed |
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | proposed |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | proposed |
@@ -420,6 +420,44 @@ unblocked_nodes: FND-002 (Monorepo/build foundation) is now dependency-ready but
   ("Part One"); no further node was started.
 new_or_changed_risks: none beyond those already tracked under G0's status-update
   record above.
+```
+
+```text
+node_id: CTR-001, DSK-001, RUN-001
+from: proposed
+to: accepted
+timestamp: real command timestamps embedded in each node's
+  Docs/graph/handoffs/<NODE-ID>-1.md; commits e5a... through 4eca56e
+actor: three loki-implementer background subagents (initial work), each
+  interrupted by an unrelated session restart before writing a handoff or
+  committing; orchestrator (Claude Code) inspected each worktree directly,
+  completed verification, wrote each handoff, committed each on its own
+  branch, then integrated all three into LokiAI-v1.2 in dependency order
+  (RUN-001, then CTR-001, then DSK-001), resolving one real mechanical
+  conflict (pnpm-lock.yaml, via `pnpm install`'s own conflict resolution)
+  and one non-conflicting shared-file merge (eslint.config.js, both
+  branches' additions coexist correctly).
+starting_revision: 519892a
+result_revision: 4eca56e (LokiAI-v1.2, local; not yet pushed as of this record)
+evidence: Docs/graph/handoffs/{CTR-001,DSK-001,RUN-001}-1.md; full integrated
+  `pnpm run verify` exit 0 after all three merged, including the Rust
+  build/test steps running for real for the first time (RUN-001 added the
+  first non-empty workspace member) — 303 TS contract tests, 17 Electron
+  security tests, 21 Rust tests, all passing together on one baseline.
+reason: All three nodes' packet acceptance criteria pass with real,
+  independently-verified evidence (not narrated). Two items explicitly NOT
+  treated as fully resolved despite `accepted` status — recorded here so
+  they aren't lost: (1) CTR-001 uses zod-schema-first contracts, not
+  TECH_STACK.md's stated "canonical JSON Schema 2020-12 plus generated
+  types" — needs an explicit human decision (accept as the real
+  implementation and update TECH_STACK.md, or require a JSON-Schema layer);
+  (2) DSK-001's packaged app is proven working, but the packet-intended
+  `pnpm run electron:package` command itself is not yet reproducible on
+  this pnpm version (node-linker friction) — tracked for a `DSK-001-R1` or
+  `PKG-001`.
+unblocked_nodes: DSK-002, DAT-001, CON-001, MCP-001, RUN-002 are all now
+  dependency-ready.
+new_or_changed_risks: none beyond the two items named above.
 ```
 
 ```text
