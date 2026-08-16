@@ -5,6 +5,7 @@
   "description": "LokiAI Main v1.2 — root workspace (FND-002). See AGENTS.md and Docs/ before changing anything here.",
   "type": "module",
   "packageManager": "pnpm@11.21.0",
+  "main": "electron/dist/main/index.cjs",
   "engines": {
     "node": ">=24.19.0 <25.0.0"
   },
@@ -22,10 +23,22 @@
     "cargo:test": "node tools/scripts/cargo-verify-guard.mjs test --workspace",
     "cargo:fmt:check": "node tools/scripts/cargo-verify-guard.mjs fmt --all -- --check",
     "cargo:clippy": "node tools/scripts/cargo-verify-guard.mjs clippy --workspace --all-targets -- -D warnings",
-    "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run cargo:fmt:check && pnpm run cargo:build && pnpm run cargo:test"
+    "electron:build:renderer": "pnpm --filter lokiai-desktop-ui run build",
+    "electron:build:app": "tsc -p electron/tsconfig.json",
+    "electron:build": "pnpm run electron:build:renderer && pnpm run electron:build:app",
+    "electron:typecheck": "tsc -p electron/tsconfig.json --noEmit",
+    "electron:test": "pnpm run electron:build:app && node --test electron/dist/**/*.test.cjs",
+    "electron:dev": "node electron/scripts/dev.mjs",
+    "electron:package": "pnpm run electron:build && electron-forge package",
+    "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run electron:typecheck && pnpm run electron:test && pnpm run cargo:fmt:check && pnpm run cargo:build && pnpm run cargo:test"
   },
   "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron/fuses": "1.8.0",
     "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "electron": "43.4.0",
     "eslint": "10.8.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.4",

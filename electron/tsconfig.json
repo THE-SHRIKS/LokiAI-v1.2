@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // "module"/"moduleResolution": "Node16" (rather than the repo-base
+    // "bundler") is deliberate: electron/main and electron/preload are run
+    // directly by Node/Electron, never bundled, so resolution here must match
+    // real runtime `require()` semantics, not a bundler's. Every source file
+    // uses the ".cts" extension so it *always* compiles to CommonJS
+    // ("index.cjs" etc.) no matter what the repository root package.json's
+    // `"type": "module"` says — Electron main/preload load reliably as CJS
+    // across Electron versions (this sidesteps ESM-preload-script edge
+    // cases entirely; see TECH_STACK.md's "build explicitly" instruction).
+    // One consequence of Node16 resolution + ".cts" sources: relative
+    // imports must spell the *compiled* extension, e.g.
+    // `from './security.cjs'` even though the source file on disk is
+    // `security.cts` — this is TypeScript's documented behaviour for
+    // .cts/.mts, not a mistake.
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["main/**/*.cts", "preload/**/*.cts"]
+}

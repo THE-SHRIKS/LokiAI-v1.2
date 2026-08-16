@@ -60,7 +60,34 @@ export default tseslint.config(
     },
   },
   {
-    files: ['*.config.{js,ts}', 'eslint.config.js', 'tools/scripts/**/*.{js,mjs,cjs}'],
+    // DSK-001: `electron/main` and `electron/preload` run under Node/Electron,
+    // never a browser, and are compiled by their own `electron/tsconfig.json`
+    // (not the renderer's) — same typed-linting mechanism as the renderer
+    // block above (`projectService` auto-discovers the nearest tsconfig for
+    // each file), just a different subtree and global set.
+    files: ['electron/main/**/*.cts', 'electron/preload/**/*.cts'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: globals.node,
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
+    files: [
+      '*.config.{js,ts}',
+      'eslint.config.js',
+      'tools/scripts/**/*.{js,mjs,cjs}',
+      'electron/scripts/**/*.mjs',
+    ],
     ...tseslint.configs.disableTypeChecked,
     languageOptions: {
       ...tseslint.configs.disableTypeChecked.languageOptions,

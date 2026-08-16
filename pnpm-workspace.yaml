@@ -16,3 +16,18 @@ packages:
 # unless specifically reviewed and allowlisted. Leave empty until a dependency
 # is reviewed and proven to need its build script.
 onlyBuiltDependencies: []
+
+# DSK-001: @electron-forge/cli -> @electron-forge/core -> @electron/rebuild pins
+# its own transitive "@electron/node-gyp" dependency to a raw git commit
+# (github:electron/node-gyp#<sha>) instead of a registry release. pnpm's default
+# blockExoticSubdeps supply-chain guard correctly refuses to install that. Rather
+# than disabling the guard (which would weaken it for every future dependency,
+# not just this one), this override forces resolution to the same package's
+# official npm-registry-published build, keeping the guard intact. Electron
+# Forge's rebuild step is inert for this project (no native Node addons are
+# built or shipped by electron/main or electron/preload), so the exact
+# node-gyp build used has no runtime effect here. Removal: delete this override
+# if @electron/rebuild starts depending on a registry-published node-gyp release
+# directly, or if Forge/rebuild is dropped as a dependency.
+overrides:
+  '@electron/node-gyp': 'npm:@electron/node-gyp@10.2.0-electron.2'
