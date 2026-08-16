@@ -26,15 +26,30 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
-    files: ['LokiAI Desktop UI/**/*.{ts,tsx}'],
+    // Every TypeScript file in the workspace (any package, not just the UI)
+    // gets type-aware linting. `projectService: true` auto-discovers the
+    // nearest tsconfig.json per file, so this one block covers
+    // `LokiAI Desktop UI/**`, `packages/*/**`, and any future TS package
+    // without needing a per-package entry here.
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,
-      globals: globals.browser,
+      globals: { ...globals.browser, ...globals.node },
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
+    // React-specific plugin rules stay scoped to the UI package only.
+    files: ['LokiAI Desktop UI/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
@@ -42,10 +57,6 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-      ],
     },
   },
   {

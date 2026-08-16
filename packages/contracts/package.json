@@ -1,0 +1,29 @@
+{
+  "name": "@lokiai/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LokiAI Main v1.2 shared cross-language contracts: versioned IDs, envelopes, errors, state enums, and MCP/connector schema shapes with runtime validation. Single TypeScript-side source of truth per Docs/ARCHITECTURE.md Section 5; a Rust codegen/crate consumer is a CTR-001 fast-follow once RUN-001's Cargo crate exists.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "engines": {
+    "node": ">=24.19.0 <25.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
