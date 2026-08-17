@@ -1,8 +1,8 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0 accepted 2026-08-15; FND-001 accepted — repo initialized, baseline committed and pushed to `origin/LokiAI-v1.2`. Program divided into Part One (W0–W6) and Part Two (W7–W10); orchestrating Part One continuously per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001 — full cross-package `pnpm run verify` (4 TS/JS packages + 4 Rust crates together) passes. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
-Updated: **2026-08-15**
+Updated: **2026-08-17**
 
 ## 1. Baseline
 
@@ -214,8 +214,8 @@ which half of the program (Section 1a) a wave belongs to.
 | ID       | Type           | Outcome                                                                                                                         | Depends on                 | Exit evidence                                                    | Status   |
 | -------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------- | -------- |
 | DSK-001  | IMPLEMENTATION | Existing UI runs in a packaged secure Electron shell with single-instance and truthful app lifecycle                            | FND-002                    | Electron config/security tests and packaged smoke run            | accepted (packaged smoke run real and verified; `pnpm run electron:package` itself not yet reproducible — app proven via `npx` path instead, see handoff §7a) |
-| DSK-002  | CONTRACT       | Minimal typed preload API and event subscription bridge with validation/sender checks                                           | CTR-001, DSK-001           | IPC contract tests; forbidden generic access tests               | proposed |
-| DAT-001  | IMPLEMENTATION | Runtime-owned SQLite schema, migrations, repositories, outbox/inbox, integrity/backup primitives                                | FND-002, CTR-001           | migration/restart/corruption/transaction tests                   | proposed |
+| DSK-002  | CONTRACT       | Minimal typed preload API and event subscription bridge with validation/sender checks                                           | CTR-001, DSK-001           | IPC contract tests; forbidden generic access tests               | accepted |
+| DAT-001  | IMPLEMENTATION | Runtime-owned SQLite schema, migrations, repositories, outbox/inbox, integrity/backup primitives                                | FND-002, CTR-001           | migration/restart/corruption/transaction tests                   | accepted |
 | DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and attribution/support decision | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked  |
 | AUTH-001 | IMPLEMENTATION | External-browser PKCE sign-in, session refresh, credential-store integration, and real logout                                   | DSK-002, DAT-001, OQ-002   | AS-001/AS-002 including replay/expiry/cleanup tests              | blocked  |
 | ONB-001  | IMPLEMENTATION | Durable account/workspace/agent/device-or-project onboarding state machine                                                      | AUTH-001, ENR-001, MCP-002 | resume/back/failure/enrolled-device and project branch scenarios | proposed |
@@ -225,9 +225,9 @@ which half of the program (Section 1a) a wave belongs to.
 | ID      | Type           | Outcome                                                                                                                  | Depends on                 | Exit evidence                                                       | Status   |
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------- | -------- |
 | RUN-001 | IMPLEMENTATION | Rust runtime executable with health, structured diagnostics, graceful shutdown, and module boundaries                    | FND-002                    | startup/shutdown/crash/error tests                                  | accepted |
-| RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | proposed |
+| RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | accepted |
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | proposed |
-| CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | proposed |
+| CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
 | CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | proposed |
 | CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | blocked  |
 | ENR-001 | IMPLEMENTATION | Challenge-bound device enrollment, ownership, replay protection, revoke/move policy, and consequential-capability gating | CON-002, AUTH-001, CLD-001 | AS-011 including wrong-workspace/runtime and replay tests           | proposed |
@@ -236,7 +236,7 @@ which half of the program (Section 1a) a wave belongs to.
 
 | ID      | Type           | Outcome                                                                                                                                                                                                                                        | Depends on                | Exit evidence                                                                                               | Status   |
 | ------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------- | -------- |
-| MCP-001 | IMPLEMENTATION | Provider-neutral stdio MCP server with `2026-07-28` per-request metadata/optional discovery plus one bounded previous-version edge adapter required by the certified clients; schemas, errors, diagnostics, and no transport-session authority | FND-002, CTR-001          | current/previous MCP protocol, transport/discovery/initialize-edge, malformed/version/client-metadata tests | proposed |
+| MCP-001 | IMPLEMENTATION | Provider-neutral stdio MCP server with `2026-07-28` per-request metadata/optional discovery plus one bounded previous-version edge adapter required by the certified clients; schemas, errors, diagnostics, and no transport-session authority | FND-002, CTR-001          | current/previous MCP protocol, transport/discovery/initialize-edge, malformed/version/client-metadata tests | accepted |
 | MCP-002 | IMPLEMENTATION | Scoped device/workspace/incident read and diagnostic resources/tools                                                                                                                                                                           | MCP-001, RUN-002, CON-002 | AS-005; auth/scope/pagination/size tests                                                                    | proposed |
 | AGT-001 | IMPLEMENTATION | Revocable agent connections plus run/parent-child/tool/change event registry                                                                                                                                                                   | MCP-002, AUTH-001         | Codex/Claude configuration contract and run lifecycle tests                                                 | proposed |
 | AGT-002 | IMPLEMENTATION | Provider-neutral incident work intents, provider adapter delivery/acknowledgement, run linking, expiry, and user-action fallback                                                                                                               | AGT-001, INC-001, NOT-001 | AS-015 with supported-client acknowledgement and unavailable-client fallback                                | proposed |
@@ -485,4 +485,50 @@ unblocked_nodes: DSK-001, RUN-001, MCP-001 (all depend on FND-002 and CTR-001
 new_or_changed_risks: two AccountMenuModal/product-behavior and metadata.json-
   deletion findings recorded in the handoff Section 7/8 for reviewer attention;
   neither blocks acceptance.
+```
+
+```text
+node_id: CON-001, DSK-002, RUN-002, DAT-001, MCP-001 (batch record — five nodes,
+  same wave, same integration pass)
+from: proposed
+to: accepted
+timestamp: 2026-08-17 (session continued after an interruption; individual
+  command timestamps are in each node's own handoff)
+actor: orchestrator (Claude Code). Each node's implementation was started by a
+  background loki-implementer subagent; all five were interrupted before
+  finishing (one API session-limit failure mid-work for MCP-001, four API
+  session-limit failures right at/near their own final verification for the
+  other four — CTR-001/DSK-001/RUN-001 from the prior wave hit the same
+  session limit but were resumed successfully before it recurred). The
+  orchestrator inspected each worktree directly rather than trust any
+  self-report, ran real verification, found and fixed real bugs in three of
+  the five (RUN-002: 6 distinct bugs including a hanging test traced to a
+  split-pipe half never being dropped; MCP-001: a broken config placeholder
+  plus 10 real lint/type findings; CON-001 and DAT-001 needed no fixes,
+  DSK-002 needed none), wrote each handoff, and committed each on its own
+  branch.
+starting_revision: 4f57452 (five task packets, dispatched from there)
+result_revision: 8ab36dc (LokiAI-v1.2, after all five merged + two Cargo.lock
+  regenerations + one stray-artifact cleanup)
+evidence: Docs/graph/handoffs/{CON-001,DSK-002,RUN-002,DAT-001,MCP-001}-1.md;
+  full `pnpm run verify` exit 0 on the final integrated state — 4 TS/JS
+  workspace packages (LokiAI Desktop UI, @lokiai/contracts, @lokiai/mcp-server,
+  root) and 4 Rust crates (loki-runtime, loki-connectors-sdk, loki-ipc,
+  loki-storage) all build/format/lint/typecheck/test together, including a
+  fresh `cargo build/fmt/clippy/test --workspace` run across all four crates
+  after each merge, not just the final one.
+reason: each node's packet acceptance criteria pass with real, independently
+  re-verified evidence — not accepted on the implementer's self-report alone,
+  consistent with `Docs/graph/PLANNER.md`'s "never reports pass based on
+  worker narrative alone."
+unblocked_nodes: RUN-003 (RUN-002+DAT-001), CON-002 (CON-001+RUN-002),
+  MCP-002 (MCP-001+RUN-002+CON-002), MON-001 (CON-001+DAT-001), JOB-001
+  (DAT-001+RUN-002), BLD-001 (JOB-001+CON-001+RUN-002, once JOB-001 lands) are
+  now dependency-ready or closer to it.
+new_or_changed_risks: CTR-001's zod-vs-JSON-Schema `TECH_STACK.md` deviation
+  (flagged in its own handoff) remains open for human decision, not resolved
+  by this record. DSK-001's pnpm-vs-npx Electron Forge packaging gap (its own
+  handoff, section 7a) likewise remains open. Both are pre-existing findings
+  from the prior wave, restated here only because later nodes build on top of
+  the same packages/crates and a reviewer should not lose track of them.
 ```
