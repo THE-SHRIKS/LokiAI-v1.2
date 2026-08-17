@@ -39,6 +39,10 @@ silently editing a worker's contract.
 | CON-001 | [`CON-001.md`](CON-001.md) | accepted, integrated | Handoff: [`../handoffs/CON-001-1.md`](../handoffs/CON-001-1.md). 52/52 tests (44 unit + 8 conformance). |
 | MCP-001 | [`MCP-001.md`](MCP-001.md) | accepted, integrated | Handoff: [`../handoffs/MCP-001-1.md`](../handoffs/MCP-001-1.md). Broken `pnpm-workspace.yaml` placeholder + 10 lint findings fixed; 36/36 tests. |
 | RUN-002 | [`RUN-002.md`](RUN-002.md) | accepted, integrated | Handoff: [`../handoffs/RUN-002-1.md`](../handoffs/RUN-002-1.md). 6 real bugs found and fixed (incl. a hanging test from a split-pipe half never dropped); 69/69 tests. |
+| RUN-003 | [`RUN-003.md`](RUN-003.md) | dispatched (worktree `RUN-003`) | `crates/loki-runtime/**` additions |
+| CON-002 | [`CON-002.md`](CON-002.md) | dispatched (worktree `CON-002`) | new `crates/loki-connector-registry/**` |
+| MON-001 | [`MON-001.md`](MON-001.md) | dispatched (worktree `MON-001`) | new `crates/loki-monitoring/**` |
+| JOB-001 | [`JOB-001.md`](JOB-001.md) | dispatched (worktree `JOB-001`) | new `crates/loki-jobs/**` |
 | Remaining Part One (W0–W6) nodes | created just-in-time as each becomes dependency-ready | dispatching continuously | Human authorized continuous Part One orchestration 2026-08-15 (see `../TASK_GRAPH.md` section 1a and `../PLANNER.md` section 12). Not paused between nodes; only genuinely blocked branches (`OQ-001`–`OQ-007`, missing credential/device/approval) wait for a human decision. |
 | `P1-INT-001` (Part One completion gate) | not created | dependency pending | Depends on all seven W6 terminal nodes (`ART-001`, `OPS-001`, `MCP-003`, `DEP-001`, `CLD-002`, `NOT-001`, `AGT-002`) being accepted first; see `../TASK_GRAPH.md` section 4 "Part One completion gate" |
 | Part Two (`UI-001` and W7–W10 descendants) | not created | dependency + human-approval pending | Blocked on `P1-INT-001` acceptance **and** a separate human go-ahead per `../TASK_GRAPH.md` section 1a; do not create Part Two packets before both exist |
