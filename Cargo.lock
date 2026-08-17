@@ -199,6 +199,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-jobs"
+version = "1.2.0"
+dependencies = [
+ "loki-storage",
+ "tracing",
+]
+
+[[package]]
 name = "loki-runtime"
 version = "1.2.0"
 dependencies = [
