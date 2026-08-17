@@ -9,6 +9,9 @@
   "engines": {
     "node": ">=24.19.0 <25.0.0"
   },
+  "dependencies": {
+    "@lokiai/contracts": "workspace:*"
+  },
   "scripts": {
     "build": "pnpm -r --if-present run build",
     "dev": "pnpm -r --if-present run dev",

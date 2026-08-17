@@ -11,8 +11,9 @@
  * root `package.json`'s `"type": "module"` — see that tsconfig's header
  * comment for why).
  */
-import { BrowserWindow, app, session } from 'electron';
+import { BrowserWindow, app, ipcMain, session } from 'electron';
 import path from 'node:path';
+import { registerLokiIpcHandlers, type LokiIpcHandlers } from './ipc.cjs';
 import { createLogger } from './log.cjs';
 import { buildMissingRendererHtml, resolveRendererTarget } from './rendererTarget.cjs';
 import {
@@ -29,6 +30,15 @@ import {
 const logger = createLogger();
 
 let mainWindow: BrowserWindow | null = null;
+
+/**
+ * DSK-002 — registered once in `main()`, before the first window is created
+ * (`ipcMain.handle`/`ipcMain.on` are process-global; registering twice
+ * throws). `getTrustedWebContents` below always re-reads the module-level
+ * `mainWindow` at call time, so sender validation stays correct across the
+ * `activate` handler's window re-creation.
+ */
+let ipcHandlers: LokiIpcHandlers | null = null;
 
 function focusMainWindow(): void {
   if (!mainWindow) {
@@ -116,10 +126,16 @@ async function createMainWindow(): Promise<BrowserWindow> {
     logger.info('window-shown');
   });
 
+  // Captured before `closed` fires (not read from `win` inside the handler):
+  // by the time `closed` fires the window/webContents are already being torn
+  // down, so this avoids depending on `win.webContents.id` still being safely
+  // readable at that point.
+  const closingWebContentsId = win.webContents.id;
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null;
     }
+    ipcHandlers?.forgetSubscriber(closingWebContentsId);
   });
 
   switch (target.kind) {
@@ -152,6 +168,11 @@ async function main(): Promise<void> {
   });
 
   applySessionHardening();
+  ipcHandlers = registerLokiIpcHandlers({
+    ipcMain,
+    getTrustedWebContents: () => mainWindow?.webContents ?? null,
+    logger,
+  });
   await createMainWindow();
 
   app.on('activate', () => {
