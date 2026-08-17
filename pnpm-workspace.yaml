@@ -12,6 +12,9 @@ packages:
   - 'packages/*'
   - 'services/*'
 
+allowBuilds:
+  esbuild: true
+
 # TECH_STACK.md section 5, rule 3: preinstall/postinstall scripts are denied
 # unless specifically reviewed and allowlisted.
 #
