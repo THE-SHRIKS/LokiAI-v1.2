@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    // The MCP SDK's published .d.mts references Buffer/process; TypeScript
+    // >=6.0 no longer auto-includes @types/* (see the SDK's own README).
+    "types": ["node"]
+  },
+  "include": ["src", "tests", "scripts", "vitest.config.ts"]
+}
