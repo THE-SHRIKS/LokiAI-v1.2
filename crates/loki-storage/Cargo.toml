@@ -1,0 +1,69 @@
+# LokiAI Main v1.2 — loki-storage (DAT-001).
+#
+# Runtime-owned SQLite schema, versioned migrations, a repository pattern
+# over device registry / job records / outbox-inbox, and integrity/backup
+# primitives. See Docs/graph/tasks/DAT-001.md for exact scope. Plaintext
+# SQLite only — full-database encryption is DAT-002 (blocked on OQ-007);
+# src/cipher.rs is the explicit, swappable seam that node extends.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state) rather than added for
+# convenience. Docs/TECH_STACK.md §5.1 requires exact versions in production
+# manifests, so direct dependencies are pinned with `=`; Cargo.lock is
+# committed on top of that for full reproducibility — matching
+# crates/loki-runtime/Cargo.toml's convention.
+[package]
+name = "loki-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 runtime-owned SQLite storage: schema, versioned migrations, repository pattern, outbox/inbox, and integrity/backup primitives (DAT-001)."
+
+[dependencies]
+# SQLite driver — Docs/TECH_STACK.md's "Local data" row: "SQLCipher
+# 4.16.x-compatible SQLite, runtime-owned." rusqlite is the de facto
+# standard, actively maintained Rust SQLite binding (rusqlite-rs project,
+# MIT license, regular releases). `bundled` statically compiles a specific,
+# pinned SQLite version from source rather than depending on whatever (if
+# any) sqlite3 happens to be present on a user's Windows machine — required
+# for a reproducible production desktop build (Docs/TECH_STACK.md §5.1:
+# "exact versions ... lockfiles are committed and immutable"). Confirmed to
+# build in this environment (MSVC Build Tools + the bundled SQLite amalgam
+# compile cleanly — see Docs/graph/handoffs/DAT-001-1.md for the actual
+# `cargo build` transcript). `bundled-sqlcipher`/`sqlcipher` are confirmed
+# real feature names on this exact pinned version
+# (`cargo add rusqlite --dry-run --no-default-features --features
+# bundled-sqlcipher` / `--features sqlcipher` both resolve real features,
+# not typos) — that is DAT-002's expected swap path; see src/cipher.rs.
+# `default-features = false` drops upstream's default `ffi-sqlite-wasm-rs`
+# (a WASM SQLite backend irrelevant to this native desktop crate) and
+# `cache`/`hashlink` (an optional statement-cache this node's bounded
+# repository pattern does not use); only `bundled` (static SQLite) and
+# `backup` (the Online Backup API `Storage::backup_to` uses for its
+# documented consistency guarantee) are enabled.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "backup"] }
+
+# Structured diagnostics for migration/integrity/backup lifecycle events —
+# Docs/TECH_STACK.md's "Async/diagnostics" row names `tracing` directly, and
+# it is already the pinned choice in crates/loki-runtime/Cargo.toml (same
+# exact version here so the workspace lockfile resolves one copy, not two
+# versions of the same crate for no reason). License: MIT, tokio-rs project.
+# This crate only emits events (`tracing::info!`/`warn!`); it never
+# initializes a subscriber — that stays the binary's responsibility
+# (crates/loki-runtime/src/logging.rs), matching tracing's own
+# library/binary split.
+tracing = "=0.1.44"
+
+[dev-dependencies]
+# Creates auto-cleaned-up temporary files/directories for this crate's
+# filesystem-backed tests (restart/corruption/backup/integrity all need a
+# real file, not `:memory:`, to exercise "close and reopen" and "copy a
+# file" behavior). License: MIT OR Apache-2.0; long-established Rust
+# ecosystem crate (used by cargo itself). Justification beyond convenience:
+# its `Drop`-based cleanup is panic-safe (a failing `assert!` mid-test still
+# removes the temp dir/file), which a hand-rolled temp-path helper would
+# have to reimplement correctly to match — effectively rebuilding this
+# crate. Dev-only: never compiled into the shipped library.
+tempfile = "=3.27.0"
