@@ -1,0 +1,82 @@
+# LokiAI Main v1.2 — loki-connector-registry (CON-002).
+#
+# Connector registry plus discovery/identity/support/capability/health
+# orchestration: register/deregister connector instances, run a discovery
+# (identify) cycle against them, run periodic health checks and aggregate
+# their status, and project each registered connector's declared
+# support-tier/capability/risk metadata from its manifest. Per
+# Docs/CONNECTOR_SPEC.md and this node's own scope, this crate is
+# registry/orchestration logic only: it consumes crates/loki-connectors-sdk's
+# `Connector` trait and lifecycle runner, it does not implement a concrete
+# device connector (ESP32-S3 is CON-003, blocked on OQ-001) and it performs
+# no physical device I/O of its own — every device-facing call happens
+# through an already-registered `Connector` implementation. See
+# Docs/graph/tasks/CON-002.md for exact scope/forbidden-scope.
+#
+# Library-only crate (no binary): the future runtime process (RUN-003+)
+# embeds this registry directly; this crate never runs standalone.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state, removal cost) rather than
+# added for convenience. Docs/TECH_STACK.md §5.1 requires exact versions in
+# production manifests, so direct dependencies are pinned with `=`, matching
+# crates/loki-runtime's and crates/loki-ipc's own convention. Cargo.lock is
+# committed on top of that for full reproducibility.
+[package]
+name = "loki-connector-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 connector registry: register/deregister, discovery/identity cycle, health orchestration, and support-tier/capability projection."
+
+[dependencies]
+# The device-neutral connector trait, manifest/capability/health/operation
+# shapes, and the canonical preflight->execute->verify lifecycle runner this
+# node orchestrates (CON-001, this node's direct dependency per the task
+# packet). Path dependency: both crates are members of this one workspace,
+# not independently published.
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
+
+# Drives every `Connector` method this crate calls (all async: health_check,
+# preflight, execute, verify, recover — see loki-connectors-sdk/src/connector.rs)
+# and provides this crate's own interior-mutability/concurrency primitives:
+#   - sync: `tokio::sync::{RwLock, Mutex}` guarding the registry's connector
+#     map and each connector's mutable trait-object handle, so
+#     register/deregister/list/discover/health-check can all run
+#     concurrently without corrupting registry state (this node's explicit
+#     concurrency acceptance criterion).
+#   - rt-multi-thread: matches crates/loki-runtime's and crates/loki-ipc's own
+#     choice; needed for `#[tokio::test(flavor = "multi_thread")]` to prove
+#     concurrent access is actually exercised across real OS threads, not
+#     just interleaved on one.
+#   - macros: `#[tokio::test]`.
+#   - time: `tokio::time::interval`/`sleep`, this crate's periodic
+#     health-check scheduler (Deliverable 3, "periodic health-check
+#     invocation").
+# Already a direct dependency of crates/loki-runtime and crates/loki-ipc;
+# reusing the same pinned version rather than adding a second async runtime
+# (AGENTS.md rule 11).
+tokio = { version = "=1.53.1", features = ["sync", "rt-multi-thread", "macros", "time"] }
+
+# Names `loki_connectors_sdk::manifest::ConnectorManifest::version`'s exact
+# type (`semver::Version`) in this crate's own public projection structs
+# (`RegisteredConnectorSummary::version`) — the two crates must depend on the
+# *same* semver version for those types to be the same Rust type, so this is
+# pinned identically to loki-connectors-sdk/Cargo.toml's own `semver = "=1.0.28"`
+# rather than left to resolve independently. License: MIT OR Apache-2.0.
+# Maintainer: dtolnay. Default features only (no "serde": this crate has no
+# serialization surface of its own either).
+semver = "=1.0.28"
+
+[dev-dependencies]
+# This crate's own tests (`tests/support/mod.rs`'s connector test double,
+# mirroring the pattern crates/loki-connectors-sdk/tests/support/mod.rs
+# already established for its own `MockConnector`) implement
+# `loki_connectors_sdk::Connector`, whose methods are `#[async_trait]` — an
+# `impl Connector for ...` requires the same macro on both sides (see
+# connector.rs's module doc). Same crate/version/reasoning as
+# loki-connectors-sdk's own direct dependency: MIT OR Apache-2.0, dtolnay,
+# proc-macro only, no runtime footprint.
+async-trait = "=0.1.92"
