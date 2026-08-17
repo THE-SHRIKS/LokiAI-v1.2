@@ -1,0 +1,71 @@
+# LokiAI Main v1.2 — loki-connectors-sdk (CON-001).
+#
+# The device-neutral connector trait and supporting contracts: manifest
+# shape, capability declaration, health-check interface, operation lifecycle
+# (preflight/execute/verify), and recovery hooks, per Docs/CONNECTOR_SPEC.md.
+# This is the SDK/trait definition only — no concrete device connector, no
+# discovery/registry logic, no physical device I/O. See
+# Docs/graph/tasks/CON-001.md for exact scope/forbidden-scope.
+#
+# Library-only crate (no binary): every downstream connector (CON-002+,
+# CON-003 ESP32-S3) depends on this as a library and implements its trait;
+# this crate never runs on its own.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state) rather than added for
+# convenience. Docs/TECH_STACK.md §5.1 requires exact versions in production
+# manifests (the same convention crates/loki-runtime/Cargo.toml documents and
+# follows), so direct dependencies are pinned with `=`; Cargo.lock is
+# committed on top of that for full reproducibility.
+[package]
+name = "loki-connectors-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 device-neutral connector SDK (trait, manifest, capability, health, operation lifecycle, and recovery contracts)."
+
+[dependencies]
+# Makes the `Connector` trait's async methods usable through `dyn Connector`
+# (`Box<dyn Connector>` / `Arc<dyn Connector>`). Native `async fn` in traits
+# does not produce a dyn-compatible trait on stable Rust on its own; a future
+# connector registry (CON-002+) and Docs/CONNECTOR_SPEC.md §12's
+# "third-party/custom connectors" (not known at compile time) need dynamic
+# dispatch over heterogeneous connector implementations, and getting this
+# trait's shape wrong now is exactly what this node's stop condition warns
+# against ("do not guess a design later connectors would have to rework") —
+# see src/connector.rs's module doc for the full reasoning. License: MIT OR
+# Apache-2.0. Maintainer: dtolnay (also the semver crate below); proc-macro
+# only, no runtime dependency footprint, the de facto standard solution to
+# this exact problem across the Rust ecosystem (tonic, tower, and many
+# others depend on it).
+async-trait = "=0.1.92"
+
+# Represents and validates `Docs/CONNECTOR_SPEC.md` §3's "connector ID and
+# *semantic version*" and "runtime protocol range" as real parsed/comparable
+# types (`manifest::ConnectorManifest::version: semver::Version`,
+# `::runtime_protocol_range: semver::VersionReq`) instead of unvalidated
+# strings — directly satisfies AGENTS.md rule 4 ("Types alone are not
+# runtime validation") for exactly the two manifest fields the spec calls
+# "semantic version"/"range". Hand-rolling correct SemVer 2.0.0 parsing
+# (prerelease/build-metadata precedence included) would be meaningfully
+# error-prone versus using the canonical crate Cargo itself uses. License:
+# MIT OR Apache-2.0. Maintainer: dtolnay; default features only ("std"; the
+# "serde" feature is not enabled since this crate has no serialization
+# surface — see manifest.rs's module doc).
+semver = "=1.0.28"
+
+[dev-dependencies]
+# Drives this crate's own `#[tokio::test]` async tests (the `Connector`
+# trait's methods are async). Reuses the async runtime
+# Docs/TECH_STACK.md/crates/loki-runtime already chose for the whole project
+# rather than adding a second, redundant async test executor
+# (e.g. `futures`/`async-std`) merely for convenience (AGENTS.md rule 11).
+# Not a production dependency of this crate: no trait method requires a
+# specific executor to be usable (an `async-trait`-boxed future can be
+# awaited by any executor), so `tokio` is scoped to dev-dependencies only.
+# License: MIT. Maintainer: the tokio-rs project. Features:
+#   - rt: the minimal single-threaded executor `#[tokio::test]` needs.
+#   - macros: the `#[tokio::test]` attribute itself.
+tokio = { version = "=1.53.1", features = ["rt", "macros"] }
