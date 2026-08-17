@@ -5,7 +5,7 @@
 # each stays a single-writer addition to this list, not a rewrite of it.
 [workspace]
 resolver = "2"
-members = ["crates/loki-runtime"]
+members = ["crates/loki-runtime", "crates/loki-ipc"]
 
 [workspace.package]
 version = "1.2.0"

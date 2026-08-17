@@ -1,0 +1,418 @@
+//! Wire message types for the loki-ipc protocol.
+//!
+//! Every message is a variant of [`WireMessage`], framed by [`crate::frame`]
+//! as `[u32 LE length][JSON payload]`. The handshake sequence is:
+//!
+//! ```text
+//! server --Challenge-->  client
+//! client --Hello------>  server
+//! server --HelloAck/HelloReject--> client
+//! ```
+//!
+//! After a successful handshake, the client may send [`WireMessage::Call`]
+//! (expects one [`WireMessage::CallResult`]) or [`WireMessage::CallStream`]
+//! (expects zero or more [`WireMessage::StreamItem`] followed by exactly one
+//! [`WireMessage::StreamEnd`]), and [`WireMessage::CancelCall`] to ask the
+//! server to stop an in-flight call early.
+//!
+//! [`Method`]/[`StreamMethod`] are deliberately the entire RPC surface this
+//! node ships: a named, typed `Ping`/`EchoStream` pair proving the pipe
+//! works end-to-end (`Docs/graph/tasks/RUN-002.md` §5's ownership boundary:
+//! "no actual business RPC methods yet"). A later node adds real business
+//! methods as new variants here — never as a generic
+//! `Invoke(name: String, params: serde_json::Value)` escape hatch, which
+//! would violate the acceptance criterion "No generic invoke/arbitrary-
+//! command surface — every RPC method is a named, typed operation."
+
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Semantic protocol version. The server rejects a client whose `major`
+/// differs (`Docs/ARCHITECTURE.md` §13: "Incompatible clients receive a
+/// precise upgrade-required state, not generic disconnection"); `minor`
+/// differences are informational only in this node (no minor-gated
+/// behavior exists yet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ProtocolVersion {
+    pub major: u16,
+    pub minor: u16,
+}
+
+impl ProtocolVersion {
+    pub const fn new(major: u16, minor: u16) -> Self {
+        Self { major, minor }
+    }
+
+    /// Whether a peer declaring `other` may interoperate with this version.
+    /// Same-major is the compatibility rule for this node; capability
+    /// negotiation (below) covers finer-grained feature gating.
+    pub fn is_compatible_with(&self, other: &ProtocolVersion) -> bool {
+        self.major == other.major
+    }
+}
+
+impl std::fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+/// The protocol version this build of loki-ipc speaks.
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+
+/// A capability every client must declare for the handshake to succeed.
+/// Real per-capability gating (e.g. "this client may subscribe to
+/// telemetry streams") is a later node's concern; this node ships one
+/// baseline marker so capability negotiation has real, testable teeth
+/// (a client that omits it is rejected) rather than being purely
+/// decorative.
+pub const CORE_CAPABILITY: &str = "loki-ipc.core.v1";
+
+/// The capability set this build of loki-ipc declares by default.
+pub fn baseline_capabilities() -> BTreeSet<String> {
+    BTreeSet::from([CORE_CAPABILITY.to_string()])
+}
+
+/// Opaque per-call/per-connection correlation identifier
+/// (AGENTS.md rule 5: "Use stable IDs ... and correlation IDs for
+/// operations that may be retried").
+pub type CorrelationId = Uuid;
+
+// ---------------------------------------------------------------------
+// RPC method surface (the entire business-method vocabulary this node
+// ships — see this module's top doc comment).
+// ---------------------------------------------------------------------
+
+/// Unary (single-response) RPC methods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", content = "params")]
+pub enum Method {
+    /// Proves the round trip works: server echoes `payload` back plus its
+    /// own clock reading.
+    Ping(PingParams),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingParams {
+    pub payload: String,
+}
+
+/// Streaming (server-to-client, multi-response) RPC methods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", content = "params")]
+pub enum StreamMethod {
+    /// Proves server-to-client streaming works: the server sends `count`
+    /// numbered items, each carrying `payload`, then a summary.
+    EchoStream(EchoStreamParams),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EchoStreamParams {
+    pub payload: String,
+    pub count: u32,
+}
+
+/// The largest `count` `EchoStream` accepts. This is transport-layer input
+/// validation (AGENTS.md rule 4: "Validate all data at every trust
+/// boundary"), not a product limit — a hostile or buggy client cannot make
+/// the server enqueue unbounded work for one call.
+pub const MAX_ECHO_STREAM_COUNT: u32 = 10_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PongResult {
+    pub payload: String,
+    pub server_unix_millis: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EchoStreamItem {
+    pub seq: u32,
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EchoStreamSummary {
+    pub items_sent: u32,
+}
+
+/// The successful result of a unary [`Method`] call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", content = "result")]
+pub enum MethodResult {
+    Ping(PongResult),
+}
+
+/// One streamed item for a [`StreamMethod`] call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", content = "item")]
+pub enum StreamItemPayload {
+    EchoStream(EchoStreamItem),
+}
+
+/// The successful terminal summary of a [`StreamMethod`] call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", content = "summary")]
+pub enum StreamSummary {
+    EchoStream(EchoStreamSummary),
+}
+
+/// A named, typed RPC failure. Every rejection reason is explicit — never a
+/// bare string alone standing in for a machine-distinguishable case
+/// (AGENTS.md rule 6: "Make every state transition explicit").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RpcError {
+    /// The call's deadline elapsed before it completed. The server-side
+    /// work was cancelled, not merely abandoned by the client — see
+    /// `tests/deadline.rs`.
+    DeadlineExceeded,
+    /// The client explicitly cancelled the call via [`WireMessage::CancelCall`].
+    Cancelled,
+    /// The request parameters failed validation (e.g. `EchoStream.count`
+    /// exceeding [`MAX_ECHO_STREAM_COUNT`]).
+    InvalidRequest { message: String },
+    /// An unexpected server-side failure (e.g. the handler task panicked).
+    /// Never includes raw internal detail beyond a short, redacted summary.
+    Internal { message: String },
+}
+
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RpcError::DeadlineExceeded => write!(f, "deadline exceeded"),
+            RpcError::Cancelled => write!(f, "cancelled"),
+            RpcError::InvalidRequest { message } => write!(f, "invalid request: {message}"),
+            RpcError::Internal { message } => write!(f, "internal error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RpcError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum CallOutcome {
+    Ok { result: MethodResult },
+    Err { error: RpcError },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum StreamOutcome {
+    Ok { summary: StreamSummary },
+    Err { error: RpcError },
+}
+
+/// Why the server rejected a [`WireMessage::Hello`]. Every reason is a named
+/// variant with the context needed for a precise client-facing message —
+/// never a generic "handshake failed" (`Docs/ARCHITECTURE.md` §13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum HandshakeRejectReason {
+    VersionMismatch {
+        server_version: ProtocolVersion,
+        client_version: ProtocolVersion,
+    },
+    MissingCapability {
+        required: String,
+    },
+    /// The declared token did not match the server's shared secret, or the
+    /// echoed nonce did not match the nonce issued for *this* connection
+    /// (see [`StaleNonce`](HandshakeRejectReason::StaleNonce) for the
+    /// latter's dedicated, more specific variant — kept distinct so a
+    /// replay attempt is diagnosable separately from a plain wrong secret).
+    AuthenticationFailed,
+    /// The `Hello`'s echoed nonce does not match the nonce this connection's
+    /// `Challenge` carried — the classic signature of a captured `Hello`
+    /// from an earlier connection being replayed against a new one.
+    StaleNonce,
+    MalformedHello {
+        message: String,
+    },
+}
+
+impl std::fmt::Display for HandshakeRejectReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HandshakeRejectReason::VersionMismatch {
+                server_version,
+                client_version,
+            } => write!(
+                f,
+                "protocol version mismatch: server={server_version} client={client_version}"
+            ),
+            HandshakeRejectReason::MissingCapability { required } => {
+                write!(f, "missing required capability: {required}")
+            }
+            HandshakeRejectReason::AuthenticationFailed => write!(f, "authentication failed"),
+            HandshakeRejectReason::StaleNonce => {
+                write!(f, "stale or replayed handshake nonce")
+            }
+            HandshakeRejectReason::MalformedHello { message } => {
+                write!(f, "malformed hello: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HandshakeRejectReason {}
+
+/// A message on the wire, in either direction. See this module's top doc
+/// comment for the message sequence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum WireMessage {
+    /// Server -> client, always the first frame on a new connection.
+    Challenge {
+        server_protocol_version: ProtocolVersion,
+        server_capabilities: BTreeSet<String>,
+        server_run_id: Uuid,
+        nonce: Uuid,
+    },
+    /// Client -> server, always the second frame (the response to
+    /// `Challenge`). `nonce` must echo the `Challenge`'s `nonce` exactly.
+    Hello {
+        client_protocol_version: ProtocolVersion,
+        client_capabilities: BTreeSet<String>,
+        client_type: String,
+        client_version: String,
+        nonce: Uuid,
+        token: String,
+    },
+    /// Server -> client: handshake accepted.
+    HelloAck {
+        negotiated_capabilities: BTreeSet<String>,
+        session_id: Uuid,
+    },
+    /// Server -> client: handshake rejected. The connection is closed
+    /// immediately after this frame.
+    HelloReject {
+        reason: HandshakeRejectReason,
+        server_protocol_version: ProtocolVersion,
+    },
+    /// Client -> server: invoke a unary method. `deadline_unix_millis` is an
+    /// absolute deadline (see [`crate::time`]); the server cancels the call
+    /// if it has not completed by then.
+    Call {
+        correlation_id: CorrelationId,
+        deadline_unix_millis: u64,
+        method: Method,
+    },
+    /// Server -> client: the terminal (and only) response to a `Call`.
+    CallResult {
+        correlation_id: CorrelationId,
+        outcome: CallOutcome,
+    },
+    /// Client -> server: invoke a streaming method.
+    CallStream {
+        correlation_id: CorrelationId,
+        deadline_unix_millis: u64,
+        method: StreamMethod,
+    },
+    /// Server -> client: one item of a streaming call's response.
+    StreamItem {
+        correlation_id: CorrelationId,
+        seq: u32,
+        item: StreamItemPayload,
+    },
+    /// Server -> client: the terminal frame of a streaming call. Exactly
+    /// one is sent per `CallStream`, always (success, error, deadline, or
+    /// cancellation all produce this — the client never has to infer stream
+    /// end from a dropped connection alone).
+    StreamEnd {
+        correlation_id: CorrelationId,
+        outcome: StreamOutcome,
+    },
+    /// Client -> server: ask the server to stop an in-flight `Call`/
+    /// `CallStream` early. Best-effort: if the call already finished, this
+    /// is a silent no-op.
+    CancelCall { correlation_id: CorrelationId },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_version_same_major_is_compatible_regardless_of_minor() {
+        let v1_0 = ProtocolVersion::new(1, 0);
+        let v1_5 = ProtocolVersion::new(1, 5);
+        assert!(v1_0.is_compatible_with(&v1_5));
+        assert!(v1_5.is_compatible_with(&v1_0));
+    }
+
+    #[test]
+    fn protocol_version_different_major_is_incompatible() {
+        let v1 = ProtocolVersion::new(1, 0);
+        let v2 = ProtocolVersion::new(2, 0);
+        assert!(!v1.is_compatible_with(&v2));
+    }
+
+    #[test]
+    fn protocol_version_display_is_dotted() {
+        assert_eq!(ProtocolVersion::new(1, 2).to_string(), "1.2");
+    }
+
+    #[test]
+    fn wire_message_round_trips_through_json() {
+        let msg = WireMessage::Call {
+            correlation_id: Uuid::nil(),
+            deadline_unix_millis: 42,
+            method: Method::Ping(PingParams {
+                payload: "hi".to_string(),
+            }),
+        };
+        let encoded = serde_json::to_string(&msg).expect("serialize");
+        let decoded: WireMessage = serde_json::from_str(&encoded).expect("deserialize");
+        match decoded {
+            WireMessage::Call {
+                correlation_id,
+                deadline_unix_millis,
+                method: Method::Ping(params),
+            } => {
+                assert_eq!(correlation_id, Uuid::nil());
+                assert_eq!(deadline_unix_millis, 42);
+                assert_eq!(params.payload, "hi");
+            }
+            other => panic!("unexpected round trip: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn baseline_capabilities_contains_the_core_marker() {
+        assert!(baseline_capabilities().contains(CORE_CAPABILITY));
+    }
+
+    #[test]
+    fn rpc_error_display_is_operator_readable() {
+        assert_eq!(RpcError::DeadlineExceeded.to_string(), "deadline exceeded");
+        assert_eq!(RpcError::Cancelled.to_string(), "cancelled");
+        assert!(
+            RpcError::InvalidRequest {
+                message: "count too large".to_string()
+            }
+            .to_string()
+            .contains("count too large")
+        );
+    }
+
+    #[test]
+    fn handshake_reject_reason_display_names_the_case() {
+        let reason = HandshakeRejectReason::VersionMismatch {
+            server_version: ProtocolVersion::new(2, 0),
+            client_version: ProtocolVersion::new(1, 0),
+        };
+        let rendered = reason.to_string();
+        assert!(rendered.contains("2.0"));
+        assert!(rendered.contains("1.0"));
+    }
+
+    #[test]
+    fn unknown_wire_message_type_is_a_clear_deserialize_error_not_a_panic() {
+        let bogus = r#"{"type":"NotARealMessage"}"#;
+        let result: Result<WireMessage, _> = serde_json::from_str(bogus);
+        assert!(result.is_err());
+    }
+}

@@ -1,0 +1,146 @@
+# LokiAI Main v1.2 — loki-ipc (RUN-002).
+#
+# Authenticated local named-pipe RPC transport: version/capability handshake,
+# per-call deadlines/cancellation, and server-to-client streaming with
+# backpressure. Pure transport + framing — no business logic, no RBAC/policy
+# (that is APR-001). This is the transport RUN-003, DSK-002, JOB-001, and
+# other later nodes build on. See Docs/graph/tasks/RUN-002.md for exact
+# scope/forbidden-scope.
+#
+# Windows-only by design (see src/lib.rs's `compile_error!` on non-Windows):
+# Docs/TECH_STACK.md §2 scopes v1.2 to Windows 11 x64, and this crate's only
+# purpose is the Windows named-pipe transport Docs/ARCHITECTURE.md §5
+# describes. A Unix-domain-socket transport is explicit future scope
+# ("later macOS/Linux") in that same section, not this node's job.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state, removal cost) rather than
+# added for convenience. Docs/TECH_STACK.md §5.1 requires exact versions in
+# production manifests, so direct dependencies are pinned with `=`, matching
+# crates/loki-runtime's own convention. Cargo.lock is committed on top for
+# full reproducibility.
+[package]
+name = "loki-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 authenticated local IPC transport (named-pipe RPC, handshake, deadlines, streaming)."
+
+[dependencies]
+# Async runtime and the Windows named-pipe transport itself.
+# Docs/TECH_STACK.md's "Async/diagnostics" row names Tokio explicitly, and
+# crates/loki-runtime already depends on it — reusing the same crate/version
+# rather than adding a second async-IPC dependency (the task packet
+# explicitly calls this out: "avoiding a second async-IPC dependency
+# duplicating what RUN-001 already pulled in"). License: MIT, tokio-rs
+# project, de facto standard async runtime, active release.
+#
+# Features actually used by this crate:
+#   - net: `tokio::net::windows::named_pipe` (ServerOptions/ClientOptions/
+#     NamedPipeServer/NamedPipeClient) — the transport itself. This is the
+#     one feature RUN-001 did not already enable, and the entire reason this
+#     is a separate crate rather than a module bolted onto loki-runtime (per
+#     the task packet's framing) still holds: loki-runtime has no IPC
+#     surface (RUN-001 scope excluded it) so nothing is duplicated by
+#     turning this feature on here.
+#   - io-util: `AsyncReadExt`/`AsyncWriteExt` (`read_exact`, `write_all`) for
+#     the length-prefixed frame codec (src/frame.rs).
+#   - time: `tokio::time::{sleep, timeout, Instant}` for per-call deadlines
+#     (src/server.rs, src/client.rs).
+#   - sync: `tokio::sync::{mpsc, oneshot}` for the per-connection outgoing
+#     write queue (backpressure/serialization) and explicit call
+#     cancellation signalling.
+#   - macros: `tokio::select!` (deadline/cancel races) and `#[tokio::test]`
+#     in this crate's own tests.
+#   - rt-multi-thread: matches crates/loki-runtime's own choice; needed by
+#     `#[tokio::test]`/`#[tokio::main]`-style harnesses and lets a server's
+#     accept loop and per-connection tasks make independent progress.
+tokio = { version = "=1.53.1", features = ["net", "io-util", "time", "sync", "macros", "rt-multi-thread"] }
+
+# Structured diagnostics — named directly in Docs/TECH_STACK.md's
+# "Async/diagnostics" row, already used by crates/loki-runtime. This crate
+# only emits `tracing::*` events (connection accept/reject/error); it never
+# installs a subscriber itself (that stays the composition root's job, per
+# crates/loki-runtime/src/logging.rs's convention — a library emits events,
+# only a binary decides how they're rendered). License: MIT, tokio-rs
+# project.
+tracing = "=0.1.44"
+
+# Wire message (de)serialization for the handshake/framing envelope
+# (src/protocol.rs, src/frame.rs). `Docs/ARCHITECTURE.md` §5 names a
+# generated-contract direction for the desktop/runtime wire format
+# (`packages/contracts`), but `CTR-001` shipped zod/TypeScript schemas only
+# and explicitly deferred Rust codegen/consumption to a fast-follow (see its
+# handoff, `Docs/graph/handoffs/CTR-001-1.md` §7) — there is nothing to
+# import from yet, and this node's own scope is "pure transport + handshake
+# + framing" (no business-method payloads to keep in lockstep with a
+# contracts package). `serde`+`serde_json` is therefore this node's own
+# concrete wire format for the transport envelope itself (handshake/call/
+# stream frames), chosen over a hand-rolled binary format for the same
+# reason CTR-001 chose schema-based validation: readable on the wire for
+# diagnostics, and `serde_json` is already resolved in this workspace (a
+# dev-dependency of crates/loki-runtime via tracing-subscriber's "json"
+# feature), so this does not add a new crate to the dependency *graph*, only
+# promotes an already-fetched one to a direct, production dependency here.
+# License: MIT OR Apache-2.0, serde-rs project (the de facto standard Rust
+# serialization framework).
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+# Correlation IDs (per-call `correlation_id`), per-connection `session_id`,
+# and the handshake replay-protection nonce (AGENTS.md rule 5: "Use stable
+# IDs ... and correlation IDs"). Already a direct dependency of
+# crates/loki-runtime (its per-run `run_id`); reusing rather than adding a
+# second ID/random-generation crate. Only the "v4" feature (random UUIDs) is
+# enabled. License: Apache-2.0 OR MIT, uuid-rs project.
+uuid = { version = "=1.24.1", features = ["v4", "serde"] }
+
+# Windows-only: connection-level authentication's OS-ACL half
+# (src/acl.rs) — restricting the named pipe's DACL to the current Windows
+# user's SID, per Docs/SECURITY.md §4's "Local client impersonation" threat
+# row ("OS ACL, per-installation secret, client handshake, protocol
+# negotiation, rate/size limits" — all required controls) and the task
+# packet's Deliverable 2 ("connection-level authentication restricting to
+# the current Windows user session"). Tokio's named-pipe API accepts a raw
+# `SECURITY_ATTRIBUTES` pointer (`ServerOptions::
+# create_with_security_attributes_raw`) but does not itself provide a way to
+# build one — its own docs point callers at `windows-sys` directly
+# (https://docs.rs/windows-sys/latest/windows_sys/Win32/Security/struct.SECURITY_ATTRIBUTES.html).
+# `windows-sys` is not a new crate to the dependency graph either: it is
+# already resolved transitively (tokio's own Windows support depends on it),
+# already compiled for this workspace, and is the official Microsoft-
+# maintained raw Win32 binding crate (thin, generated, no logic of its own
+# to audit beyond signature correctness) — the natural choice over a
+# higher-level wrapper (e.g. the `windows` crate) for a handful of one-shot
+# FFI calls (SID lookup, SDDL-to-security-descriptor conversion), and over
+# hand-writing `extern "system"` declarations ourselves, which would only
+# reproduce what this crate already generates correctly. License: MIT OR
+# Apache-2.0, microsoft/windows-rs project.
+#
+# Feature modules used (only what src/acl.rs calls):
+#   - Win32_Foundation: HANDLE/BOOL/CloseHandle/LocalFree — already enabled
+#     transitively by tokio's own "net" feature, listed here anyway so this
+#     crate's manifest is correct/self-contained even if tokio's feature set
+#     ever changes.
+#   - Win32_Security: SECURITY_ATTRIBUTES, TOKEN_USER, GetTokenInformation —
+#     also already enabled transitively by tokio's "net" feature.
+#   - Win32_Security_Authorization: ConvertStringSecurityDescriptorToSecurityDescriptorW,
+#     ConvertSidToStringSidW — NOT enabled by anything tokio pulls in; this
+#     is the one module this crate adds to the build that nothing else
+#     already provided.
+#   - Win32_System_Threading: GetCurrentProcess, OpenProcessToken — also not
+#     enabled by tokio's "net"/"time"/"sync"/"io-util"/"macros" features
+#     (only tokio's "process"/"signal" features would pull it in, and this
+#     crate uses neither).
+# Gated to `cfg(windows)` only, matching tokio's own manifest convention, so
+# nothing here is even fetched/built on a non-Windows host — this crate's
+# top-level `compile_error!` (src/lib.rs) fires immediately instead.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
