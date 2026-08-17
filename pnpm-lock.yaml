@@ -10,6 +10,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@lokiai/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
     devDependencies:
       '@electron-forge/cli':
         specifier: 7.11.2

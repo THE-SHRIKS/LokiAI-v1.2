@@ -65,24 +65,56 @@ void test('the real Electron package has no remote module installed', () => {
 
 /**
  * Strips `/* ... *\/` and `// ...` comments so this check looks at real code,
- * not the doc comments that (deliberately) *describe* what is withheld —
- * e.g. preload/index.cts's own header explains it exposes no `ipcRenderer`,
- * which would otherwise false-positive a naive substring search.
+ * not doc comments that merely *describe* behavior in prose (which could
+ * otherwise false-positive or false-negative a naive substring search).
  */
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
 
-void test('main/preload source does not reference the remote module or ipcRenderer', () => {
+void test('main source does not reference the remote module or ipcRenderer', () => {
+  // `electron/main/index.cts` is main-process code: it must never import
+  // `ipcRenderer` (a renderer/preload-side API — main uses `ipcMain`) or the
+  // remote module, in DSK-001 or afterward.
   const repoRoot = process.cwd();
-  const filesToScan = [
-    path.join(repoRoot, 'electron', 'main', 'index.cts'),
-    path.join(repoRoot, 'electron', 'preload', 'index.cts'),
-  ];
+  const filePath = path.join(repoRoot, 'electron', 'main', 'index.cts');
+  const code = stripComments(fs.readFileSync(filePath, 'utf8'));
+  assert.ok(!code.includes('@electron/remote'), `${filePath} must not import the remote module`);
+  assert.ok(!code.includes('ipcRenderer'), `${filePath} must not touch ipcRenderer directly`);
+});
+
+/**
+ * DSK-001's placeholder preload touched no IPC at all, so this test
+ * originally asserted preload source never references `ipcRenderer` either.
+ * DSK-002 (`Docs/graph/tasks/DSK-002.md` Section 1: "Replace DSK-001's
+ * minimal placeholder preload with a real, narrow, typed `contextBridge`
+ * API") deliberately, correctly supersedes that: `electron/preload/bridge.
+ * cts` now uses `ipcRenderer.invoke`/`on`/`removeListener`/`send` to
+ * implement the named methods this repository's actual, unchanged
+ * requirement allows (`AGENTS.md` locked-architecture rule: "no generic
+ * `invoke`, raw command, or arbitrary path bridge" — a narrower, more
+ * precise rule than "no `ipcRenderer` reference at all", which was never the
+ * literal requirement, just this test's original DSK-001-scoped proxy for
+ * it; DSK-001's own comment on this test anticipated exactly this revision —
+ * "preload/index.cts's own header explains it exposes no `ipcRenderer`,
+ * which would otherwise false-positive a naive substring search"). This
+ * test now checks what actually matters (no remote module; every preload
+ * source file's `contextBridge.exposeInMainWorld` calls stay outside this
+ * scan's remit — `electron/preload/bridge.test.cts` structurally proves the
+ * exposed surface is exactly the named allowlist, which is a stronger proof
+ * than a source-text grep could ever be).
+ */
+void test('preload source does not reference the remote module', () => {
+  const repoRoot = process.cwd();
+  const preloadDir = path.join(repoRoot, 'electron', 'preload');
+  const filesToScan = fs
+    .readdirSync(preloadDir)
+    .filter((name) => name.endsWith('.cts'))
+    .map((name) => path.join(preloadDir, name));
+  assert.ok(filesToScan.length > 0, 'expected at least one electron/preload/*.cts file to scan');
   for (const filePath of filesToScan) {
     const code = stripComments(fs.readFileSync(filePath, 'utf8'));
     assert.ok(!code.includes('@electron/remote'), `${filePath} must not import the remote module`);
-    assert.ok(!code.includes('ipcRenderer'), `${filePath} must not touch ipcRenderer directly`);
   }
 });
 
