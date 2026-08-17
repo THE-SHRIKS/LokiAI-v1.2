@@ -13,9 +13,20 @@ packages:
   - 'services/*'
 
 # TECH_STACK.md section 5, rule 3: preinstall/postinstall scripts are denied
-# unless specifically reviewed and allowlisted. Leave empty until a dependency
-# is reviewed and proven to need its build script.
-onlyBuiltDependencies: []
+# unless specifically reviewed and allowlisted.
+#
+# MCP-001: `esbuild` is a genuine direct dependency of
+# services/mcp-server/scripts/build.ts (bundles the standalone MCP server,
+# inlining @lokiai/contracts, so it ships as a self-contained launcher per
+# TECH_STACK.md rather than depending on Electron's embedded Node). Its
+# postinstall script downloads the correct platform-specific native binary
+# from esbuild's own published release — the standard, well-known mechanism
+# every esbuild consumer relies on, not arbitrary/attacker-controlled code.
+# Reviewed and allowlisted here, same precedent as DSK-001's node-gyp entry
+# below. Removal: delete this entry if the MCP server drops esbuild (e.g. a
+# future node switches bundlers).
+onlyBuiltDependencies:
+  - esbuild
 
 # DSK-001: @electron-forge/cli -> @electron-forge/core -> @electron/rebuild pins
 # its own transitive "@electron/node-gyp" dependency to a raw git commit
