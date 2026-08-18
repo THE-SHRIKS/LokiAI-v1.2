@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001 — full cross-package `pnpm run verify` (4 TS/JS packages + 4 Rust crates together) passes. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002 — full cross-package `pnpm run verify` (4 TS/JS packages + 6 Rust crates together) passes. RUN-003 and MON-001 in progress (resumed with fresh workers after session-limit interruptions). Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -228,7 +228,7 @@ which half of the program (Section 1a) a wave belongs to.
 | RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | accepted |
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | proposed |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
-| CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | proposed |
+| CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | accepted |
 | CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | blocked  |
 | ENR-001 | IMPLEMENTATION | Challenge-bound device enrollment, ownership, replay protection, revoke/move policy, and consequential-capability gating | CON-002, AUTH-001, CLD-001 | AS-011 including wrong-workspace/runtime and replay tests           | proposed |
 
@@ -250,7 +250,7 @@ which half of the program (Section 1a) a wave belongs to.
 
 | ID      | Type           | Outcome                                                                                                                                                                                                    | Depends on                                  | Exit evidence                                                                                  | Status   |
 | ------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------- |
-| JOB-001 | IMPLEMENTATION | Durable job stages, idempotency, per-device lease, cancel/restart/reconcile/quarantine                                                                                                                     | DAT-001, RUN-002                            | crash/race/retry/unknown-outcome tests                                                         | proposed |
+| JOB-001 | IMPLEMENTATION | Durable job stages, idempotency, per-device lease, cancel/restart/reconcile/quarantine                                                                                                                     | DAT-001, RUN-002                            | crash/race/retry/unknown-outcome tests                                                         | accepted |
 | APR-001 | IMPLEMENTATION | RBAC/policy decision and immutable, expiring, single-use approvals                                                                                                                                         | JOB-001, AUTH-001                           | AS-007 plus authorization/race/binding tests                                                   | proposed |
 | BLD-001 | IMPLEMENTATION | Separate AppContainer/Job Object build executor, typed recipes, immutable snapshots, resource limits, no-network/secret/device authority, quarantine, and teardown                                         | JOB-001, CON-001, RUN-002                   | AS-012/AS-013 containment, escape, exhaustion, crash, and process-tree tests                   | proposed |
 | ART-001 | IMPLEMENTATION | Content-addressed firmware/model/config/bundle registry, external output validation, target/resource compatibility, member ordering/atomicity, build provenance, signature status, and immutable retrieval | BLD-001, DAT-002                            | substitution/mislabel/type/bundle/resource/size/format/provenance and cache-invalidation tests | proposed |
@@ -531,4 +531,53 @@ new_or_changed_risks: CTR-001's zod-vs-JSON-Schema `TECH_STACK.md` deviation
   handoff, section 7a) likewise remains open. Both are pre-existing findings
   from the prior wave, restated here only because later nodes build on top of
   the same packages/crates and a reviewer should not lose track of them.
+```
+
+```text
+node_id: JOB-001, CON-002 (batch record — two nodes, sequential integration,
+  same session)
+from: proposed
+to: accepted
+timestamp: 2026-08-18 (session continued after an interruption)
+actor: orchestrator (Claude Code). Both nodes' implementations were completed
+  by background loki-implementer subagents that self-reported COMPLETE. Per
+  standing discipline, the orchestrator did not trust either self-report:
+  independently re-ran `cargo build/fmt/clippy/test --workspace` in each
+  worktree from a clean shell, read each full handoff, and spot-checked the
+  specific code each handoff flagged as its highest-risk design decision
+  (JOB-001's `lease.rs` mutex-guarded atomicity and `engine.rs::reconcile`;
+  CON-002's substitution of its own `TestConnector` for CON-001's
+  crate-private `MockConnector`) against the actual source, not just the
+  narrative. No bugs found in either; both accepted as submitted.
+starting_revision: b3d5caf (both dispatched from there)
+result_revision: 530ef0f (LokiAI-v1.2, after both merged — one Cargo.toml
+  members-array conflict between them, resolved by combining both entries and
+  regenerating Cargo.lock via a real `cargo build`, never hand-edited)
+evidence: Docs/graph/handoffs/{JOB-001,CON-002}-1.md; JOB-001 contributes
+  44 tests (25 unit + 19 integration, incl. a real 8-thread lease-race test
+  and a crash-mid-job quarantine test that inserts a pre-crash row directly
+  via loki-storage); CON-002 contributes 35 tests (26 unit + 9 integration,
+  incl. a 50-connector/8-thread concurrency test re-run 5x with no flakiness);
+  full `pnpm run verify` exit 0 on the final integrated state — 4 TS/JS
+  workspace packages and now 6 Rust crates (loki-runtime, loki-connectors-sdk,
+  loki-ipc, loki-storage, loki-jobs, loki-connector-registry) all build/
+  format/lint/typecheck/test together; pushed to `origin/LokiAI-v1.2`.
+reason: each node's packet acceptance criteria pass with real, independently
+  re-verified evidence — not accepted on the implementer's self-report alone.
+unblocked_nodes: MCP-002 (MCP-001+RUN-002+CON-002, now fully dependency-ready)
+  and BLD-001 (JOB-001+CON-001+RUN-002, now fully dependency-ready) move from
+  "closer to ready" to dependency-ready. RUN-003 and MON-001 remain in
+  progress (resumed after their own session-limit interruptions with a fresh
+  worker each, since the interrupted sessions were unreachable).
+new_or_changed_risks: JOB-001's device lease is in-memory/per-process, not a
+  durable SQLite-backed table (flagged in its own handoff §7 as a deliberate,
+  in-scope reading of its writable boundary, not a workaround) —
+  `JobEngine::reconcile()` is the tested compensating control; a future
+  consumer node (RUN-002's real process / MCP-003 / OPS-001) must call it
+  once at startup before accepting work, and that call site is explicitly
+  out of JOB-001's own scope. CON-002 proposes a non-blocking follow-up to
+  expose CON-001's `MockConnector` behind a `test-util` feature so future
+  connector-consuming crates share one mock instead of each maintaining its
+  own equivalent test double. Neither blocks acceptance; both carried forward
+  for reviewer awareness.
 ```
