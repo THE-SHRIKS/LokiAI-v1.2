@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002 — full cross-package `pnpm run verify` (4 TS/JS packages + 6 Rust crates together) passes. RUN-003 and MON-001 in progress (resumed with fresh workers after session-limit interruptions). Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003, MCP-002, BLD-001 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -216,7 +216,7 @@ which half of the program (Section 1a) a wave belongs to.
 | DSK-001  | IMPLEMENTATION | Existing UI runs in a packaged secure Electron shell with single-instance and truthful app lifecycle                            | FND-002                    | Electron config/security tests and packaged smoke run            | accepted (packaged smoke run real and verified; `pnpm run electron:package` itself not yet reproducible — app proven via `npx` path instead, see handoff §7a) |
 | DSK-002  | CONTRACT       | Minimal typed preload API and event subscription bridge with validation/sender checks                                           | CTR-001, DSK-001           | IPC contract tests; forbidden generic access tests               | accepted |
 | DAT-001  | IMPLEMENTATION | Runtime-owned SQLite schema, migrations, repositories, outbox/inbox, integrity/backup primitives                                | FND-002, CTR-001           | migration/restart/corruption/transaction tests                   | accepted |
-| DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and attribution/support decision | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked  |
+| DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and attribution/support decision. **Scope note (added by MON-001's flagged deviation):** as of `MON-001`, there are two plaintext SQLite database files (`loki-storage`'s and `loki-monitoring`'s own) — this node's scope must explicitly cover both or explicitly decide not to, not assume one. | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked  |
 | AUTH-001 | IMPLEMENTATION | External-browser PKCE sign-in, session refresh, credential-store integration, and real logout                                   | DSK-002, DAT-001, OQ-002   | AS-001/AS-002 including replay/expiry/cleanup tests              | blocked  |
 | ONB-001  | IMPLEMENTATION | Durable account/workspace/agent/device-or-project onboarding state machine                                                      | AUTH-001, ENR-001, MCP-002 | resume/back/failure/enrolled-device and project branch scenarios | proposed |
 
@@ -240,7 +240,7 @@ which half of the program (Section 1a) a wave belongs to.
 | MCP-002 | IMPLEMENTATION | Scoped device/workspace/incident read and diagnostic resources/tools                                                                                                                                                                           | MCP-001, RUN-002, CON-002 | AS-005; auth/scope/pagination/size tests                                                                    | proposed |
 | AGT-001 | IMPLEMENTATION | Revocable agent connections plus run/parent-child/tool/change event registry                                                                                                                                                                   | MCP-002, AUTH-001         | Codex/Claude configuration contract and run lifecycle tests                                                 | proposed |
 | AGT-002 | IMPLEMENTATION | Provider-neutral incident work intents, provider adapter delivery/acknowledgement, run linking, expiry, and user-action fallback                                                                                                               | AGT-001, INC-001, NOT-001 | AS-015 with supported-client acknowledgement and unavailable-client fallback                                | proposed |
-| MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | proposed |
+| MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
 | MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | proposed |
 | INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | proposed |
 | CLD-002 | IMPLEMENTATION | Durable cloud outbox/inbox sync, conflicts, runtime heartbeat/freshness, control-plane projections, reconnect and backpressure                                                                                                                 | CLD-001, RUN-003, DAT-002 | AS-014 and cloud contract/revocation/deduplication tests                                                    | proposed |
@@ -580,4 +580,58 @@ new_or_changed_risks: JOB-001's device lease is in-memory/per-process, not a
   connector-consuming crates share one mock instead of each maintaining its
   own equivalent test double. Neither blocks acceptance; both carried forward
   for reviewer awareness.
+```
+
+```text
+node_id: MON-001
+from: proposed
+to: accepted
+timestamp: 2026-08-18
+actor: orchestrator (Claude Code). Original worker session was interrupted by
+  an API session-limit error; the original worktree's uncommitted, in-progress
+  work was not discarded — a fresh worker session was pointed at the same
+  worktree, read every existing file, verified it against the packet rather
+  than trusting it, ran the required verification to completion, and
+  committed. The orchestrator then independently re-ran `cargo build/fmt/
+  clippy/test --workspace` from a clean shell and, because the handoff's
+  central technical claim was the single highest-stakes judgment call in it,
+  read `crates/loki-storage/src/{storage,migrations}.rs` directly to confirm
+  it before accepting (see new_or_changed_risks below) rather than trusting
+  the handoff's own re-verification of it.
+starting_revision: b3d5caf (dispatched from there)
+result_revision: bd8a711 (LokiAI-v1.2, after merge — one Cargo.toml
+  members-array conflict against CON-002/JOB-001's own prior additions,
+  resolved by combining all four entries and regenerating Cargo.lock via a
+  real `cargo build`)
+evidence: Docs/graph/handoffs/MON-001-1.md; 58 tests for `loki-monitoring`
+  (42 unit + 16 integration across `backpressure`/`buffer_overflow`/
+  `gap_detection`/`restart`); full `pnpm run verify` exit 0 on the final
+  integrated state — 4 TS/JS workspace packages and now 7 Rust crates
+  (loki-runtime, loki-connectors-sdk, loki-ipc, loki-storage, loki-jobs,
+  loki-connector-registry, loki-monitoring) all build/format/lint/typecheck/
+  test together; pushed to `origin/LokiAI-v1.2`.
+reason: packet acceptance criteria pass with real, independently re-verified
+  evidence, including a direct-source-read verification of the one flagged
+  architectural deviation rather than accepting its stated justification on
+  narrative alone.
+unblocked_nodes: MON-002 (needs MON-001, now dependency-ready).
+new_or_changed_risks: **flagged for human/ADR-level attention, not resolved
+  by this record.** MON-001's telemetry/log/gap data lives in a second,
+  self-contained SQLite database (`crates/loki-monitoring/migrations/
+  0001_telemetry.sql`, its own connection and migration runner) rather than
+  inside `loki-storage`'s shared database, because the task packet's literal
+  instruction ("new migration file in `crates/loki-storage/migrations/`")
+  and its own forbidden-scope boundary (no edits to `crates/loki-storage/
+  src/**`) are mutually exclusive as written: `loki-storage`'s `MIGRATIONS`
+  array is a `pub(crate)` compile-time-embedded constant in `src/
+  migrations.rs`, and its SQLite connection is reachable only via a
+  `pub(crate)` method — both confirmed by the orchestrator reading that
+  source directly, not assumed. This is functionally sound and fully tested
+  (restart-durability included), but it is a real architecture fork —
+  "one database per bounded context" vs. "one shared `loki-storage`-owned
+  database with a repository seam for other crates" — that nobody has
+  explicitly decided yet, and it changes `DAT-002`'s (encryption) scope: that
+  node must now cover two plaintext database files, not one, or explicitly
+  decide not to. Recommend either a short ADR or a small follow-up node
+  before `DAT-002` is dispatched.
 ```
