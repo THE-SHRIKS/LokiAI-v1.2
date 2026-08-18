@@ -119,7 +119,11 @@ describe('malformed / unsupported client-metadata requests', () => {
       result?: { supportedVersions?: string[]; capabilities?: unknown };
     };
     expect(goodResponse.result?.supportedVersions).toEqual(['2026-07-28']);
-    expect(goodResponse.result?.capabilities).toEqual({});
+    // `MCP-002` registers real tools (`src/tools/index.ts`), so the honest
+    // capability set is no longer empty — see `tests/capabilities.test.ts`
+    // for the dedicated capability-negotiation coverage this assertion used
+    // to own alone back when `MCP-001` shipped no tools/resources at all.
+    expect(goodResponse.result?.capabilities).toHaveProperty('tools');
 
     await server.handle.close();
   });
