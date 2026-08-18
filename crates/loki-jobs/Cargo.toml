@@ -1,0 +1,37 @@
+# LokiAI Main v1.2 — loki-jobs (JOB-001).
+#
+# Durable job/lease engine: staged job lifecycle (queued -> preflight ->
+# executing -> testing -> succeeded/failed, with an explicit `outcome-unknown`
+# quarantine state for a crash-mid-job/ambiguous-verify outcome), idempotent
+# submission, and a per-device lease (expiry/renewal/reclaim) that at most one
+# concurrent attempt can hold. Built directly on `DAT-001`'s
+# `loki_storage::jobs::JobRepository` (the `jobs` table's existing 15-state
+# `JobState` vocabulary) rather than a duplicate schema — see src/lib.rs for
+# why this crate adds no new SQLite table/migration. See
+# Docs/graph/tasks/JOB-001.md for exact scope/forbidden-scope.
+[package]
+name = "loki-jobs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 durable job/lease engine: staged lifecycle, idempotency, per-device lease, cancel/restart/reconcile/quarantine (JOB-001)."
+
+[dependencies]
+# The repository this engine sits on top of (`Storage`, `JobRepository`,
+# `JobState`, opaque ID newtypes). Path dependency within the same
+# workspace — same convention as every other crate that depends on a
+# sibling crate here (none yet do directly, but this mirrors how
+# crates/loki-runtime depends on tokio/tracing: workspace-pinned, no
+# version drift).
+loki-storage = { path = "../loki-storage" }
+
+# Structured diagnostics for lifecycle transitions, lease acquisition/
+# reclaim, and reconcile-time quarantine events (`AGENTS.md` rule 6: "make
+# every state transition explicit"). Already the pinned choice in
+# crates/loki-runtime/Cargo.toml, crates/loki-storage/Cargo.toml, and
+# crates/loki-ipc/Cargo.toml — same exact version here so the workspace
+# lockfile resolves one copy, not two. License: MIT, tokio-rs project. This
+# crate only emits events; it never installs a subscriber.
+tracing = "=0.1.44"
