@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003, MCP-002, BLD-001 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002, BLD-001, MON-002 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -226,7 +226,7 @@ which half of the program (Section 1a) a wave belongs to.
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------- | -------- |
 | RUN-001 | IMPLEMENTATION | Rust runtime executable with health, structured diagnostics, graceful shutdown, and module boundaries                    | FND-002                    | startup/shutdown/crash/error tests                                  | accepted |
 | RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | accepted |
-| RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | proposed |
+| RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | accepted |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
 | CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | accepted |
 | CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | blocked  |
@@ -634,4 +634,55 @@ new_or_changed_risks: **flagged for human/ADR-level attention, not resolved
   node must now cover two plaintext database files, not one, or explicitly
   decide not to. Recommend either a short ADR or a small follow-up node
   before `DAT-002` is dispatched.
+```
+
+```text
+node_id: RUN-003
+from: proposed
+to: accepted
+timestamp: 2026-08-18
+actor: orchestrator (Claude Code). Original worker session was interrupted by
+  an API session-limit error mid-implementation (files written, uncommitted,
+  no tests, not wired into the crate's module tree). Original session was
+  unreachable (no captured agent ID), so a fresh worker was pointed at the
+  same worktree; it read every existing file, found the implementation logic
+  itself complete with no placeholders, wired it into the crate, added real
+  test coverage, and fixed a pre-existing timing race in an unrelated
+  RUN-001 test exposed by the new synchronous host-startup step. The
+  orchestrator independently re-ran `cargo build/fmt/clippy/test --workspace`
+  from a clean shell, repeated the full `cargo test --workspace` three times
+  and the `loki-runtime` suite specifically an additional three times (this
+  node includes real-process-spawn and real-pipe-bind tests, the highest
+  flakiness risk of any node so far) — zero failures, zero flakiness — and
+  read `discovery.rs`'s actual `locate()`/`try_ping` logic directly to
+  confirm `HostStatus::Healthy` is genuinely gated on a real handshake+ping
+  round trip, not a file claim, before accepting.
+starting_revision: f0bb792 (worktree's actual start point; dispatched
+  alongside the b3d5caf batch)
+result_revision: 6a5eccb (LokiAI-v1.2, after merge — clean auto-merge, no
+  Cargo.toml conflict since this node only touched `loki-runtime`'s own
+  manifest, not the root workspace members array)
+evidence: Docs/graph/handoffs/RUN-003-1.md; `loki-runtime` grew from 21 to 53
+  unit tests plus 4 new `tests/host_lifecycle.rs` integration tests and one
+  new `tests/process_behavior.rs` real-binary end-to-end test; full
+  `pnpm run verify` exit 0 on the final integrated state — 4 TS/JS workspace
+  packages and 7 Rust crates all build/format/lint/typecheck/test together;
+  pushed to `origin/LokiAI-v1.2`.
+reason: packet acceptance criteria pass with real, independently
+  re-verified evidence, including direct source inspection of the one
+  property (`Healthy` never defaults) `AGENTS.md` rule 1 is strictest about.
+unblocked_nodes: none newly unblocked by this node alone (its consumers —
+  desktop discovery integration, `CLD-002`, packaging — are later/blocked
+  nodes); it does retire the "RUN-003 in progress" caveat on the wave status
+  line above.
+new_or_changed_risks: the interim IPC shared-secret token
+  (`src/host/token.rs`) is stored as a plain file under
+  `%LOCALAPPDATA%\LokiAI\runtime\ipc.token`, relying on default NTFS
+  per-user-profile ownership, not yet DPAPI-wrapped — explicitly recorded as
+  deferred to `DAT-002` (blocked on OQ-007) rather than an ad hoc fix here;
+  this is a restatement of an already-known gap category (plaintext-at-rest
+  pending DAT-002), not a new one. `--supervised` relies on default Windows
+  console-process-group signal propagation rather than explicit process-group
+  creation for the spawned child — documented as a recorded userland-scope
+  design choice, not a silent gap. Neither blocks acceptance.
 ```
