@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002 also accepted/integrated (85/85 tests; honestly reports `runtime_unavailable` for real device data, a documented gap not a shortcut). BLD-001, MON-002 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002, MON-002 also accepted/integrated. MCP-002 honestly reports `runtime_unavailable` for real device data (documented gap, not a shortcut). MON-002 adds versioned rule evaluation on top of MON-001; its `ScopeSelector` mechanically matches device IDs pending `AUTH-001`/`ENR-001`, resolving its own stop condition rather than evading it. BLD-001 in progress (safety-boundary node, requires independent security review before acceptance). Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -241,7 +241,7 @@ which half of the program (Section 1a) a wave belongs to.
 | AGT-001 | IMPLEMENTATION | Revocable agent connections plus run/parent-child/tool/change event registry                                                                                                                                                                   | MCP-002, AUTH-001         | Codex/Claude configuration contract and run lifecycle tests                                                 | proposed |
 | AGT-002 | IMPLEMENTATION | Provider-neutral incident work intents, provider adapter delivery/acknowledgement, run linking, expiry, and user-action fallback                                                                                                               | AGT-001, INC-001, NOT-001 | AS-015 with supported-client acknowledgement and unavailable-client fallback                                | proposed |
 | MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
-| MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | proposed |
+| MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | accepted |
 | INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | proposed |
 | CLD-002 | IMPLEMENTATION | Durable cloud outbox/inbox sync, conflicts, runtime heartbeat/freshness, control-plane projections, reconnect and backpressure                                                                                                                 | CLD-001, RUN-003, DAT-002 | AS-014 and cloud contract/revocation/deduplication tests                                                    | proposed |
 | NOT-001 | IMPLEMENTATION | Deduplicated action-center and Windows notification intents, preferences, delivery/read state, secure deep links, and offline alerts                                                                                                           | CLD-002, INC-001, DSK-001 | notification privacy/dedup/deep-link/runtime-offline tests                                                  | proposed |
@@ -719,4 +719,51 @@ new_or_changed_risks: `loki_list_devices`/`loki_get_device_health` cannot
   honest-gap pattern `DSK-002` established, not a new one; a future node
   wiring a real IPC-backed `DeviceDataSource` implementation is the
   documented follow-up. Not blocking.
+```
+
+```text
+node_id: MON-002
+from: proposed
+to: accepted
+timestamp: 2026-08-18
+actor: orchestrator (Claude Code). Worker session was interrupted mid-task by
+  an API session-limit error (mid-way through a full workspace test run
+  following a clean format pass) and resumed via SendMessage once the limit
+  reset; it also self-corrected a mistake mid-task (briefly wrote the
+  handoff into the main repo checkout instead of the MON-002 worktree,
+  caught it, moved it, confirmed the main checkout was left clean) which the
+  orchestrator independently re-verified with `git status --porcelain` on
+  the main checkout before trusting it. The orchestrator then independently
+  re-ran `cargo build/fmt/clippy/test --workspace` from a clean shell,
+  confirmed via `git diff --stat` that all six of MON-001's protected files
+  (`buffer.rs`/`freshness.rs`/`gap.rs`/`pipeline.rs`/`store.rs`/
+  `subscription.rs`) are byte-for-byte unmodified, and read the handoff's
+  central design decision (`ScopeSelector`'s mechanical device-ID matching)
+  in full before accepting it as a legitimate resolution of the packet's
+  stop condition rather than an evasion.
+starting_revision: 66296d4 (dispatched from there)
+result_revision: e6d1dcf (LokiAI-v1.2, after merge — clean, no conflicts,
+  since this node's only root-level touch was inside
+  `crates/loki-monitoring/**`)
+evidence: Docs/graph/handoffs/MON-002-1.md; `loki-monitoring` grew from 58 to
+  75 unit tests plus 5 new integration-test files (20 new black-box tests:
+  debounce/cooldown, deterministic evaluation, all three missing-data
+  behaviors, version attribution, restart); full `pnpm run verify` exit 0 on
+  the final integrated state; pushed to `origin/LokiAI-v1.2`.
+reason: packet acceptance criteria pass with real, independently
+  re-verified evidence, including direct confirmation that the main
+  checkout was not left in an inconsistent state by the worker's mid-task
+  self-correction.
+unblocked_nodes: none newly unblocked (this node's own consumer, `INC-001`,
+  still needs `MON-002` — now satisfied — but `INC-001`'s own packet has not
+  been written yet; dispatching it next).
+new_or_changed_risks: `RuleStore` opens a second plaintext SQLite connection
+  into the same physical database file `MON-001`'s `SqliteTelemetryStore`
+  already uses — extends, not introduces, the two-plaintext-database gap
+  already flagged in MON-001's own record above; `DAT-002`'s eventual scope
+  must account for this. The condition grammar (single-signal threshold
+  comparison only) and the debounce-gates-first-fire/cooldown-gates-every-
+  fire interaction rule are both this node's own necessary design decisions
+  where `Docs/SPEC.md` §3.6 is silent — flagged for reviewer awareness
+  before `INC-001` builds on them, not blocking this node's own acceptance.
 ```
