@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { LOKI_MCP_SERVER_CAPABILITIES } from '../src/capabilities.js';
+import { LOKI_LIST_DEVICES_TOOL_NAME } from '../src/tools/listDevices.js';
 import { startRawTestServer, withConnectedClient } from './helpers.js';
 
 /**
  * `Docs/graph/tasks/MCP-001.md` acceptance criterion: "No capability
  * advertised that isn't actually implemented" — honest capability
  * negotiation, not aspirational, on both protocol eras.
+ *
+ * `MCP-002` is the node `src/capabilities.ts`'s own module doc predicted
+ * would extend this constant "in the same change" it registers real
+ * handlers — these assertions are updated from MCP-001's original
+ * empty-capabilities expectations to match: `tools` is now real (two tools
+ * are registered, `src/tools/index.ts`), `resources`/`prompts` remain
+ * genuinely absent (this node ships tools only, per its own task packet
+ * Section 4's naming flexibility).
  */
 describe('honest capability negotiation', () => {
-  it('the static capability set this node ships is empty (no tools/resources yet)', () => {
-    expect(LOKI_MCP_SERVER_CAPABILITIES).toEqual({});
+  it('the static capability set this node ships declares tools (real tools are registered) and nothing else', () => {
+    expect(LOKI_MCP_SERVER_CAPABILITIES).toEqual({ tools: {} });
   });
 
-  it('the modern server/discover advertisement carries no tools/resources/prompts capability', async () => {
+  it('the modern server/discover advertisement carries a real tools capability and no resources/prompts capability', async () => {
     const server = await startRawTestServer();
     await server.sendRaw({
       jsonrpc: '2.0',
@@ -27,14 +36,13 @@ describe('honest capability negotiation', () => {
     });
     const [response] = await server.collector.waitForCount(1);
     const result = (response as { result?: { capabilities?: Record<string, unknown> } }).result;
-    expect(result?.capabilities).toEqual({});
-    expect(result?.capabilities).not.toHaveProperty('tools');
+    expect(result?.capabilities).toHaveProperty('tools');
     expect(result?.capabilities).not.toHaveProperty('resources');
     expect(result?.capabilities).not.toHaveProperty('prompts');
     await server.handle.close();
   });
 
-  it('the legacy initialize result carries no tools/resources/prompts capability', async () => {
+  it('the legacy initialize result carries a real tools capability and no resources/prompts capability', async () => {
     const server = await startRawTestServer();
     await server.sendRaw({
       jsonrpc: '2.0',
@@ -48,39 +56,35 @@ describe('honest capability negotiation', () => {
     });
     const [response] = await server.collector.waitForCount(1);
     const result = (response as { result?: { capabilities?: Record<string, unknown> } }).result;
-    expect(result?.capabilities).toEqual({});
+    expect(result?.capabilities).toHaveProperty('tools');
+    expect(result?.capabilities).not.toHaveProperty('resources');
+    expect(result?.capabilities).not.toHaveProperty('prompts');
     await server.handle.close();
   });
 
-  it('a live client sees no server capabilities after a real modern connect', async () => {
+  it('a live client sees a real tools capability after a real modern connect', async () => {
     await withConnectedClient(
       {},
       { versionNegotiation: { mode: { pin: '2026-07-28' } } },
-      // `withConnectedClient`'s callback type is `Promise<T>` — `async` is
-      // structurally required to satisfy it, not because this body awaits.
       // eslint-disable-next-line @typescript-eslint/require-await
       async ({ client }) => {
-        expect(client.getServerCapabilities()).toEqual({});
+        expect(client.getServerCapabilities()).toHaveProperty('tools');
       },
     );
   });
 
-  it('a live client sees no server capabilities after a real legacy connect', async () => {
+  it('a live client sees a real tools capability after a real legacy connect', async () => {
     await withConnectedClient(
       {},
       { versionNegotiation: { mode: 'legacy' } },
-      // eslint-disable-next-line @typescript-eslint/require-await -- see above
+      // eslint-disable-next-line @typescript-eslint/require-await
       async ({ client }) => {
-        expect(client.getServerCapabilities()).toEqual({});
+        expect(client.getServerCapabilities()).toHaveProperty('tools');
       },
     );
   });
 
-  it('calling tools/list is refused as an unsupported capability, not answered with a fabricated empty list', async () => {
-    // A server that declared `capabilities.tools` would answer `tools/list`
-    // with a (possibly empty) result. Because this node does not declare
-    // it, the spec-correct answer is a capability error — proving the
-    // empty capability set is enforced, not merely advertised.
+  it('tools/list is answered for real (not refused) and includes the registered device tools', async () => {
     const server = await startRawTestServer();
     await server.sendRaw({
       jsonrpc: '2.0',
@@ -94,8 +98,9 @@ describe('honest capability negotiation', () => {
       },
     });
     const [response] = await server.collector.waitForCount(1);
-    expect(response).toMatchObject({ jsonrpc: '2.0', id: 'list-1', error: {} });
-    expect(response).not.toHaveProperty('result');
+    const result = (response as { result?: { tools?: Array<{ name: string }> } }).result;
+    expect(result?.tools?.map((t) => t.name)).toContain(LOKI_LIST_DEVICES_TOOL_NAME);
+    expect(response).not.toHaveProperty('error');
     await server.handle.close();
   });
 });

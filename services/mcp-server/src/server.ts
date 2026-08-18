@@ -1,5 +1,6 @@
 import { McpServer, type McpServerFactory } from '@modelcontextprotocol/server';
 import { LOKI_MCP_SERVER_CAPABILITIES } from './capabilities.js';
+import { registerLokiTools } from './tools/index.js';
 
 /**
  * The MCP `Implementation` identity this server reports in every handshake
@@ -22,14 +23,21 @@ export const LOKI_MCP_SERVER_VERSION = '0.1.0';
  * `Docs/graph/handoffs/MCP-001-1.md` for why this node does not hand-roll
  * any of that, and for the verified behavior this relies on).
  *
- * This factory's only job is to declare identity and the currently-empty,
- * honest capability set (`capabilities.ts`). `MCP-002` registers real
- * tools/resources here; `AUTH-001`/`RUN-002` add authenticated runtime
- * access — neither exists yet, so neither belongs in this node.
+ * This factory declares identity and the honest capability set
+ * (`capabilities.ts`), then registers `MCP-002`'s real read-only device
+ * tools (`src/tools/index.ts`) — the empty-capabilities state
+ * `Docs/graph/handoffs/MCP-001-1.md` describes is this node's own starting
+ * point, not its final state; `capabilities.ts`'s own module doc predicted
+ * exactly this extension. `AUTH-001`/`RUN-002`-backed authenticated runtime
+ * access to real device data does not exist yet — see
+ * `src/devices/runtimeUnavailableDataSource.ts` for the honest default this
+ * factory wires in until it does.
  */
 export const lokiMcpServerFactory: McpServerFactory = () => {
-  return new McpServer(
+  const server = new McpServer(
     { name: LOKI_MCP_SERVER_NAME, version: LOKI_MCP_SERVER_VERSION },
     { capabilities: LOKI_MCP_SERVER_CAPABILITIES },
   );
+  registerLokiTools(server);
+  return server;
 };
