@@ -12,6 +12,7 @@ members = [
   "crates/loki-storage",
   "crates/loki-jobs",
   "crates/loki-connector-registry",
+  "crates/loki-monitoring",
 ]
 
 [workspace.package]
