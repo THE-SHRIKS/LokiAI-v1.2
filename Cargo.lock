@@ -178,6 +178,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loki-connector-registry"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "loki-connectors-sdk",
+ "semver",
+ "tokio",
+]
+
+[[package]]
 name = "loki-connectors-sdk"
 version = "1.2.0"
 dependencies = [
