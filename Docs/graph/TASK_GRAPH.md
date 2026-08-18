@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002, BLD-001, MON-002 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002 also accepted/integrated (85/85 tests; honestly reports `runtime_unavailable` for real device data, a documented gap not a shortcut). BLD-001, MON-002 in progress. Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -237,7 +237,7 @@ which half of the program (Section 1a) a wave belongs to.
 | ID      | Type           | Outcome                                                                                                                                                                                                                                        | Depends on                | Exit evidence                                                                                               | Status   |
 | ------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------- | -------- |
 | MCP-001 | IMPLEMENTATION | Provider-neutral stdio MCP server with `2026-07-28` per-request metadata/optional discovery plus one bounded previous-version edge adapter required by the certified clients; schemas, errors, diagnostics, and no transport-session authority | FND-002, CTR-001          | current/previous MCP protocol, transport/discovery/initialize-edge, malformed/version/client-metadata tests | accepted |
-| MCP-002 | IMPLEMENTATION | Scoped device/workspace/incident read and diagnostic resources/tools                                                                                                                                                                           | MCP-001, RUN-002, CON-002 | AS-005; auth/scope/pagination/size tests                                                                    | proposed |
+| MCP-002 | IMPLEMENTATION | Scoped device/workspace/incident read and diagnostic resources/tools                                                                                                                                                                           | MCP-001, RUN-002, CON-002 | AS-005; auth/scope/pagination/size tests                                                                    | accepted |
 | AGT-001 | IMPLEMENTATION | Revocable agent connections plus run/parent-child/tool/change event registry                                                                                                                                                                   | MCP-002, AUTH-001         | Codex/Claude configuration contract and run lifecycle tests                                                 | proposed |
 | AGT-002 | IMPLEMENTATION | Provider-neutral incident work intents, provider adapter delivery/acknowledgement, run linking, expiry, and user-action fallback                                                                                                               | AGT-001, INC-001, NOT-001 | AS-015 with supported-client acknowledgement and unavailable-client fallback                                | proposed |
 | MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
@@ -685,4 +685,38 @@ new_or_changed_risks: the interim IPC shared-secret token
   console-process-group signal propagation rather than explicit process-group
   creation for the spawned child — documented as a recorded userland-scope
   design choice, not a silent gap. Neither blocks acceptance.
+```
+
+```text
+node_id: MCP-002
+from: proposed
+to: accepted
+timestamp: 2026-08-18
+actor: orchestrator (Claude Code). Worker self-reported COMPLETE with a full
+  `pnpm run verify` claim; the orchestrator independently re-ran typecheck,
+  the crate's own test suite, root lint, and root format:check from a clean
+  shell (not the full multi-minute `pnpm run verify` a second time, since
+  its constituent steps were re-run individually and a `git diff --stat`
+  confirmed the commit touched only `services/mcp-server/**`, making a
+  second full run redundant), and read the commit message's own scope claim
+  against the actual diff before accepting.
+starting_revision: 776c946 (dispatched from there)
+result_revision: cde152d (LokiAI-v1.2, after merge — clean, no conflicts)
+evidence: Docs/graph/handoffs/MCP-002-1.md; 85/85 `services/mcp-server`
+  tests (26 new unit + 14 new pure-handler + 9 new full-protocol integration
+  + 2 pre-existing updated); root lint 0 errors (4 pre-existing unrelated
+  warnings); root format:check clean; pushed to `origin/LokiAI-v1.2`.
+reason: packet acceptance criteria pass with real, independently
+  re-verified evidence.
+unblocked_nodes: none newly unblocked (this node's own consumers — real
+  device data wiring, AGT-001 — are later/blocked nodes).
+new_or_changed_risks: `loki_list_devices`/`loki_get_device_health` cannot
+  reach real device data at this milestone and honestly report
+  `runtime_unavailable` via a pluggable `DeviceDataSource` — RUN-003 (now
+  accepted) still has no MCP-facing device/health RPC of its own, and
+  `loki-connector-registry` (CON-002) deliberately has no IPC dependency
+  (its own accepted handoff already documents this). This is the same
+  honest-gap pattern `DSK-002` established, not a new one; a future node
+  wiring a real IPC-backed `DeviceDataSource` implementation is the
+  documented follow-up. Not blocking.
 ```
