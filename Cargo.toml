@@ -10,6 +10,7 @@ members = [
   "crates/loki-connectors-sdk",
   "crates/loki-ipc",
   "crates/loki-storage",
+  "crates/loki-monitoring",
 ]
 
 [workspace.package]

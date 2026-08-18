@@ -199,6 +199,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-monitoring"
+version = "1.2.0"
+dependencies = [
+ "loki-connectors-sdk",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "loki-runtime"
 version = "1.2.0"
 dependencies = [
