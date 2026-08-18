@@ -1,0 +1,198 @@
+//! Composes the background host's real subsystems — `RUN-001`'s health/
+//! logging, `RUN-002`'s IPC listener, and `DAT-001`'s storage — into one
+//! runnable unit, and drives the desktop-discovery file's lifecycle
+//! (`starting` -> `serving` -> `stopped`) alongside it.
+//!
+//! `ComposedHost::open` does the synchronous/fallible startup work (bind the
+//! database, migrate it, load/create the local IPC token, bind the named
+//! pipe) so a failure to start is reported clearly and immediately, rather
+//! than surfacing later as a mysteriously-unhealthy running process.
+//! `ComposedHost::run` then drives the long-lived service loop, reusing
+//! `crate::runtime::run` (`RUN-001`, unmodified) for the existing shutdown-
+//! vs-heartbeat race, with the IPC accept loop running alongside it and
+//! stopped afterward.
+
+use std::future::Future;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use loki_ipc::auth::AuthToken;
+use loki_ipc::{Server, ServerConfig};
+use loki_storage::{Cipher, Storage};
+
+use crate::host::clock::{now_utc_iso8601, unix_millis_now};
+use crate::host::discovery::{self, RecordedState};
+use crate::host::paths::HostPaths;
+use crate::host::token;
+use crate::runtime::{self, RunOutcome};
+use crate::shutdown::ShutdownReason;
+
+/// How long [`ComposedHost::run`] waits for the IPC accept loop to drain
+/// after the primary shutdown/heartbeat race ends, before giving up —
+/// matches `crates/loki-ipc/src/server.rs`'s own bounded-shutdown-grace
+/// philosophy (`WRITER_SHUTDOWN_GRACE`) rather than trusting an unbounded
+/// drop to finish promptly.
+const IPC_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// Resolved configuration for one background host instance.
+#[derive(Debug, Clone)]
+pub struct HostConfig {
+    pub paths: HostPaths,
+    pub pipe_name: String,
+}
+
+impl HostConfig {
+    /// Production configuration: per-user `%LOCALAPPDATA%` paths and the
+    /// well-known, protocol-versioned, per-user pipe name.
+    pub fn for_current_user() -> std::io::Result<Self> {
+        let paths = HostPaths::default_for_current_user()?;
+        let pipe_name = discovery::well_known_pipe_name()?;
+        Ok(Self { paths, pipe_name })
+    }
+}
+
+/// Why [`ComposedHost::open`] failed to start.
+#[derive(Debug)]
+pub enum HostStartError {
+    Io(std::io::Error),
+    Storage(loki_storage::StorageError),
+}
+
+impl std::fmt::Display for HostStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HostStartError::Io(err) => write!(f, "i/o error starting background host: {err}"),
+            HostStartError::Storage(err) => {
+                write!(f, "storage error starting background host: {err}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HostStartError {}
+
+impl From<std::io::Error> for HostStartError {
+    fn from(err: std::io::Error) -> Self {
+        HostStartError::Io(err)
+    }
+}
+
+impl From<loki_storage::StorageError> for HostStartError {
+    fn from(err: loki_storage::StorageError) -> Self {
+        HostStartError::Storage(err)
+    }
+}
+
+/// A fully started background host: storage migrated, IPC pipe bound, and
+/// the desktop-discovery file already reflecting `"serving"`.
+pub struct ComposedHost {
+    storage: Storage,
+    server: Server,
+    discovery_file: PathBuf,
+    started_at_unix_millis: u64,
+}
+
+impl ComposedHost {
+    /// Starts everything synchronously: creates the base directory,
+    /// opens/migrates the `DAT-001` database, writes the discovery file as
+    /// `"starting"`, loads or creates the local IPC token, binds the named
+    /// pipe, then updates the discovery file to `"serving"`. Any failure at
+    /// any step is returned immediately — this never leaves a
+    /// half-initialized host silently running.
+    pub fn open(config: &HostConfig) -> Result<Self, HostStartError> {
+        config.paths.ensure_base_dir()?;
+
+        let storage = Storage::open(&config.paths.database_file(), Cipher::None)?;
+        let report = storage.run_migrations(&now_utc_iso8601())?;
+        tracing::info!(applied = ?report.applied_versions, "background host: storage migrated");
+
+        let started_at_unix_millis = unix_millis_now();
+        let discovery_file = config.paths.discovery_file();
+        discovery::write(
+            &discovery_file,
+            RecordedState::Starting,
+            &config.pipe_name,
+            started_at_unix_millis,
+        )?;
+
+        let raw_token = token::load_or_create(&config.paths.token_file())?;
+        let server_config = ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
+        let server = Server::bind(server_config)?;
+
+        discovery::write(
+            &discovery_file,
+            RecordedState::Serving,
+            &config.pipe_name,
+            started_at_unix_millis,
+        )?;
+        tracing::info!(pipe_name = %config.pipe_name, "background host: ipc listener bound and serving");
+
+        Ok(Self {
+            storage,
+            server,
+            discovery_file,
+            started_at_unix_millis,
+        })
+    }
+
+    /// The opened, migrated storage handle. Exposed so a caller (this
+    /// crate's own tests, and future consumers such as `JOB-001`) can use it
+    /// directly — no business method reads/writes it over IPC yet (`RUN-002`
+    /// ships only `ping`/`echo_stream`; real business methods are later
+    /// nodes' scope).
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
+
+    /// Runs the host until `shutdown_signal` resolves (clean exit) or
+    /// `heartbeat` ends on its own (treated as a crash) — reusing
+    /// `crate::runtime::run` (`RUN-001`, unmodified) for that race exactly
+    /// as before. The IPC accept loop runs concurrently and is told to stop
+    /// once that race ends, bounded by [`IPC_SHUTDOWN_GRACE`]. On return,
+    /// the discovery file is updated to `"stopped"` best-effort, so a
+    /// subsequent [`crate::host::discovery::locate`] call reports
+    /// [`crate::host::discovery::HostStatus::NotRunning`] immediately
+    /// without needing a live connect attempt.
+    pub async fn run<S, H>(self, shutdown_signal: S, heartbeat: H) -> RunOutcome
+    where
+        S: Future<Output = ShutdownReason>,
+        H: Future<Output = ()> + Send + 'static,
+    {
+        let ComposedHost {
+            storage: _storage,
+            mut server,
+            discovery_file,
+            started_at_unix_millis,
+        } = self;
+
+        let (ipc_stop_tx, ipc_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let ipc_shutdown: std::pin::Pin<Box<dyn Future<Output = ()> + Send>> =
+            Box::pin(async move {
+                let _ = ipc_stop_rx.await;
+            });
+        let ipc_task = tokio::spawn(async move {
+            server.serve(ipc_shutdown).await;
+        });
+
+        let outcome = runtime::run(shutdown_signal, heartbeat).await;
+
+        let _ = ipc_stop_tx.send(());
+        if tokio::time::timeout(IPC_SHUTDOWN_GRACE, ipc_task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("ipc accept loop did not stop within the shutdown grace period");
+        }
+
+        if let Err(err) = discovery::write(
+            &discovery_file,
+            RecordedState::Stopped,
+            "",
+            started_at_unix_millis,
+        ) {
+            tracing::warn!(error = %err, "failed to mark the discovery file stopped on shutdown");
+        }
+
+        outcome
+    }
+}

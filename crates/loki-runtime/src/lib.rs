@@ -25,12 +25,17 @@
 //!   jobs, and others not yet chartered) have a place to land instead of
 //!   growing a monolith.
 //!
-//! No IPC, persistence, connector, or device access is implemented here.
+//! `RUN-003` (`src/host`) extends this with the real background-host
+//! composition — IPC listener, persisted storage, crash-recovery
+//! supervision, and desktop discovery — alongside this module's process
+//! skeleton, which stays unmodified.
 
 mod app;
 pub mod cli;
 pub mod domain;
 pub mod health;
+#[cfg(windows)]
+pub mod host;
 pub mod logging;
 pub mod runtime;
 pub mod shutdown;

@@ -49,15 +49,23 @@ pub struct RunningChild {
 
 impl RunningChild {
     /// Spawns the compiled `loki-runtime` binary with no arguments (the
-    /// default, long-running "run" mode) in its own console process group.
-    pub fn spawn() -> Self {
+    /// default, long-running "run" mode) in its own console process group,
+    /// with `envs` set on the child in addition to its inherited
+    /// environment — used by `RUN-003` tests to point `LOCALAPPDATA` at a
+    /// temporary directory so a black-box test of the real binary's
+    /// background-host startup never touches the real user profile. Pass an
+    /// empty slice for no additional environment overrides.
+    pub fn spawn_with_env(envs: &[(&str, &str)]) -> Self {
         let binary = env!("CARGO_BIN_EXE_loki-runtime");
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .creation_flags(CREATE_NEW_PROCESS_GROUP)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn loki-runtime");
+            .stderr(Stdio::piped());
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let mut child = command.spawn().expect("failed to spawn loki-runtime");
 
         let stdout_pipe = child.stdout.take().expect("stdout was not piped");
         let stderr_pipe = child.stderr.take().expect("stderr was not piped");
