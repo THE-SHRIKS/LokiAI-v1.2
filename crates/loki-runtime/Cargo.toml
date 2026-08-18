@@ -47,7 +47,12 @@ description = "LokiAI Main v1.2 Rust runtime process (hardware/job/durable-execu
 #     ("no dependency merely for convenience").
 #   - time: `tokio::time::interval` (heartbeat) and `tokio::time::timeout`
 #     (tests; bounds wait time so a broken test hangs loudly, not silently).
-tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+#   - sync: `tokio::sync::oneshot` — added by RUN-003 (`src/host/compose.rs`)
+#     to signal the IPC accept loop to stop once the shutdown/heartbeat race
+#     in `src/runtime.rs` ends. No new crate: already a transitive dependency
+#     via `loki-ipc` below, this only enables the feature directly for
+#     `loki-runtime`'s own use of it.
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 
 # Structured, span-based diagnostics API — named directly in
 # Docs/TECH_STACK.md's "Async/diagnostics" row. License: MIT, tokio-rs
@@ -68,15 +73,44 @@ tracing-subscriber = { version = "=0.3.23", features = ["json", "env-filter"] }
 # Generates the per-run correlation ID (Deliverable 3; AGENTS.md rule 5:
 # "Use stable IDs ... and correlation IDs"). License: Apache-2.0 OR MIT,
 # uuid-rs project — the canonical Rust UUID implementation. Only the "v4"
-# feature (random UUIDs) is enabled.
+# feature (random UUIDs) is enabled. RUN-003 also reuses it for the interim
+# IPC token generator (`src/host/token.rs`), matching `loki-ipc`'s own
+# `AuthToken::generate()` approach rather than adding a second randomness
+# source.
 uuid = { version = "=1.24.1", features = ["v4"] }
 
-[dev-dependencies]
-# Used only by tests/*.rs to parse this crate's own JSON log-line output, so
-# the structured-logging deliverable is verified by actually parsing valid
-# JSON rather than by brittle substring matching. Not used by production
-# code/the shipped binary. Adds no new crate to the build graph: it is
-# already a transitive dependency of tracing-subscriber's "json" feature
-# above; this only makes the already-compiled crate directly usable from
-# tests. License: MIT OR Apache-2.0, serde-rs project.
+# RUN-003: (de)serializes the desktop-discovery file (`src/host/discovery.rs`)
+# and the IPC handshake types it references. License: MIT OR Apache-2.0,
+# serde-rs project. Not a new crate to the dependency graph: already resolved
+# transitively via `tracing-subscriber`'s "json" feature and via `loki-ipc`
+# (below); this promotes it to a direct production dependency of this crate
+# too, matching `loki-ipc/Cargo.toml`'s own justification for the same crate.
+serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
+
+# RUN-003: `crates/loki-storage` (`DAT-001`) — the background host opens and
+# migrates its own SQLite database on startup (`src/host/compose.rs`) so
+# state survives a crash/restart, per `Docs/graph/tasks/RUN-003.md`
+# Deliverable 2. Same workspace, path dependency, no version pin needed
+# (`publish = false`).
+loki-storage = { path = "../loki-storage" }
+
+[target.'cfg(windows)'.dependencies]
+# RUN-003: `crates/loki-ipc` (`RUN-002`) — the background host binds and
+# serves the real named-pipe IPC listener (`src/host/compose.rs`), and the
+# desktop-discovery mechanism (`src/host/discovery.rs`) performs a real
+# handshake+`ping` to determine host status. Windows-only, matching
+# `loki-ipc`'s own scope (its `src/lib.rs` hard-fails to compile on any other
+# target) — gated the same way here so a non-Windows `cargo check -p
+# loki-runtime` (in isolation, not `--workspace`) does not require it. Same
+# workspace, path dependency, no version pin needed (`publish = false`).
+loki-ipc = { path = "../loki-ipc" }
+
+[dev-dependencies]
+# Creates auto-cleaned-up temporary directories for `src/host/*` tests
+# (discovery files, token files, and the DAT-001 database all need a real
+# path, not just an in-memory fixture, to exercise "close and reopen after a
+# simulated crash"). Same exact version already resolved in this workspace
+# via `crates/loki-storage/Cargo.toml`'s dev-dependency — no new crate.
+# License: MIT OR Apache-2.0.
+tempfile = "=3.27.0"

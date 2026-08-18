@@ -12,9 +12,18 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Run the long-lived service (default with no recognized-mode flags).
+    /// `RUN-003`: this composes the real background host (IPC listener +
+    /// persisted storage) alongside `RUN-001`'s health/logging — see
+    /// `src/host/compose.rs`.
     Run,
     /// Perform a one-shot self-check and exit; see [`crate::health`].
     HealthCheck,
+    /// `RUN-003`: supervise `Run` mode as a child process, restarting it on
+    /// an unexpected (non-zero/killed) exit, bounded by a restart budget —
+    /// see `src/host/supervisor.rs`. Userland crash recovery only, not an
+    /// OS-service-manager integration (that is a future packaging node's
+    /// scope, per `Docs/graph/tasks/RUN-003.md` §7).
+    Supervised,
     /// Print usage and exit successfully.
     Help,
 }
@@ -71,6 +80,15 @@ pub fn parse<S: AsRef<str>>(argv: &[S]) -> Result<Mode, CliError> {
                 }
                 mode = Mode::HealthCheck;
             }
+            "--supervised" => {
+                if let Some(value) = value {
+                    return Err(CliError::UnexpectedValue {
+                        flag: "--supervised",
+                        value: value.to_string(),
+                    });
+                }
+                mode = Mode::Supervised;
+            }
             _ => return Err(CliError::UnknownArgument(arg.to_string())),
         }
     }
@@ -89,9 +107,13 @@ pub fn print_usage() {
          \n\
          Options:\n\
          \x20\x20--health-check   Run a one-shot self-check and exit\n\
+         \x20\x20--supervised     Supervise the background host as a child\n\
+         \x20\x20                 process, restarting it after an\n\
+         \x20\x20                 unexpected crash (bounded restart budget)\n\
          \x20\x20-h, --help       Print this message and exit\n\
          \n\
-         With no options, runs the long-lived service until a shutdown\n\
+         With no options, runs the long-lived background host (IPC listener\n\
+         + persisted storage + heartbeat/health logging) until a shutdown\n\
          signal (Ctrl-C, Ctrl-Break, console close, logoff, or shutdown) is\n\
          received.",
         version = env!("CARGO_PKG_VERSION"),
@@ -112,6 +134,27 @@ mod tests {
     fn health_check_flag_selects_health_check_mode() {
         let argv = ["loki-runtime", "--health-check"];
         assert_eq!(parse(&argv), Ok(Mode::HealthCheck));
+    }
+
+    #[test]
+    fn supervised_flag_selects_supervised_mode() {
+        let argv = ["loki-runtime", "--supervised"];
+        assert_eq!(parse(&argv), Ok(Mode::Supervised));
+    }
+
+    #[test]
+    fn supervised_rejects_a_value() {
+        let argv = ["loki-runtime", "--supervised=now"];
+        let err = parse(&argv).expect_err("--supervised does not take a value");
+        assert_eq!(
+            err,
+            CliError::UnexpectedValue {
+                flag: "--supervised",
+                value: "now".to_string(),
+            }
+        );
+        assert!(err.to_string().contains("--supervised"));
+        assert!(err.to_string().contains("now"));
     }
 
     #[test]
