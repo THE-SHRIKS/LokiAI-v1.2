@@ -32,6 +32,11 @@ static RUN_MODE_PIPE_LOCK: Mutex<()> = Mutex::new(());
 fn health_check_mode_starts_up_logs_json_and_exits_zero() {
     let output = Command::new(binary_path())
         .arg("--health-check")
+        // The parent developer/CI environment may set a stricter filter
+        // such as `RUST_LOG=warn`. This test verifies the runtime's
+        // documented default health-check contract, so isolate it from
+        // that ambient operator override.
+        .env_remove("RUST_LOG")
         .output()
         .expect("failed to spawn loki-runtime --health-check");
 
