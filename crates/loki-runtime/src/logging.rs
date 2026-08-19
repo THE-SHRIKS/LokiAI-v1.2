@@ -41,6 +41,11 @@ pub fn init() -> Result<(), LoggingInitError> {
 
     tracing_subscriber::fmt()
         .json()
+        // `tracing-subscriber` defaults to stderr. LokiAI's process
+        // contract and black-box health-check test require structured
+        // diagnostics on stdout, so make the destination explicit rather
+        // than relying on a library default.
+        .with_writer(std::io::stdout)
         .flatten_event(true)
         .with_target(true)
         .with_current_span(true)

@@ -59,6 +59,10 @@ impl RunningChild {
         let binary = env!("CARGO_BIN_EXE_loki-runtime");
         let mut command = Command::new(binary);
         command
+            // These black-box tests assert the documented default INFO
+            // lifecycle events. An ambient developer RUST_LOG override must
+            // not silently change the behavior under test.
+            .env_remove("RUST_LOG")
             .creation_flags(CREATE_NEW_PROCESS_GROUP)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
