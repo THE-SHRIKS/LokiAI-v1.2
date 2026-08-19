@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **G0/FND-001/FND-002 accepted. Wave accepted and integrated on `origin/LokiAI-v1.2`: CTR-001, DSK-001, RUN-001, CON-001, DSK-002, RUN-002, DAT-001, MCP-001, JOB-001, CON-002, MON-001, RUN-003 — full cross-package `pnpm run verify` (4 TS/JS packages + 7 Rust crates together) passes. MON-001 flagged an open ADR-level question (second self-contained SQLite database vs. a shared `loki-storage` seam — see its node-register entry) for human/follow-up attention; not blocking. RUN-003's interim plain-file IPC token (not yet DPAPI-wrapped) is deferred to `DAT-002`, a pre-existing gap, not new. MCP-002, MON-002 also accepted/integrated. MCP-002 honestly reports `runtime_unavailable` for real device data (documented gap, not a shortcut). MON-002 adds versioned rule evaluation on top of MON-001; its `ScopeSelector` mechanically matches device IDs pending `AUTH-001`/`ENR-001`, resolving its own stop condition rather than evading it. BLD-001 in progress (safety-boundary node, requires independent security review before acceptance). Continuing to dispatch/complete the remaining OQ-free Part One nodes per human authorization.**  
+Status: **G0/FND-001/FND-002 and the OQ-free implementation wave through INC-001 are accepted on the local integrated baseline. Accepted nodes: CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, and INC-001. Post-merge `pnpm run verify` passes across all four TS/JS packages and eight Rust crates; full-workspace Clippy also passes with warnings denied. INC-001 adds atomic, bounded, scope-filtered incident/evidence persistence and 61 focused tests. The accepted plaintext-storage gaps remain explicitly deferred to DAT-002/OQ-007. MCP-002 still honestly reports `runtime_unavailable` where real device data wiring does not exist. BLD-001 remains in progress and cannot be accepted until its containment defects are remediated and independently security-reviewed. Continuing the remaining OQ-free Part One work.**
 Graph owner: **Orchestrator**  
 Updated: **2026-08-17**
 
@@ -243,7 +243,7 @@ which half of the program (Section 1a) a wave belongs to.
 | AGT-002 | IMPLEMENTATION | Provider-neutral incident work intents, provider adapter delivery/acknowledgement, run linking, expiry, and user-action fallback                                                                                                               | AGT-001, INC-001, NOT-001 | AS-015 with supported-client acknowledgement and unavailable-client fallback                                | proposed |
 | MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
 | MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | accepted |
-| INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | proposed |
+| INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | accepted |
 | CLD-002 | IMPLEMENTATION | Durable cloud outbox/inbox sync, conflicts, runtime heartbeat/freshness, control-plane projections, reconnect and backpressure                                                                                                                 | CLD-001, RUN-003, DAT-002 | AS-014 and cloud contract/revocation/deduplication tests                                                    | proposed |
 | NOT-001 | IMPLEMENTATION | Deduplicated action-center and Windows notification intents, preferences, delivery/read state, secure deep links, and offline alerts                                                                                                           | CLD-002, INC-001, DSK-001 | notification privacy/dedup/deep-link/runtime-offline tests                                                  | proposed |
 
@@ -794,4 +794,31 @@ unblocked_nodes: INC-001 workspace verification can proceed without waiving the
 new_or_changed_risks: none. Production RUST_LOG behavior remains unchanged;
   only black-box tests remove an inherited parent override when asserting the
   documented default.
+```
+
+```text
+node_id: INC-001
+from: ready
+to: accepted
+timestamp: 2026-08-19T09:42:40Z
+actor: Codex orchestrator. Implementation was rebased onto the accepted runtime
+  diagnostics correction, audited against SPEC §3.7/§4.6 and the task packet,
+  hardened after review, then integrated in dependency order.
+starting_revision: 6d20b5c3af51f8d2411edf1b88c973d99953df1e
+worker_result_revision: 632b67e08f36a90222add1e07b650aa1b969901e
+integrated_revision: 33ad99671ddacf978f6c47c37fb6110416dffd78
+evidence: Docs/graph/handoffs/INC-001-1.md; 61/61 focused incident tests;
+  exact eleven-edge state-machine matrix; eight-thread correlation race;
+  real SQLite forced-failure rollback across incident/timeline/evidence/intent;
+  evidence scope-isolation and bounds; expiry-overflow no-panic/no-partial-write;
+  post-merge `pnpm run verify` exit 0; post-merge workspace Clippy exit 0.
+reason: every packet deliverable and mandatory gate passed on the merged
+  baseline. Review-found false-success and privacy risks were fixed before
+  acceptance rather than documented away.
+unblocked_nodes: AGT-002, NOT-001, DEP-001, and UI-004 satisfy their INC-001
+  edge, but remain blocked/proposed on their other dependencies.
+new_or_changed_risks: this crate adds the third accepted self-contained
+  plaintext SQLite database; DAT-002 must include it once OQ-007 is resolved.
+  No device, provider delivery, approval, shell, network, USB, or serial
+  authority was added.
 ```
