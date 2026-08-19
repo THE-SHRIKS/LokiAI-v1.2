@@ -197,6 +197,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-incidents"
+version = "1.2.0"
+dependencies = [
+ "loki-connectors-sdk",
+ "loki-monitoring",
+ "rusqlite",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "loki-ipc"
 version = "1.2.0"
 dependencies = [
