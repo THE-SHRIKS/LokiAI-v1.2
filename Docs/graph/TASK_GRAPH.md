@@ -225,6 +225,7 @@ which half of the program (Section 1a) a wave belongs to.
 | ID      | Type           | Outcome                                                                                                                  | Depends on                 | Exit evidence                                                       | Status   |
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------- | -------- |
 | RUN-001 | IMPLEMENTATION | Rust runtime executable with health, structured diagnostics, graceful shutdown, and module boundaries                    | FND-002                    | startup/shutdown/crash/error tests                                  | accepted |
+| RUN-001-CORR-001 | CORRECTION | Restore RUN-001's structured-stdout diagnostics contract and deterministic default-logging process tests          | RUN-001, RUN-003           | runtime and IPC real-process/named-pipe regression suites           | accepted |
 | RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | accepted |
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | accepted |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
@@ -766,4 +767,31 @@ new_or_changed_risks: `RuleStore` opens a second plaintext SQLite connection
   fire interaction rule are both this node's own necessary design decisions
   where `Docs/SPEC.md` §3.6 is silent — flagged for reviewer awareness
   before `INC-001` builds on them, not blocking this node's own acceptance.
+```
+
+```text
+node_id: RUN-001-CORR-001
+from: running
+to: accepted
+timestamp: 2026-08-19T09:20:50Z
+actor: Codex orchestrator. The Part One workspace gate exposed an accepted
+  RUN-001 contract regression: structured health/lifecycle diagnostics were
+  using tracing-subscriber's stderr default, while LokiAI's process contract
+  requires stdout. The correction was isolated, tested, committed, and merged
+  without changing event shape, redaction, filtering, IPC, persistence, or
+  shutdown behavior.
+starting_revision: 76c73a14e5cc9abb2efe01b4d9e087fb175d40fb
+result_revision: 025442805f3197343faaa756f5799884e93e1707
+evidence: Docs/graph/handoffs/RUN-001-CORR-001-1.md; runtime Clippy exit 0;
+  63/63 runtime tests; the six-case real child-process/named-pipe suite passed
+  independently; 69/69 IPC tests passed. PID 11648 was verified as the exact
+  stale test-built runtime before termination, then the affected suite and the
+  complete suites passed from a clean process state.
+reason: every correction-packet acceptance criterion and mandatory verification
+  row passed with real Windows process and named-pipe evidence.
+unblocked_nodes: INC-001 workspace verification can proceed without waiving the
+  runtime gate.
+new_or_changed_risks: none. Production RUST_LOG behavior remains unchanged;
+  only black-box tests remove an inherited parent override when asserting the
+  documented default.
 ```

@@ -1,7 +1,7 @@
 # Task Packet — `RUN-001-CORR-001 Restore Runtime Stdout Diagnostics`
 
 Packet status: `accepted`  
-Graph status: `running`  
+Graph status: `accepted`
 Created by: `orchestrator`  
 Created at: `2026-08-19T09:18:50Z`  
 Starting revision: `76c73a14e5cc9abb2efe01b4d9e087fb175d40fb`
