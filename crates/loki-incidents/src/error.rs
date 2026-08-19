@@ -34,6 +34,10 @@ pub enum IncidentError {
     /// `OutOfScope` (`Docs/graph/tasks/INC-001.md` §1: "turns a ...
     /// Fired/MissingDataAlert outcome into a ... incident").
     NotAFiringOutcome,
+    /// A caller-supplied timestamp plus policy duration cannot be
+    /// represented by `SystemTime`. Reported as an error instead of letting
+    /// `SystemTime`'s `Add` implementation panic the runtime process.
+    TimeOverflow { field: &'static str },
     /// A durable store was opened at a path/connection that has not had this
     /// crate's own migrations applied yet — an honest "cannot serve this
     /// request" state (`AGENTS.md` rule 1), never silently treated as an
@@ -55,6 +59,9 @@ impl fmt::Display for IncidentError {
                 f,
                 "only Fired/MissingDataAlert evaluation outcomes create or correlate an incident"
             ),
+            IncidentError::TimeOverflow { field } => {
+                write!(f, "time calculation overflowed for {field}")
+            }
             IncidentError::NotMigrated => {
                 write!(f, "incident store has not had its schema migrated yet")
             }

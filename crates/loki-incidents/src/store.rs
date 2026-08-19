@@ -28,7 +28,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 use loki_connectors_sdk::ids::{CapabilityId, DeviceId};
 use loki_monitoring::rule::{RuleId, Severity};
@@ -89,14 +89,44 @@ impl IncidentStore {
     /// incident whose entire in-memory timeline has never been persisted;
     /// pass the timeline length as it was immediately after the most recent
     /// load/save for an incident mutated since then.
-    pub fn save_incident(
+    pub(crate) fn save_incident(
         &self,
         incident: &Incident,
         timeline_from_index: usize,
     ) -> Result<(), IncidentError> {
         let conn = self.lock();
         let tx = conn.unchecked_transaction()?;
+        Self::save_incident_in_transaction(&tx, incident, timeline_from_index)?;
+        tx.commit()?;
+        Ok(())
+    }
 
+    /// Atomically persists every durable result of one firing ingest. A
+    /// caller must never observe an evidence snapshot or emitted work intent
+    /// without the incident/timeline mutation that produced it.
+    pub(crate) fn save_ingest(
+        &self,
+        incident: &Incident,
+        timeline_from_index: usize,
+        evidence: &EvidenceSnapshot,
+        work_intent: Option<&WorkIntent>,
+    ) -> Result<(), IncidentError> {
+        let conn = self.lock();
+        let tx = conn.unchecked_transaction()?;
+        insert_evidence_snapshot(&tx, evidence)?;
+        if let Some(intent) = work_intent {
+            insert_work_intent(&tx, intent)?;
+        }
+        Self::save_incident_in_transaction(&tx, incident, timeline_from_index)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn save_incident_in_transaction(
+        tx: &Transaction<'_>,
+        incident: &Incident,
+        timeline_from_index: usize,
+    ) -> Result<(), IncidentError> {
         let correlation_device_id = incident
             .affected_scope
             .first()
@@ -209,10 +239,9 @@ impl IncidentStore {
         }
 
         for entry in &incident.timeline[timeline_from_index.min(incident.timeline.len())..] {
-            insert_timeline_entry(&tx, incident.incident_id.as_str(), entry)?;
+            insert_timeline_entry(tx, incident.incident_id.as_str(), entry)?;
         }
 
-        tx.commit()?;
         Ok(())
     }
 
@@ -296,28 +325,10 @@ impl IncidentStore {
         Ok(out)
     }
 
-    pub fn insert_evidence_snapshot(
-        &self,
-        evidence: &EvidenceSnapshot,
-    ) -> Result<(), IncidentError> {
+    #[cfg(test)]
+    fn insert_evidence_snapshot(&self, evidence: &EvidenceSnapshot) -> Result<(), IncidentError> {
         let conn = self.lock();
-        conn.execute(
-            "INSERT INTO incident_evidence_snapshots
-                (evidence_id, rule_id, rule_version, device_id, outcome_kind,
-                 missing_signals_encoded, samples_encoded, captured_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                evidence.evidence_id.as_str(),
-                evidence.rule_id.as_str(),
-                evidence.rule_version,
-                evidence.device_id.as_str(),
-                evidence.outcome_kind,
-                encode_string_list(&evidence.missing_signals),
-                encode_samples(&evidence.samples),
-                to_millis(evidence.captured_at),
-            ],
-        )?;
-        Ok(())
+        insert_evidence_snapshot(&conn, evidence)
     }
 
     pub fn get_evidence_snapshot(
@@ -335,39 +346,6 @@ impl IncidentStore {
         .optional()
         .map_err(IncidentError::from)?
         .transpose()
-    }
-
-    pub fn insert_work_intent(&self, intent: &WorkIntent) -> Result<(), IncidentError> {
-        let conn = self.lock();
-        let (terminal_kind, terminal_reason) = encode_terminal_outcome(&intent.terminal_outcome);
-        conn.execute(
-            "INSERT INTO incident_work_intents
-                (work_intent_id, incident_id, requested_capability, evidence_refs_encoded,
-                 delivery_requirements_description, expiry_ms, delivery_attempts,
-                 acknowledged_agent_run, terminal_outcome_kind, terminal_outcome_reason,
-                 created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                intent.work_intent_id.as_str(),
-                intent.incident_id.as_str(),
-                intent.requested_capability.as_str(),
-                encode_string_list(
-                    &intent
-                        .evidence_refs
-                        .iter()
-                        .map(|e| e.as_str().to_string())
-                        .collect::<Vec<_>>()
-                ),
-                intent.delivery_requirements.description,
-                to_millis(intent.expiry),
-                intent.delivery_attempts,
-                intent.acknowledged_agent_run,
-                terminal_kind,
-                terminal_reason,
-                to_millis(intent.created_at),
-            ],
-        )?;
-        Ok(())
     }
 
     pub fn list_work_intents_for_incident(
@@ -389,6 +367,61 @@ impl IncidentStore {
         }
         Ok(out)
     }
+}
+
+fn insert_evidence_snapshot(
+    conn: &Connection,
+    evidence: &EvidenceSnapshot,
+) -> Result<(), IncidentError> {
+    conn.execute(
+        "INSERT INTO incident_evidence_snapshots
+            (evidence_id, rule_id, rule_version, device_id, outcome_kind,
+             missing_signals_encoded, samples_encoded, captured_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            evidence.evidence_id.as_str(),
+            evidence.rule_id.as_str(),
+            evidence.rule_version,
+            evidence.device_id.as_str(),
+            evidence.outcome_kind,
+            encode_string_list(&evidence.missing_signals),
+            encode_samples(&evidence.samples),
+            to_millis(evidence.captured_at),
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_work_intent(conn: &Connection, intent: &WorkIntent) -> Result<(), IncidentError> {
+    let (terminal_kind, terminal_reason) = encode_terminal_outcome(&intent.terminal_outcome);
+    conn.execute(
+        "INSERT INTO incident_work_intents
+            (work_intent_id, incident_id, requested_capability, evidence_refs_encoded,
+             delivery_requirements_description, expiry_ms, delivery_attempts,
+             acknowledged_agent_run, terminal_outcome_kind, terminal_outcome_reason,
+             created_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            intent.work_intent_id.as_str(),
+            intent.incident_id.as_str(),
+            intent.requested_capability.as_str(),
+            encode_string_list(
+                &intent
+                    .evidence_refs
+                    .iter()
+                    .map(|e| e.as_str().to_string())
+                    .collect::<Vec<_>>()
+            ),
+            intent.delivery_requirements.description,
+            to_millis(intent.expiry),
+            intent.delivery_attempts,
+            intent.acknowledged_agent_run,
+            terminal_kind,
+            terminal_reason,
+            to_millis(intent.created_at),
+        ],
+    )?;
+    Ok(())
 }
 
 const INCIDENT_SELECT_COLUMNS: &str = "SELECT
@@ -965,6 +998,7 @@ mod tests {
             RuleId::new("rule-1").unwrap(),
             1,
             device("dev-1"),
+            &["temperature_c".to_string()],
             "fired",
             vec!["temperature_c".to_string()],
             &[],

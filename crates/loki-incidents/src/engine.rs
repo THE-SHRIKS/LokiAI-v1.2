@@ -115,11 +115,11 @@ pub struct IngestResult {
 /// caller-supplied policy, never an invented default.
 pub struct IncidentEngine {
     store: IncidentStore,
-    /// Serializes the read-correlate-write ingest transaction inside the
-    /// single owning runtime process. Without this guard, two simultaneous
-    /// firings for the same rule/device could both observe no current
-    /// incident and create duplicates before either persisted its row.
-    ingest_lock: Mutex<()>,
+    /// Serializes every read-mutate-write sequence inside the single owning
+    /// runtime process. Without this guard, simultaneous firings could create
+    /// duplicate incidents and concurrent transitions could overwrite each
+    /// other's state or append-only timeline additions.
+    mutation_lock: Mutex<()>,
     correlation_window: Duration,
     reopen_policy_window: Duration,
     retention_close_window: Duration,
@@ -136,7 +136,7 @@ impl IncidentEngine {
     ) -> Self {
         Self {
             store,
-            ingest_lock: Mutex::new(()),
+            mutation_lock: Mutex::new(()),
             correlation_window,
             reopen_policy_window,
             retention_close_window,
@@ -170,8 +170,8 @@ impl IncidentEngine {
         // arrive concurrently on different worker threads. Keep the full
         // evidence -> correlate/create -> work-intent -> incident sequence
         // serialized so the correlation contract remains true under race.
-        let _ingest_guard = self
-            .ingest_lock
+        let _mutation_guard = self
+            .mutation_lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
@@ -186,13 +186,12 @@ impl IncidentEngine {
             rule.rule_id.clone(),
             rule.version,
             device.clone(),
+            &rule.required_signals,
             outcome.kind_wire_str(),
             outcome.missing_signals(),
             evidence_samples,
             at,
         );
-        self.store.insert_evidence_snapshot(&evidence)?;
-
         let existing = self.store.latest_incident_for(&rule.rule_id, device)?;
 
         // The fourth element is `timeline_from_index`: how much of the
@@ -260,7 +259,11 @@ impl IncidentEngine {
         incident.push_evidence_ref(evidence.evidence_id.clone());
 
         let work_intent = if emits_work_intent {
-            let expiry = at + self.work_intent_expiry_window;
+            let expiry = at.checked_add(self.work_intent_expiry_window).ok_or(
+                IncidentError::TimeOverflow {
+                    field: "work_intent.expiry",
+                },
+            )?;
             let intent = WorkIntent::emit(
                 incident.incident_id.clone(),
                 requested_capability,
@@ -269,13 +272,17 @@ impl IncidentEngine {
                 expiry,
                 at,
             );
-            self.store.insert_work_intent(&intent)?;
             Some(intent)
         } else {
             None
         };
 
-        self.store.save_incident(&incident, timeline_from_index)?;
+        self.store.save_ingest(
+            &incident,
+            timeline_from_index,
+            &evidence,
+            work_intent.as_ref(),
+        )?;
 
         Ok(IngestResult {
             incident,
@@ -313,6 +320,10 @@ impl IncidentEngine {
     /// (`Docs/SPEC.md` §4.6's `Resolved -> Closed: retention/policy close`
     /// edge). Returns every incident this call closed.
     pub fn apply_retention_policy(&self, now: SystemTime) -> Result<Vec<Incident>, IncidentError> {
+        let _mutation_guard = self
+            .mutation_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let resolved = self
             .store
             .list_incidents_in_state(IncidentState::Resolved)?;
@@ -342,6 +353,10 @@ impl IncidentEngine {
     where
         F: FnOnce(&mut Incident) -> Result<(), IncidentError>,
     {
+        let _mutation_guard = self
+            .mutation_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut incident = self.get(incident_id)?;
         let original_len = incident.timeline.len();
         f(&mut incident)?;

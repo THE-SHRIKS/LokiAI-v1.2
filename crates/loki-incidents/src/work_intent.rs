@@ -155,6 +155,7 @@ mod tests {
             RuleId::new("rule-1").unwrap(),
             1,
             DeviceId::new("dev-1").unwrap(),
+            &["temperature_c".to_string()],
             "fired",
             vec![],
             &[],

@@ -37,6 +37,12 @@ use crate::ids::EvidenceId;
 /// real, enforced, small bound rather than an unlimited blob.
 pub const MAX_SAMPLES_PER_SNAPSHOT: usize = 20;
 
+/// Maximum number of missing-signal names retained in one snapshot. The
+/// monitoring rule contract bounds each name; this additional collection
+/// bound prevents a manually constructed outcome from becoming an
+/// unbounded evidence payload.
+pub const MAX_MISSING_SIGNALS_PER_SNAPSHOT: usize = 64;
+
 /// One bounded reference to an already-ingested sample's value, captured at
 /// evidence-snapshot time (not a live pointer back into
 /// `crates/loki-monitoring`'s own storage, which this crate does not have
@@ -87,16 +93,26 @@ impl EvidenceSnapshot {
     /// most recent [`MAX_SAMPLES_PER_SNAPSHOT`] (by `source_time`) are kept;
     /// this is proven, not merely typed, by
     /// `tests::capturing_more_than_the_bound_keeps_only_the_most_recent_samples`.
+    #[allow(clippy::too_many_arguments)]
     pub fn capture(
         rule_id: RuleId,
         rule_version: u32,
         device_id: DeviceId,
+        relevant_signals: &[String],
         outcome_kind: impl Into<String>,
         missing_signals: Vec<String>,
         samples: &[TelemetrySample],
         captured_at: SystemTime,
     ) -> Self {
-        let mut sorted: Vec<&TelemetrySample> = samples.iter().collect();
+        // The evaluator accepts a caller-provided slice and ignores samples
+        // outside this rule/device. Evidence must apply the same scope filter
+        // or an incident could retain unrelated device data from that slice.
+        let mut sorted: Vec<&TelemetrySample> = samples
+            .iter()
+            .filter(|sample| {
+                sample.source_id == device_id && relevant_signals.contains(&sample.metric_name)
+            })
+            .collect();
         sorted.sort_by_key(|s| s.source_time);
         let start = sorted.len().saturating_sub(MAX_SAMPLES_PER_SNAPSHOT);
         let bounded_samples = sorted[start..]
@@ -110,7 +126,11 @@ impl EvidenceSnapshot {
             rule_version,
             device_id,
             outcome_kind: outcome_kind.into(),
-            missing_signals,
+            missing_signals: missing_signals
+                .into_iter()
+                .filter(|signal| relevant_signals.contains(signal))
+                .take(MAX_MISSING_SIGNALS_PER_SNAPSHOT)
+                .collect(),
             samples: bounded_samples,
             captured_at,
         }
@@ -136,9 +156,18 @@ mod tests {
     }
 
     fn sample(t: SystemTime, value: f64) -> TelemetrySample {
+        sample_for("dev-1", "temperature_c", t, value)
+    }
+
+    fn sample_for(
+        device_id: &str,
+        metric_name: &str,
+        t: SystemTime,
+        value: f64,
+    ) -> TelemetrySample {
         TelemetrySample::new(
-            device("dev-1"),
-            "temperature_c",
+            device(device_id),
+            metric_name,
             value,
             "C",
             t,
@@ -156,6 +185,7 @@ mod tests {
             rule_id(),
             1,
             device("dev-1"),
+            &["temperature_c".to_string()],
             "fired",
             vec![],
             &samples,
@@ -176,6 +206,7 @@ mod tests {
             rule_id(),
             1,
             device("dev-1"),
+            &["temperature_c".to_string()],
             "fired",
             vec![],
             &samples,
@@ -200,6 +231,7 @@ mod tests {
             rule_id(),
             1,
             device("dev-1"),
+            &["temperature_c".to_string()],
             "fired",
             vec![],
             &samples,
@@ -209,11 +241,58 @@ mod tests {
             rule_id(),
             1,
             device("dev-1"),
+            &["temperature_c".to_string()],
             "fired",
             vec![],
             &samples,
             epoch(10),
         );
         assert_ne!(a.evidence_id, b.evidence_id);
+    }
+
+    #[test]
+    fn snapshot_excludes_samples_outside_the_incident_device_and_rule_signals() {
+        let samples = vec![
+            sample_for("dev-1", "temperature_c", epoch(1), 81.0),
+            sample_for("dev-2", "temperature_c", epoch(2), 99.0),
+            sample_for("dev-1", "secret_metric", epoch(3), 42.0),
+        ];
+        let snapshot = EvidenceSnapshot::capture(
+            rule_id(),
+            1,
+            device("dev-1"),
+            &["temperature_c".to_string()],
+            "fired",
+            vec![],
+            &samples,
+            epoch(10),
+        );
+
+        assert_eq!(snapshot.samples.len(), 1);
+        assert_eq!(snapshot.samples[0].metric_name, "temperature_c");
+        assert_eq!(snapshot.samples[0].value, 81.0);
+    }
+
+    #[test]
+    fn missing_signal_references_are_bounded() {
+        let missing_signals = (0..(MAX_MISSING_SIGNALS_PER_SNAPSHOT + 10))
+            .map(|index| format!("signal-{index}"))
+            .collect::<Vec<_>>();
+        let relevant_signals = missing_signals.clone();
+        let snapshot = EvidenceSnapshot::capture(
+            rule_id(),
+            1,
+            device("dev-1"),
+            &relevant_signals,
+            "missing_data_alert",
+            missing_signals,
+            &[],
+            epoch(10),
+        );
+
+        assert_eq!(
+            snapshot.missing_signals.len(),
+            MAX_MISSING_SIGNALS_PER_SNAPSHOT
+        );
     }
 }
