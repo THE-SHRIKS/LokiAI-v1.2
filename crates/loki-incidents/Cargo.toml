@@ -1,0 +1,67 @@
+# LokiAI Main v1.2 — loki-incidents (INC-001).
+#
+# Turns a MON-002 RuleEvaluator Fired/MissingDataAlert outcome into a
+# correlated, bounded-evidence incident with the state machine Docs/SPEC.md
+# §4.6 defines, plus assignment, timeline, verification-window resolution,
+# reopen/close policy, and work-intent emission per Docs/SPEC.md §3's
+# work-intent fields. See src/lib.rs's module doc for scope boundaries
+# (read-side/state-machine engine only — no delivery, no device action).
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state) rather than added for
+# convenience. Docs/TECH_STACK.md §5.1 requires exact versions in production
+# manifests, so direct dependencies are pinned with `=`; Cargo.lock is
+# committed on top of that for full reproducibility — matching
+# crates/loki-monitoring/Cargo.toml's convention.
+[package]
+name = "loki-incidents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 incident correlation and evidence engine: Docs/SPEC.md §4.6 state machine, correlation, bounded evidence, verification windows, reopen/close policy, work-intent emission (INC-001)."
+
+[dependencies]
+# This node's required reading names crates/loki-monitoring/src/evaluate.rs
+# directly ("the actual shape this node correlates from") — EvaluationOutcome,
+# DataStatus, and MonitoringRule (rule_id/version/severity/scope) are
+# consumed as-is, never re-derived or copied into a second, divergent shape.
+# Path dependency: same workspace, same version. This node is read-only
+# against this crate's public API (Docs/graph/tasks/INC-001.md §2: "do not
+# touch crates/loki-monitoring/**").
+loki-monitoring = { path = "../loki-monitoring" }
+
+# DeviceId (affected scope / correlation key), CapabilityId (work-intent
+# "requested capability" — reuses CON-001's already-defined, open capability
+# vocabulary rather than inventing a new one, resolving this node's own stop
+# condition per Docs/graph/tasks/INC-001.md §7), and ValidationError. Path
+# dependency: same workspace, same version.
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
+
+# Stable work_intent_id/incident_id/evidence_id generation (AGENTS.md rule 5:
+# "use stable IDs ... for operations that may be retried"). Not a new
+# dependency decision: already the pinned choice in
+# crates/loki-runtime/Cargo.toml and crates/loki-ipc/Cargo.toml (identical
+# version/feature set here so the workspace lockfile resolves one copy).
+# License: Apache-2.0 OR MIT, uuid-rs project. Only the "v4" feature is
+# enabled (random ids; no MAC-address-derived v1 concerns).
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+# SQLite driver for this crate's own durable incident/timeline/evidence/
+# work-intent store — same exact pinned version/feature set as
+# crates/loki-monitoring/Cargo.toml (same rationale: `bundled` statically
+# compiles a pinned SQLite; `Docs/graph/tasks/INC-001.md`'s ownership section
+# forbids this crate from adding a repository directly inside
+# crates/loki-storage/src or crates/loki-monitoring/src, so this crate
+# persists through its own self-contained database instead — see
+# src/store.rs's doc comment, following the exact precedent
+# Docs/graph/handoffs/{MON-001,MON-002}-1.md §5/§7 already recorded).
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+
+[dev-dependencies]
+# Creates auto-cleaned-up temporary files for this crate's restart test
+# (open store at a real path, close, reopen, assert data survived — a
+# `:memory:` database cannot exercise that). Same exact pinned version as
+# crates/loki-monitoring/Cargo.toml. License: MIT OR Apache-2.0.
+tempfile = "=3.27.0"
