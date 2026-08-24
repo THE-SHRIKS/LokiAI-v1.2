@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **The accepted local integrated baseline now includes CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, INC-001, LOC-001, LDEV-001, APR-001, AGT-001, and LONB-001. ADR-0002 is accepted by explicit human instruction: Part One is a local-only milestone and the cloud-dependent slice is deferred, not deleted. The new local authority/device/approval/agent/setup nodes passed their full workspace gates and are integrated. OQ-007 is accepted. `DAT-002` has a production implementation checkpoint on isolated revision `7ef9bc3`; all runnable gates pass, while cross-Windows-identity DPAPI verification and independent review remain explicitly blocked. Read-only USB discovery confirms an Espressif native USB JTAG/serial device at `VID_303A&PID_1001` on COM5, but not the exact board/module SKU, so OQ-001 remains open. BLD-001 and its device-operation descendants remain explicitly deferred after `BLD-001-CORR-001-R1` returned `NEEDS_REPLAN`. No Part Two work may start before the revised `P1-INT-001` gate.**
+Status: **The accepted local integrated baseline now includes CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, INC-001, LOC-001, LDEV-001, APR-001, AGT-001, and LONB-001. ADR-0002 is accepted by explicit human instruction: Part One is a local-only milestone and the cloud-dependent slice is deferred, not deleted. The new local authority/device/approval/agent/setup nodes passed their full workspace gates and are integrated, and their persisted metadata now uses DAT-002's SQLCipher/DPAPI managed open path with ciphertext/restart evidence. OQ-007 is accepted. `DAT-002` has an integrated production implementation checkpoint; all runnable gates pass, while cross-Windows-identity DPAPI verification and independent review remain explicitly blocked. Read-only USB discovery confirms an Espressif native USB JTAG/serial device at `VID_303A&PID_1001` on COM5, but not the exact board/module SKU, so OQ-001 remains open. BLD-001 and its device-operation descendants remain explicitly deferred after `BLD-001-CORR-001-R1` returned `NEEDS_REPLAN`. No Part Two work may start before the revised `P1-INT-001` gate.**
 Graph owner: **Orchestrator**  
 Updated: **2026-08-24**
 
@@ -228,7 +228,7 @@ which half of the program (Section 1a) a wave belongs to.
 | DSK-001  | IMPLEMENTATION | Existing UI runs in a packaged secure Electron shell with single-instance and truthful app lifecycle                            | FND-002                    | Electron config/security tests and packaged smoke run            | accepted (packaged smoke run real and verified; `pnpm run electron:package` itself not yet reproducible — app proven via `npx` path instead, see handoff §7a) |
 | DSK-002  | CONTRACT       | Minimal typed preload API and event subscription bridge with validation/sender checks                                           | CTR-001, DSK-001           | IPC contract tests; forbidden generic access tests               | accepted |
 | DAT-001  | IMPLEMENTATION | Runtime-owned SQLite schema, migrations, repositories, outbox/inbox, integrity/backup primitives                                | FND-002, CTR-001           | migration/restart/corruption/transaction tests                   | accepted |
-| DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and SQLCipher Community attribution. **Accepted scope:** preserve the established three bounded-context files (`loki-storage`, `loki-monitoring`, and `loki-incidents`) rather than merge stores; every file and its WAL/backup must be encrypted. | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked — implementation checkpoint `7ef9bc3` on `codex/DAT-002`; all runnable gates pass (`Docs/graph/evidence/W4/DAT-002/verification.md`), but the mandatory second-identity DPAPI test environment and independent data-security review are unavailable. Not merged/accepted. |
+| DAT-002  | IMPLEMENTATION | Full-database encryption, OS-protected key lifecycle, encrypted backup/WAL, rotation/recovery, and SQLCipher Community attribution. **Accepted scope:** preserve bounded-context files rather than merge stores; every persisted local Part One database and its WAL/backup must be encrypted. | DAT-001, OQ-007            | wrong-key/key-loss/rotation/backup/service-user boundary tests   | blocked — production checkpoint integrated at `073af82`; local Part One store integration at `41d510f`. All runnable gates pass (`Docs/graph/evidence/W4/DAT-002/verification.md` and `local-part-one-integration.md`), but the mandatory second-identity DPAPI test environment and independent data-security review remain unavailable. Integrated does not mean accepted. |
 | LOC-001  | IMPLEMENTATION | Windows-bound local installation-owner/session authority, explicit local capability projection, revocation, and fail-closed cloud separation | DSK-002, DAT-001, ADR-0002 | wrong-principal/session, revocation, expiry, restart, and cloud-unavailable tests | accepted — integrated at `ce789a6`; full verification in `Docs/graph/evidence/W3/LOC-001/verification.md` |
 | LONB-001 | IMPLEMENTATION | Durable local setup state machine for installation owner, agent registration, and existing-device-or-project choice without inventing cloud account/workspace state | LOC-001, LDEV-001, MCP-002 | resume/back/failure/device and project branch scenarios | accepted — integrated at `c9e82e7`; full verification in `Docs/graph/evidence/W5/LONB-001/verification.md` |
 | AUTH-001 | IMPLEMENTATION | External-browser PKCE sign-in, session refresh, credential-store integration, and real logout                                   | DSK-002, DAT-001, OQ-002   | AS-001/AS-002 including replay/expiry/cleanup tests              | deferred — excluded from local-only Part One by ADR-0002 |
@@ -858,4 +858,28 @@ new_or_changed_risks: this crate adds the third accepted self-contained
   plaintext SQLite database; DAT-002 must include it once OQ-007 is resolved.
   No device, provider delivery, approval, shell, network, USB, or serial
   authority was added.
+```
+
+```text
+node_id: P1-DAT-INTEGRATION
+from: ready
+to: accepted
+timestamp: 2026-08-24T18:42:00+05:30
+actor: Codex orchestrator under the accepted local-only Part One scope
+starting_revision: 073af82
+worker_result_revision: 8e12aa0
+integrated_revision: 41d510f
+evidence: Docs/graph/evidence/W4/DAT-002/local-part-one-integration.md;
+  focused encrypted restart tests pass for authority, device bindings,
+  approvals, agents, and setup; warnings-denied workspace Clippy passes; all
+  repository non-Rust stages pass; an initial Windows Application Control
+  pre-execution block was followed by successful exact-package and complete
+  workspace Rust test reruns.
+reason: every newly persisted local Part One store now routes through the
+  SQLCipher/DPAPI managed open path and has raw-file ciphertext evidence. No
+  plaintext local metadata exception was accepted.
+unblocked_nodes: LNOT-001 can use the integrated encrypted storage foundation.
+new_or_changed_risks: DAT-002 remains blocked, not accepted, because its
+  second-Windows-identity DPAPI test and independent data-security review are
+  still unavailable. Cloud remains deferred and fail-closed.
 ```
