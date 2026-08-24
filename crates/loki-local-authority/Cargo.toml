@@ -1,0 +1,27 @@
+[package]
+name = "loki-local-authority"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Windows-bound local installation authority for LokiAI's local-only milestone (LOC-001)."
+
+[dependencies]
+# Reuses the accepted RUN-002 Windows SID resolver so authority and the named
+# pipe DACL derive identity from the same OS token boundary. Internal path
+# dependency; no new licence or upstream maintenance surface.
+loki-ipc = { path = "../loki-ipc" }
+
+# Durable transactional session metadata. Exact version matches loki-storage;
+# MIT licensed and already reviewed/pinned in this workspace.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+
+# Unpredictable stable installation/session/correlation identifiers. Exact
+# version already present in loki-ipc and the workspace lockfile; MIT/Apache-2.0.
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+[dev-dependencies]
+# Panic-safe cleanup for restart/persistence tests; already reviewed in
+# loki-storage and never shipped in the production binary.
+tempfile = "=3.27.0"
