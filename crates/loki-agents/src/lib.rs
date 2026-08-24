@@ -19,6 +19,7 @@ pub enum AgentScope {
     RegisterRuns,
     RecordToolUse,
     RecordChanges,
+    ReceiveWorkIntents,
 }
 impl AgentScope {
     fn wire(self) -> &'static str {
@@ -27,6 +28,7 @@ impl AgentScope {
             Self::RegisterRuns => "register_runs",
             Self::RecordToolUse => "record_tool_use",
             Self::RecordChanges => "record_changes",
+            Self::ReceiveWorkIntents => "receive_work_intents",
         }
     }
     fn parse(value: &str) -> Option<Self> {
@@ -35,6 +37,7 @@ impl AgentScope {
             "register_runs" => Some(Self::RegisterRuns),
             "record_tool_use" => Some(Self::RecordToolUse),
             "record_changes" => Some(Self::RecordChanges),
+            "receive_work_intents" => Some(Self::ReceiveWorkIntents),
             _ => None,
         }
     }
@@ -296,6 +299,31 @@ impl AgentRegistry {
         }
     }
 
+    /// Authenticates an active local connection for one explicit scope.
+    /// Transport presence alone is never authority.
+    pub fn authorize_scope(
+        &self,
+        connection_id: &str,
+        secret: &str,
+        scope: AgentScope,
+    ) -> Result<(), AgentError> {
+        self.authenticate(connection_id, secret, scope)
+    }
+
+    /// Returns a run only when it belongs to the named connection.
+    pub fn require_run_for_connection(
+        &self,
+        connection_id: &str,
+        run_id: &str,
+    ) -> Result<AgentRun, AgentError> {
+        let connection = self.lock()?;
+        let run = load_run(&connection, run_id)?.ok_or(AgentError::NotFound)?;
+        if run.connection_id != connection_id {
+            return Err(AgentError::AuthenticationFailed);
+        }
+        Ok(run)
+    }
+
     pub fn start_run(
         &self,
         connection_id: &str,
@@ -523,6 +551,7 @@ mod tests {
             AgentScope::RegisterRuns,
             AgentScope::RecordToolUse,
             AgentScope::RecordChanges,
+            AgentScope::ReceiveWorkIntents,
         ]
     }
     #[test]
