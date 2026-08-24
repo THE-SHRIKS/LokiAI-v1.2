@@ -53,10 +53,13 @@ silently editing a worker's contract.
 | `DAT-002-REV-001` | [`DAT-002-REV-001.md`](DAT-002-REV-001.md) | `FAILED_VERIFICATION` | Two critical and seven high encrypted-data lifecycle findings; review recorded under W4 evidence. |
 | `DAT-002-CORR-001` | [`DAT-002-CORR-001.md`](DAT-002-CORR-001.md) | `NEEDS_REPLAN` | Required lifecycle exposed the SQLCipher secure-memory quota failure; ADR-0005 replaces the unsafe allocation model without accepting this failed node. |
 | `DAT-002-MEM-ADR-001` | ADR-0005 decision record | accepted 2026-08-24 | Fixed verified secure arena accepted for implementation; operational Windows/VM validation remains separately gated. |
-| `DAT-002-MEM-IMPL-001` | packet pending | proposed | Packet may be created from the accepted ADR baseline; no elevation or VM operation is authorized. |
-| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | `FAILED_VERIFICATION`, correction active | REV-002 found three high live-session/scope/parity defects; correction is active in its isolated worktree. |
+| `DAT-002-MEM-CODE-001` | [`DAT-002-MEM-CODE-001.md`](DAT-002-MEM-CODE-001.md) | ready | Accepted code packet at `0bd4a704`; no elevation, VM, signing credential, or guessed production bounds are authorized. |
+| `DAT-002-MEM-HOST-VERIFY-001` | packet pending | `BLOCKED_DEPENDENCY` | Requires CODE plus exact VM/signing operation approval and an approved supported-host environment. |
+| `DAT-002-MEM-REV-001` | packet pending | proposed | Independent review follows accepted CODE and HOST-VERIFY evidence. |
+| `DAT-002-MEM-IMPL-001` | packet pending | proposed | Final integration/acceptance cannot occur from code tests alone. |
+| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | `FAILED_VERIFICATION`, correction active | REV-003 found four high result-binding, strict-parity, in-flight-revocation, and bounded-dispatch defects; correction is active in its isolated worktree. |
 | `BLD-ARCH-ADR-001` | [`BLD-ARCH-ADR-001.md`](BLD-ARCH-ADR-001.md) | accepted 2026-08-24 | ADR-0004 Design A accepted for implementation; every elevated/VHDX operation remains separately gated. |
-| `BLD-001-R2-CODE` | packet pending | proposed | Unprivileged protocol/journal/state-machine/fixture implementation only; no VHDX invocation, elevation, install or host mutation. |
+| `BLD-001-R2-CODE` | [`BLD-001-R2-CODE.md`](BLD-001-R2-CODE.md) | ready | Accepted packet at `0bd4a704`; no VHDX invocation, elevation, install, signing credential, or host mutation. |
 | `BLD-001-R2-HOST-VERIFY` | packet pending | `BLOCKED_DEPENDENCY` | Requires accepted R2 code plus separate exact VHDX/elevation approval and an approved signer/provisioning environment. |
 | `CON-003-PRE-001` | [`CON-003-PRE-001.md`](CON-003-PRE-001.md) | accepted | Read-only audit exit passed; COM5 is only a transport candidate and exact SKU remains unverified. |
 | `CON-ID-CONTRACT-001` | [`CON-ID-CONTRACT-001.md`](CON-ID-CONTRACT-001.md) | ready | Protocol v1.0.0 accepted; no COM open, reset, flash or device configuration is authorized. |
