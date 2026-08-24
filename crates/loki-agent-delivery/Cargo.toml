@@ -1,0 +1,21 @@
+[package]
+name = "loki-agent-delivery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Authenticated local incident work-intent delivery coordinator (AGT-002)."
+
+[dependencies]
+loki-agents = { path = "../loki-agents" }
+loki-incidents = { path = "../loki-incidents" }
+loki-local-notifications = { path = "../loki-local-notifications" }
+loki-storage = { path = "../loki-storage" }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled-sqlcipher-vendored-openssl"] }
+serde_json = "=1.0.151"
+
+[dev-dependencies]
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
+loki-local-authority = { path = "../loki-local-authority" }
+tempfile = "=3.27.0"
