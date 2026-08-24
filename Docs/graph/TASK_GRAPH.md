@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **The accepted local integrated baseline now includes CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, INC-001, LOC-001, LDEV-001, APR-001, AGT-001, and LONB-001. ADR-0002 is accepted by explicit human instruction: Part One is a local-only milestone and the cloud-dependent slice is deferred, not deleted. The new local authority/device/approval/agent/setup nodes passed their full workspace gates and are integrated, and their persisted metadata now uses DAT-002's SQLCipher/DPAPI managed open path with ciphertext/restart evidence. OQ-007 is accepted. `DAT-002` has an integrated production implementation checkpoint; all runnable gates pass, while cross-Windows-identity DPAPI verification and independent review remain explicitly blocked. Read-only USB discovery confirms an Espressif native USB JTAG/serial device at `VID_303A&PID_1001` on COM5, but not the exact board/module SKU, so OQ-001 remains open. BLD-001 and its device-operation descendants remain explicitly deferred after `BLD-001-CORR-001-R1` returned `NEEDS_REPLAN`. No Part Two work may start before the revised `P1-INT-001` gate.**
+Status: **The revised local-only Part One gate `P1-INT-001` is accepted at `38fd260`; its complete evidence is `Docs/graph/evidence/P1/P1-INT-001/verification.md`. The accepted local integrated baseline includes CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, INC-001, LOC-001, LDEV-001, APR-001, AGT-001/002, LONB-001, and LNOT-001. ADR-0002's cloud-dependent slice is deferred, not deleted. `DAT-002` remains blocked, not accepted: its integrated current-user SQLCipher/DPAPI paths pass, while cross-Windows/service-identity verification and independent review remain unavailable. OQ-001/exact-board work and BLD-001 plus its descendants remain blocked/deferred. Part Two has not started and still requires separate human approval.**
 Graph owner: **Orchestrator**  
 Updated: **2026-08-24**
 
@@ -279,7 +279,7 @@ which half of the program (Section 1a) a wave belongs to.
 
 | ID         | Type        | Outcome | Depends on | Exit evidence | Status |
 | ---------- | ----------- | ------- | ---------- | ------------- | ------ |
-| P1-INT-001 | INTEGRATION | The accepted, non-deferred local Part One services run together on one non-UI baseline: contracts, Electron shell/preload, Rust runtime/authenticated local IPC, encrypted persistence implementation, Windows-bound local authority/setup, connector discovery/local device binding, MCP/agent runs, monitoring/incidents/local notification intents, and durable jobs/local policy/approvals. Required checks: (1) every dependency-ready local node is accepted; blocked nodes are listed without being relabeled; (2) integration follows `Docs/graph/INTEGRATION.md`; (3) all node tests plus cross-service restart/revocation/expiry scenarios pass; (4) consumed contracts have compatibility fixtures; (5) secret scan, dependency/licence review, IPC/preload/local-authority/approval regressions pass. Cloud, remote delivery, contained builds, artifact/device-operation/deployment, exact-board, and mandatory blocked DAT-002 review evidence are explicitly outside this revised certification and remain fail-closed. This gate is not `SEC-001`/`SEC-002` or a release claim. | DAT-002, LOC-001, LDEV-001, LONB-001, AGT-001, APR-001, LNOT-001, AGT-002 | local integrator record; cross-service results; contract matrix; security regression/scan results; explicit deferred/blocker register | proposed — ADR-0002 removed the cloud structural blocker. DAT-002's unavailable second-identity/reviewer evidence remains named; the gate may verify the integrated implementation but cannot relabel DAT-002 accepted. |
+| P1-INT-001 | INTEGRATION | The accepted, non-deferred local Part One services run together on one non-UI baseline: contracts, Electron shell/preload, Rust runtime/authenticated local IPC, encrypted persistence implementation, Windows-bound local authority/setup, connector discovery/local device binding, MCP/agent runs, monitoring/incidents/local notification intents, and durable jobs/local policy/approvals. Required checks: (1) every dependency-ready local node is accepted; blocked nodes are listed without being relabeled; (2) integration follows `Docs/graph/INTEGRATION.md`; (3) all node tests plus cross-service restart/revocation/expiry scenarios pass; (4) consumed contracts have compatibility fixtures; (5) secret scan, dependency/licence review, IPC/preload/local-authority/approval regressions pass. Cloud, remote delivery, contained builds, artifact/device-operation/deployment, exact-board, and mandatory blocked DAT-002 review evidence are explicitly outside this revised certification and remain fail-closed. This gate is not `SEC-001`/`SEC-002` or a release claim. | DAT-002, LOC-001, LDEV-001, LONB-001, AGT-001, APR-001, LNOT-001, AGT-002 | local integrator record; cross-service results; contract matrix; security regression/scan results; explicit deferred/blocker register | accepted — tested baseline and evidence at `38fd260`; DAT-002 remains explicitly blocked and excluded from acceptance |
 
 ### UI, review, packaging, and release
 
@@ -923,4 +923,27 @@ reason: the authenticated local pull/acknowledgement path and deduplicated human
 unblocked_nodes: P1-INT-001 has all revised local implementation dependencies.
 new_or_changed_risks: none. Remote/cloud delivery remains deferred. DAT-002's
   second-identity and independent-review blocker remains named and unchanged.
+```
+
+```text
+node_id: P1-INT-001
+from: ready
+to: accepted
+timestamp: 2026-08-24T19:14:22+05:30
+actor: Codex orchestrator under ADR-0002's accepted revised local-only scope
+starting_revision: 333209ea7d674d1cd397164ebafd66ef5c63ef36
+integrated_evidence_revision: 38fd260802881ebec46c1e6a3ed1a74c37ad1a3a
+evidence: Docs/graph/evidence/P1/P1-INT-001/verification.md;
+  Docs/graph/handoffs/P1-INT-001-1.md; final complete repository verify exit 0;
+  workspace warnings-denied Clippy exit 0; 303 contract, 85 MCP, and 77 Electron
+  tests pass; complete Cargo workspace passes; tracked-source secret scan clean;
+  dependency/licence inventories contain no missing metadata.
+reason: every runnable revised local Part One integration row passed and every
+  excluded capability is named and remains fail-closed. DAT-002's missing
+  second-identity/reviewer evidence is retained as a blocker, not relabelled.
+unblocked_nodes: the graph prerequisite for UI-001 is satisfied, but the separate
+  human approval required to begin Part Two has not been given.
+new_or_changed_risks: none. This is not SEC-001/SEC-002, packaging, release,
+  cloud, contained-build, exact-board, flash, device-operation, or deployment
+  certification. Part Two was not started.
 ```
