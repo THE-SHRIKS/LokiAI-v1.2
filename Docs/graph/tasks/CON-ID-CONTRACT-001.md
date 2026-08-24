@@ -1,7 +1,7 @@
 # Task Packet — `CON-ID-CONTRACT-001 Device-derived Connector Identity`
 
 Packet status: `accepted`  
-Graph status: `ready`  
+Graph status: `BLOCKED_DEPENDENCY`  
 Created by: `Codex orchestrator`  
 Created at: `2026-08-24T15:35:00Z`
 
@@ -69,7 +69,17 @@ Risk: high identity/security boundary. No device operation is authorized by this
 
 ## 10. Human gate
 
-None for the device-neutral contract. Exact physical SKU remains `OQ-001`.
+Required before implementation because this node adds a new public
+cross-language protocol and compatibility promise:
+
+> I approve the new Connector Identity Protocol v1.0.0: device-neutral
+> transient candidate/probe contracts, encrypted-only device-derived identity
+> evidence, installation-scoped HMAC-SHA256 public device identity, and
+> explicit fail-closed unknown/partial/ambiguous/conflicting outcomes. I accept
+> that this is a new public cross-language protocol requiring downstream
+> registry migration.
+
+Exact physical SKU remains separately blocked by `OQ-001`.
 
 ## 11. Worker and reviewer
 
