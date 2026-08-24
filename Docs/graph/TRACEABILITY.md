@@ -1,7 +1,7 @@
 # Requirements Traceability — LokiAI Main v1.2
 
 Status: **Operational; update with every accepted behavior change**  
-Updated: **2026-08-15**
+Updated: **2026-08-24**
 
 ## 1. Rules
 
@@ -30,7 +30,7 @@ Updated: **2026-08-15**
 | FR-INC-001, FR-INC-002, FR-INC-003             | Incident/evidence domain                                         | INC-001, DEP-001, UI-004                                         | AS-008; verification-window tests                                                 | INC-001 accepted; deployment/UI pending |
 | FR-NOT-001                                     | Runtime/cloud notification service, Electron main, action center | CLD-002, NOT-001, UI-003, UI-004                                 | AS-014/AS-015; dedup/privacy/deep-link tests                                      | planned                     |
 | FR-CLD-001, FR-CLD-002, FR-CLD-003             | Cloud contract/client, runtime sync and heartbeat                | CLD-001, CLD-002, DAT-001, RUN-003, UI-004, UI-005               | AS-014; contract/revocation/reconnect/dedup tests                                 | blocked OQ-002              |
-| FR-BLD-001, FR-BLD-002                         | Contained build executor, job engine, artifact validation        | BLD-001, ART-001, MCP-003, UI-005, SEC-002                       | AS-012/AS-013; L8 containment/provenance                                          | planned                     |
+| FR-BLD-001, FR-BLD-002                         | Contained build executor, job engine, artifact validation        | BLD-001, ART-001, MCP-003, UI-005, SEC-002                       | AS-012/AS-013; L8 containment/provenance                                          | blocked — BLD-001 explicitly deferred after R1 `NEEDS_REPLAN`; no containment claim accepted |
 | FR-ART-001                                     | Artifact registry, connector capability, deployment domain       | ART-001, CON-001, OPS-001, DEP-001, UI-005, HIL-001              | type/bundle/resource/compatibility/substitution and physical apply/rollback tests | planned                     |
 | FR-JOB-001                                     | Durable job engine/storage                                       | DAT-001, JOB-001, RUN-003, UI-005                                | AS-009/AS-010; crash/reconcile tests                                              | planned                     |
 | FR-APR-001, FR-APR-002                         | Policy/approval domain                                           | APR-001, MCP-003, UI-003, UI-005                                 | AS-006/AS-007; binding/race tests                                                 | planned                     |
@@ -43,7 +43,7 @@ Updated: **2026-08-15**
 | NFR-SAFE-001                                   | Policy, job, connector, deployment                               | CON-001, JOB-001, APR-001, OPS-001, SEC-002, HIL-001             | wrong-target/interruption/approval evidence                                       | planned                     |
 | NFR-REL-001, NFR-REL-002                       | Runtime lifecycle/job engine                                     | RUN-003, JOB-001, P1-INT-001, INT-001                            | AS-009/AS-010; retry/idempotency                                                  | planned                     |
 | NFR-DATA-001                                   | SQLite/migrations                                                | DAT-001, PKG-002                                                 | migration/recovery/update tests                                                   | planned                     |
-| NFR-DATA-002                                   | SQLCipher storage and OS-protected key service                   | DAT-002, SEC-001, PKG-001, PKG-002                               | AS-016; wrong-key/rotation/backup/service-user tests                              | blocked OQ-007              |
+| NFR-DATA-002                                   | SQLCipher storage and OS-protected key service                   | DAT-002, SEC-001, PKG-001, PKG-002                               | AS-016; wrong-key/rotation/backup/service-user tests                              | ready — OQ-007 accepted; implementation evidence pending |
 | NFR-OBS-001                                    | Contracts/runtime/activity                                       | CTR-001, RUN-001, DAT-001, P1-INT-001, INT-001                   | correlation/redaction/diagnostics                                                 | planned                     |
 | NFR-PERF-001, NFR-PERF-002                     | Desktop/runtime streams                                          | DSK-001, MON-001, UI-001, UI-004, UI-006, P1-INT-001, INT-001    | startup/backpressure/soak results                                                 | planned                     |
 | NFR-COMP-001                                   | Shared contracts/release updater                                 | CTR-001, RUN-002, MCP-001, PKG-002                               | compatibility matrix                                                              | planned                     |

@@ -1,7 +1,7 @@
 # LokiAI project context
 
 Status: **Informative baseline**  
-Updated: **2026-08-15**
+Updated: **2026-08-24**
 
 ## Product story
 
@@ -110,7 +110,12 @@ visual baseline and should be wired to production behavior rather than replaced.
 | OQ-004 | Windows distribution channel: direct signed installer, Microsoft Store, or both | Signing, update, and service-install behavior differ | Packaging architecture gate |
 | OQ-005 | v1.2 commercial retention limits for telemetry, logs, incidents, and audit records | Storage, sync, privacy, and export behavior depend on policy | Persistence and release gates |
 | OQ-006 | Whether v1.2 includes an embedded LokiAI operations chat, or intentionally keeps coding conversation in Codex/Claude/Cursor while LokiAI Main remains the control center | Earlier product intent mentioned chatting inside LokiAI, but the accepted eight-tab UI and non-goal currently define external coding clients; silently choosing either changes scope and UI/agent architecture | Any chat UI/model/provider task; not the core desktop/runtime/MCP path |
-| OQ-007 | Direct-installer data-at-rest edition/support choice: SQLCipher Community with required attribution, or a supported commercial build | Both can satisfy the architecture, but support, provenance, licensing, performance packaging, and release notices differ | DAT-002 dependency acceptance and release packaging |
 
 Only the affected graph branch should wait on an unresolved input. Independent
 work may continue.
+
+## Resolved inputs
+
+| ID | Decision | Accepted by | Recorded effect |
+|---|---|---|---|
+| OQ-007 | SQLCipher Community Edition for the local-only v1.2 database implementation, with required attribution in release notices. The existing three bounded-context database files remain separate and each must receive full SQLCipher encryption with a shared Windows DPAPI-backed key lifecycle. | Human product owner, explicit “okay go ahead”, 2026-08-24 | Unblocks `DAT-002`; does not approve cloud, hardware, installer, or release work. See `Docs/graph/decisions/ADR-0001-local-data-encryption.md`. |

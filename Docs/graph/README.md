@@ -18,6 +18,7 @@ Docs/graph/
 ├── TASK_GRAPH.md             # accepted nodes, dependencies, gates, and state
 ├── INTEGRATION.md            # integration order and contract ownership
 ├── TRACEABILITY.md           # requirement → node → test/evidence coverage
+├── decisions/                # accepted architecture decision records (ADRs)
 ├── PROMPTS.md                # provider-neutral role prompts
 ├── tasks/                    # accepted immutable task packets
 ├── handoffs/                 # structured worker results
