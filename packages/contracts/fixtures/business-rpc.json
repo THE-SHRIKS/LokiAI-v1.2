@@ -1,0 +1,356 @@
+{
+  "requests": [
+    { "method": "runtime_get_status", "params": {} },
+    { "method": "devices_list", "params": { "limit": 20, "cursor": null } },
+    { "method": "device_get", "params": { "device_id": "dev-1" } },
+    {
+      "method": "device_get_health",
+      "params": { "device_id": "dev-1", "limit": 20, "cursor": null }
+    },
+    {
+      "method": "device_read_logs",
+      "params": { "device_id": "dev-1", "limit": 20, "cursor": null }
+    },
+    {
+      "method": "device_query_telemetry",
+      "params": { "device_id": "dev-1", "limit": 20, "cursor": null, "signal_ids": ["temperature"] }
+    },
+    { "method": "incidents_list", "params": { "limit": 20, "cursor": null } },
+    { "method": "incident_get", "params": { "incident_id": "inc-1" } },
+    { "method": "job_get", "params": { "job_id": "job-1" } },
+    {
+      "method": "agent_run_register",
+      "params": { "parent_run_id": null, "idempotency_key": "idem-1" }
+    },
+    {
+      "method": "agent_run_update",
+      "params": {
+        "run_id": "run-1",
+        "phase": "working",
+        "summary": "bounded status",
+        "idempotency_key": "idem-2"
+      }
+    },
+    {
+      "method": "work_intent_acknowledge",
+      "params": { "work_intent_id": "wi-1", "run_id": "run-1", "idempotency_key": "idem-3" }
+    },
+    {
+      "method": "health_check_request",
+      "params": { "device_id": "dev-1", "idempotency_key": "idem-4" }
+    },
+    {
+      "method": "preflight_request",
+      "params": { "device_id": "dev-1", "idempotency_key": "idem-5" }
+    },
+    { "method": "job_cancel", "params": { "job_id": "job-1", "idempotency_key": "idem-6" } },
+    {
+      "method": "build_request",
+      "params": {
+        "source_snapshot_id": "snap-1",
+        "target_id": "target-1",
+        "recipe_id": "recipe-1",
+        "idempotency_key": "idem-7"
+      }
+    },
+    {
+      "method": "restart_request",
+      "params": { "device_id": "dev-1", "idempotency_key": "idem-8" }
+    },
+    {
+      "method": "flash_request",
+      "params": {
+        "device_id": "dev-1",
+        "artifact_id": "art-1",
+        "artifact_digest": "0123456789abcdef0123456789abcdef",
+        "idempotency_key": "idem-9"
+      }
+    },
+    {
+      "method": "test_on_device_request",
+      "params": { "device_id": "dev-1", "test_suite_id": "suite-1", "idempotency_key": "idem-10" }
+    },
+    {
+      "method": "deployment_request",
+      "params": {
+        "device_id": "dev-1",
+        "artifact_id": "art-1",
+        "artifact_digest": "0123456789abcdef0123456789abcdef",
+        "verification_plan_id": "verify-1",
+        "rollback_plan_id": "rollback-1",
+        "idempotency_key": "idem-11"
+      }
+    },
+    {
+      "method": "rollback_request",
+      "params": {
+        "device_id": "dev-1",
+        "deployment_id": "dep-1",
+        "recovery_policy_id": "recovery-1",
+        "idempotency_key": "idem-12"
+      }
+    },
+    {
+      "method": "approval_grant",
+      "params": {
+        "approval_id": "approval-1",
+        "bound_request_digest": "fedcba9876543210fedcba9876543210",
+        "idempotency_key": "idem-13"
+      }
+    },
+    {
+      "method": "approval_deny",
+      "params": {
+        "approval_id": "approval-1",
+        "bound_request_digest": "fedcba9876543210fedcba9876543210",
+        "reason": "operator denied",
+        "idempotency_key": "idem-14"
+      }
+    }
+  ],
+  "results": [
+    {
+      "kind": "runtime_status",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-1"
+      },
+      "state": "connected",
+      "runtime_id": "runtime-1"
+    },
+    {
+      "kind": "devices_list",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-2"
+      },
+      "devices": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "device_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-3"
+      },
+      "device": null
+    },
+    {
+      "kind": "device_health",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-4"
+      },
+      "device_id": "dev-1",
+      "entries": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "device_logs",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-5"
+      },
+      "device_id": "dev-1",
+      "entries": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "device_telemetry",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-6"
+      },
+      "device_id": "dev-1",
+      "entries": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "incidents_list",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-7"
+      },
+      "incidents": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "incident_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-8"
+      },
+      "incident": null
+    },
+    {
+      "kind": "job_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-9"
+      },
+      "job": null
+    },
+    {
+      "kind": "agent_run",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-10"
+      },
+      "run_id": "run-1",
+      "state": "working"
+    },
+    {
+      "kind": "work_intent_acknowledged",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-11"
+      },
+      "work_intent_id": "wi-1",
+      "run_id": "run-1"
+    },
+    {
+      "kind": "operation",
+      "method": "health_check_request",
+      "outcome": "accepted",
+      "correlation_id": "corr-12",
+      "policy_reason": "accepted",
+      "approval_id": null,
+      "job_id": "job-1",
+      "bound_request_digest": null
+    },
+    {
+      "kind": "operation",
+      "method": "preflight_request",
+      "outcome": "accepted",
+      "correlation_id": "corr-13",
+      "policy_reason": "accepted",
+      "approval_id": null,
+      "job_id": "job-1",
+      "bound_request_digest": null
+    },
+    {
+      "kind": "operation",
+      "method": "job_cancel",
+      "outcome": "accepted",
+      "correlation_id": "corr-14",
+      "policy_reason": "accepted",
+      "approval_id": null,
+      "job_id": "job-1",
+      "bound_request_digest": null
+    },
+    {
+      "kind": "operation",
+      "method": "build_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-15",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "restart_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-16",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "flash_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-17",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "test_on_device_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-18",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "deployment_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-19",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "rollback_request",
+      "outcome": "approval_required",
+      "correlation_id": "corr-20",
+      "policy_reason": "approval required",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "approval_grant",
+      "outcome": "accepted",
+      "correlation_id": "corr-21",
+      "policy_reason": "decision recorded",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    },
+    {
+      "kind": "operation",
+      "method": "approval_deny",
+      "outcome": "accepted",
+      "correlation_id": "corr-22",
+      "policy_reason": "decision recorded",
+      "approval_id": "approval-1",
+      "job_id": null,
+      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+    }
+  ],
+  "streams": [
+    { "stream": "runtime_status", "after_sequence": null, "max_items": 10 },
+    { "stream": "device_projection", "after_sequence": null, "max_items": 10 },
+    { "stream": "device_health", "after_sequence": null, "max_items": 10 },
+    { "stream": "telemetry", "after_sequence": null, "max_items": 10 },
+    { "stream": "logs", "after_sequence": null, "max_items": 10 },
+    { "stream": "incidents", "after_sequence": null, "max_items": 10 },
+    { "stream": "jobs", "after_sequence": null, "max_items": 10 },
+    { "stream": "approvals", "after_sequence": null, "max_items": 10 },
+    { "stream": "notifications", "after_sequence": null, "max_items": 10 },
+    { "stream": "work_intents", "after_sequence": null, "max_items": 10 }
+  ],
+  "events": [
+    {
+      "stream": "runtime_status",
+      "sequence": 1,
+      "correlation_id": "corr-event-1",
+      "occurred_at": "2026-08-24T12:00:00Z",
+      "entity_id": "runtime-1",
+      "state": "connected",
+      "source_runtime_id": "runtime-1"
+    }
+  ]
+}

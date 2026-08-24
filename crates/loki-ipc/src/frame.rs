@@ -30,6 +30,8 @@ pub enum FrameError {
     /// The payload's bytes were not valid UTF-8 JSON, or did not match any
     /// [`WireMessage`] variant.
     Malformed(serde_json::Error),
+    /// JSON decoded to a known message, but its bounded semantic contract failed.
+    InvalidContract(String),
 }
 
 impl std::fmt::Display for FrameError {
@@ -40,6 +42,7 @@ impl std::fmt::Display for FrameError {
                 write!(f, "frame too large: {len} bytes (maximum {max})")
             }
             FrameError::Malformed(err) => write!(f, "malformed frame payload: {err}"),
+            FrameError::InvalidContract(message) => write!(f, "invalid frame contract: {message}"),
         }
     }
 }
@@ -50,6 +53,7 @@ impl std::error::Error for FrameError {
             FrameError::Io(err) => Some(err),
             FrameError::TooLarge { .. } => None,
             FrameError::Malformed(err) => Some(err),
+            FrameError::InvalidContract(_) => None,
         }
     }
 }
@@ -105,7 +109,10 @@ pub async fn read_frame<R: AsyncRead + Unpin>(
         .read_exact(&mut payload)
         .await
         .map_err(FrameError::Io)?;
-    let message = serde_json::from_slice(&payload).map_err(FrameError::Malformed)?;
+    let message: WireMessage = serde_json::from_slice(&payload).map_err(FrameError::Malformed)?;
+    message
+        .validate_contract()
+        .map_err(FrameError::InvalidContract)?;
     Ok(Some(message))
 }
 

@@ -26,7 +26,7 @@
 //! mirrors `crates/loki-runtime/src/runtime.rs`'s established
 //! shutdown-vs-heartbeat race pattern in this workspace.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,6 +36,10 @@ use uuid::Uuid;
 
 use crate::acl::{self, AclScope};
 use crate::auth::{self, AuthToken};
+use crate::business::{
+    AuthenticatedPrincipal, Authority, BUSINESS_CAPABILITY, MAX_STREAM_ITEMS, PrincipalKind,
+    bounded, safe_digest, safe_id, valid_page,
+};
 use crate::frame::{DEFAULT_MAX_FRAME_BYTES, FrameError, read_frame, write_frame};
 use crate::protocol::{
     CORE_CAPABILITY, CallOutcome, EchoStreamItem, EchoStreamSummary, HandshakeRejectReason,
@@ -57,6 +61,12 @@ const OUTGOING_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// finish.
 const WRITER_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+#[derive(Clone)]
+struct SessionAuthority {
+    negotiated_capabilities: BTreeSet<String>,
+    principal: AuthenticatedPrincipal,
+}
+
 /// Server-side configuration. See [`crate::acl`]/[`crate::auth`] for why
 /// both `acl_scope` and `token` exist.
 #[derive(Clone)]
@@ -76,6 +86,8 @@ pub struct ServerConfig {
     /// Bounded capacity of the per-connection outgoing frame queue — the
     /// backpressure knob described in this module's top doc comment.
     pub outgoing_channel_capacity: usize,
+    /// Server-created identity attached after credential authentication. Client metadata never mutates it.
+    pub principal: AuthenticatedPrincipal,
 }
 
 impl ServerConfig {
@@ -88,7 +100,13 @@ impl ServerConfig {
             out_buffer_size: 65536,
             in_buffer_size: 65536,
             outgoing_channel_capacity: 16,
+            principal: AuthenticatedPrincipal::runtime_service("unresolved-local-client"),
         }
+    }
+
+    pub fn with_principal(mut self, principal: AuthenticatedPrincipal) -> Self {
+        self.principal = principal;
+        self
     }
 }
 
@@ -292,8 +310,9 @@ impl Connection {
         write_frame(
             &mut writer,
             &WireMessage::HelloAck {
-                negotiated_capabilities,
+                negotiated_capabilities: negotiated_capabilities.clone(),
                 session_id,
+                principal: Some(config.principal.clone()),
             },
         )
         .await
@@ -306,7 +325,16 @@ impl Connection {
             "ipc connection established"
         );
 
-        run_dispatch_loop(reader, writer, &config).await
+        run_dispatch_loop(
+            reader,
+            writer,
+            &config,
+            SessionAuthority {
+                negotiated_capabilities,
+                principal: config.principal.clone(),
+            },
+        )
+        .await
     }
 }
 
@@ -328,6 +356,7 @@ async fn run_dispatch_loop<R, W>(
     mut reader: R,
     mut writer: W,
     config: &Arc<ServerConfig>,
+    session_authority: SessionAuthority,
 ) -> Result<(), ConnectionError>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -357,6 +386,7 @@ where
                             correlation_id,
                             deadline_unix_millis,
                             method,
+                            session_authority.clone(),
                             outgoing_tx.clone(),
                             cancel_rx,
                             completed_tx.clone(),
@@ -369,6 +399,7 @@ where
                             correlation_id,
                             deadline_unix_millis,
                             method,
+                            session_authority.clone(),
                             outgoing_tx.clone(),
                             cancel_rx,
                             completed_tx.clone(),
@@ -435,6 +466,7 @@ fn spawn_unary_call(
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: Method,
+    session_authority: SessionAuthority,
     outgoing_tx: mpsc::Sender<WireMessage>,
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
@@ -442,7 +474,11 @@ fn spawn_unary_call(
     tokio::spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let outcome = tokio::select! {
-            outcome = execute_method(method) => outcome,
+            outcome = execute_method(
+                method,
+                &session_authority.negotiated_capabilities,
+                &session_authority.principal,
+            ) => outcome,
             _ = tokio::time::sleep(deadline) => CallOutcome::Err { error: RpcError::DeadlineExceeded },
             _ = &mut cancel_rx => CallOutcome::Err { error: RpcError::Cancelled },
         };
@@ -458,13 +494,25 @@ fn spawn_unary_call(
     });
 }
 
-async fn execute_method(method: Method) -> CallOutcome {
+async fn execute_method(
+    method: Method,
+    negotiated_capabilities: &std::collections::BTreeSet<String>,
+    principal: &AuthenticatedPrincipal,
+) -> CallOutcome {
+    if let Err(error) = authorize_method(&method, negotiated_capabilities, principal) {
+        return CallOutcome::Err { error };
+    }
     match method {
         Method::Ping(params) => CallOutcome::Ok {
             result: MethodResult::Ping(PongResult {
                 payload: params.payload,
                 server_unix_millis: time::unix_millis_now(),
             }),
+        },
+        business => CallOutcome::Err {
+            error: RpcError::UnsupportedMethod {
+                method: method_name(&business).to_string(),
+            },
         },
     }
 }
@@ -473,6 +521,7 @@ fn spawn_stream_call(
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: StreamMethod,
+    session_authority: SessionAuthority,
     outgoing_tx: mpsc::Sender<WireMessage>,
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
@@ -480,7 +529,13 @@ fn spawn_stream_call(
     tokio::spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let result = tokio::select! {
-            result = execute_stream_method(correlation_id, method, &outgoing_tx) => result,
+            result = execute_stream_method(
+                correlation_id,
+                method,
+                &outgoing_tx,
+                &session_authority.negotiated_capabilities,
+                &session_authority.principal,
+            ) => result,
             _ = tokio::time::sleep(deadline) => Err(RpcError::DeadlineExceeded),
             _ = &mut cancel_rx => Err(RpcError::Cancelled),
         };
@@ -504,6 +559,8 @@ async fn execute_stream_method(
     correlation_id: Uuid,
     method: StreamMethod,
     outgoing_tx: &mpsc::Sender<WireMessage>,
+    negotiated_capabilities: &std::collections::BTreeSet<String>,
+    principal: &AuthenticatedPrincipal,
 ) -> Result<StreamSummary, RpcError> {
     match method {
         StreamMethod::EchoStream(params) => {
@@ -534,12 +591,334 @@ async fn execute_stream_method(
                 items_sent: params.count,
             }))
         }
+        StreamMethod::BusinessEvents(params) => {
+            if !negotiated_capabilities.contains(BUSINESS_CAPABILITY) {
+                return Err(RpcError::MissingCapability {
+                    required: BUSINESS_CAPABILITY.to_string(),
+                });
+            }
+            if !principal.authorizes(Authority::Subscribe) {
+                return Err(RpcError::PermissionDenied);
+            }
+            if params.max_items == 0 || params.max_items > MAX_STREAM_ITEMS {
+                return Err(RpcError::InvalidRequest {
+                    message: "max_items is outside the bounded range".to_string(),
+                });
+            }
+            Err(RpcError::UnsupportedMethod {
+                method: "business_events".to_string(),
+            })
+        }
+    }
+}
+
+fn authorize_method(
+    method: &Method,
+    capabilities: &std::collections::BTreeSet<String>,
+    principal: &AuthenticatedPrincipal,
+) -> Result<(), RpcError> {
+    if matches!(method, Method::Ping(_)) {
+        return Ok(());
+    }
+    if !capabilities.contains(BUSINESS_CAPABILITY) {
+        return Err(RpcError::MissingCapability {
+            required: BUSINESS_CAPABILITY.to_string(),
+        });
+    }
+    validate_method(method)?;
+    let required = match method {
+        Method::Ping(_) => return Ok(()),
+        Method::RuntimeGetStatus(_) => Authority::ReadRuntime,
+        Method::DevicesList(_) | Method::DeviceGet(_) | Method::DeviceGetHealth(_) => {
+            Authority::ReadDevices
+        }
+        Method::DeviceReadLogs(_) | Method::DeviceQueryTelemetry(_) => Authority::ReadTelemetry,
+        Method::IncidentsList(_) | Method::IncidentGet(_) => Authority::ReadIncidents,
+        Method::JobGet(_) => Authority::ReadJobs,
+        Method::AgentRunRegister(_) | Method::AgentRunUpdate(_) => Authority::ManageAgentRuns,
+        Method::WorkIntentAcknowledge(_) => Authority::AcknowledgeWorkIntents,
+        Method::HealthCheckRequest(_) | Method::PreflightRequest(_) => {
+            Authority::RequestDiagnostics
+        }
+        Method::JobCancel(_) => Authority::CancelJobs,
+        Method::BuildRequest(_) => Authority::RequestBuild,
+        Method::RestartRequest(_)
+        | Method::FlashRequest(_)
+        | Method::TestOnDeviceRequest(_)
+        | Method::DeploymentRequest(_)
+        | Method::RollbackRequest(_) => Authority::RequestDeviceOperation,
+        Method::ApprovalGrant(_) | Method::ApprovalDeny(_) => {
+            if principal.kind != PrincipalKind::DesktopInstallation {
+                return Err(RpcError::PermissionDenied);
+            }
+            Authority::DecideApproval
+        }
+    };
+    principal
+        .authorizes(required)
+        .then_some(())
+        .ok_or(RpcError::PermissionDenied)
+}
+
+pub(crate) fn validate_method(method: &Method) -> Result<(), RpcError> {
+    let valid = match method {
+        Method::Ping(_) | Method::RuntimeGetStatus(_) => true,
+        Method::DevicesList(v) | Method::IncidentsList(v) => {
+            valid_page(v.limit, v.cursor.as_deref())
+        }
+        Method::DeviceGet(v) => safe_id(&v.device_id, 200),
+        Method::DeviceGetHealth(v) | Method::DeviceReadLogs(v) => {
+            safe_id(&v.device_id, 200) && valid_page(v.limit, v.cursor.as_deref())
+        }
+        Method::DeviceQueryTelemetry(v) => {
+            safe_id(&v.device_id, 200)
+                && valid_page(v.limit, v.cursor.as_deref())
+                && v.signal_ids.len() <= 64
+                && v.signal_ids.iter().all(|s| bounded(s, 128))
+        }
+        Method::IncidentGet(v) => safe_id(&v.incident_id, 200),
+        Method::JobGet(v) => safe_id(&v.job_id, 200),
+        Method::AgentRunRegister(v) => {
+            v.parent_run_id.as_deref().is_none_or(|id| safe_id(id, 200))
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::JobCancel(v) => safe_id(&v.job_id, 200) && safe_id(&v.idempotency_key, 200),
+        Method::AgentRunUpdate(v) => {
+            safe_id(&v.run_id, 200)
+                && matches!(
+                    v.phase.as_str(),
+                    "planning" | "working" | "waiting" | "completed" | "failed"
+                )
+                && bounded(&v.summary, crate::business::MAX_TEXT_BYTES)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::WorkIntentAcknowledge(v) => {
+            safe_id(&v.work_intent_id, 200)
+                && safe_id(&v.run_id, 200)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::HealthCheckRequest(v) | Method::PreflightRequest(v) | Method::RestartRequest(v) => {
+            safe_id(&v.device_id, 200) && safe_id(&v.idempotency_key, 200)
+        }
+        Method::BuildRequest(v) => {
+            safe_id(&v.source_snapshot_id, 200)
+                && safe_id(&v.target_id, 200)
+                && safe_id(&v.recipe_id, 200)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::FlashRequest(v) => {
+            safe_id(&v.device_id, 200)
+                && safe_id(&v.artifact_id, 200)
+                && safe_digest(&v.artifact_digest)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::TestOnDeviceRequest(v) => {
+            safe_id(&v.device_id, 200)
+                && safe_id(&v.test_suite_id, 200)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::DeploymentRequest(v) => {
+            safe_id(&v.device_id, 200)
+                && safe_id(&v.artifact_id, 200)
+                && safe_digest(&v.artifact_digest)
+                && bounded(&v.verification_plan_id, 200)
+                && bounded(&v.rollback_plan_id, 200)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::RollbackRequest(v) => {
+            safe_id(&v.device_id, 200)
+                && safe_id(&v.deployment_id, 200)
+                && bounded(&v.recovery_policy_id, 200)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::ApprovalGrant(v) => {
+            safe_id(&v.approval_id, 200)
+                && safe_digest(&v.bound_request_digest)
+                && safe_id(&v.idempotency_key, 200)
+        }
+        Method::ApprovalDeny(v) => {
+            safe_id(&v.approval_id, 200)
+                && safe_digest(&v.bound_request_digest)
+                && bounded(&v.reason, crate::business::MAX_TEXT_BYTES)
+                && safe_id(&v.idempotency_key, 200)
+        }
+    };
+    valid.then_some(()).ok_or_else(|| RpcError::InvalidRequest {
+        message: "business RPC parameters failed bounds validation".to_string(),
+    })
+}
+
+fn method_name(method: &Method) -> &'static str {
+    match method {
+        Method::Ping(_) => "ping",
+        Method::RuntimeGetStatus(_) => "runtime_get_status",
+        Method::DevicesList(_) => "devices_list",
+        Method::DeviceGet(_) => "device_get",
+        Method::DeviceGetHealth(_) => "device_get_health",
+        Method::DeviceReadLogs(_) => "device_read_logs",
+        Method::DeviceQueryTelemetry(_) => "device_query_telemetry",
+        Method::IncidentsList(_) => "incidents_list",
+        Method::IncidentGet(_) => "incident_get",
+        Method::JobGet(_) => "job_get",
+        Method::AgentRunRegister(_) => "agent_run_register",
+        Method::AgentRunUpdate(_) => "agent_run_update",
+        Method::WorkIntentAcknowledge(_) => "work_intent_acknowledge",
+        Method::HealthCheckRequest(_) => "health_check_request",
+        Method::PreflightRequest(_) => "preflight_request",
+        Method::JobCancel(_) => "job_cancel",
+        Method::BuildRequest(_) => "build_request",
+        Method::RestartRequest(_) => "restart_request",
+        Method::FlashRequest(_) => "flash_request",
+        Method::TestOnDeviceRequest(_) => "test_on_device_request",
+        Method::DeploymentRequest(_) => "deployment_request",
+        Method::RollbackRequest(_) => "rollback_request",
+        Method::ApprovalGrant(_) => "approval_grant",
+        Method::ApprovalDeny(_) => "approval_deny",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct BusinessFixture {
+        requests: Vec<Method>,
+    }
+
+    fn expected_authority(method: &Method) -> Authority {
+        match method {
+            Method::RuntimeGetStatus(_) => Authority::ReadRuntime,
+            Method::DevicesList(_) | Method::DeviceGet(_) | Method::DeviceGetHealth(_) => {
+                Authority::ReadDevices
+            }
+            Method::DeviceReadLogs(_) | Method::DeviceQueryTelemetry(_) => Authority::ReadTelemetry,
+            Method::IncidentsList(_) | Method::IncidentGet(_) => Authority::ReadIncidents,
+            Method::JobGet(_) => Authority::ReadJobs,
+            Method::AgentRunRegister(_) | Method::AgentRunUpdate(_) => Authority::ManageAgentRuns,
+            Method::WorkIntentAcknowledge(_) => Authority::AcknowledgeWorkIntents,
+            Method::HealthCheckRequest(_) | Method::PreflightRequest(_) => {
+                Authority::RequestDiagnostics
+            }
+            Method::JobCancel(_) => Authority::CancelJobs,
+            Method::BuildRequest(_) => Authority::RequestBuild,
+            Method::RestartRequest(_)
+            | Method::FlashRequest(_)
+            | Method::TestOnDeviceRequest(_)
+            | Method::DeploymentRequest(_)
+            | Method::RollbackRequest(_) => Authority::RequestDeviceOperation,
+            Method::ApprovalGrant(_) | Method::ApprovalDeny(_) => Authority::DecideApproval,
+            Method::Ping(_) => panic!("business fixture must not contain core ping"),
+        }
+    }
+
+    #[test]
+    fn every_business_method_requires_capability_and_its_exact_authority() {
+        let fixture: BusinessFixture = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/business-rpc.json"
+        ))
+        .expect("business fixture");
+        assert_eq!(
+            fixture.requests.len(),
+            23,
+            "cover the complete method table"
+        );
+
+        for method in fixture.requests {
+            let required = expected_authority(&method);
+            let no_capabilities = BTreeSet::new();
+            let denied = AuthenticatedPrincipal {
+                kind: PrincipalKind::DesktopInstallation,
+                principal_id: "desktop-denied".to_string(),
+                authority: BTreeSet::new(),
+            };
+            assert!(matches!(
+                authorize_method(&method, &no_capabilities, &denied),
+                Err(RpcError::MissingCapability { .. })
+            ));
+            assert!(matches!(
+                authorize_method(&method, &crate::protocol::previous_capabilities(), &denied),
+                Err(RpcError::MissingCapability { .. })
+            ));
+            assert!(matches!(
+                authorize_method(&method, &baseline_capabilities(), &denied),
+                Err(RpcError::PermissionDenied)
+            ));
+
+            let allowed = AuthenticatedPrincipal {
+                kind: PrincipalKind::DesktopInstallation,
+                principal_id: "desktop-allowed".to_string(),
+                authority: BTreeSet::from([required]),
+            };
+            assert!(authorize_method(&method, &baseline_capabilities(), &allowed).is_ok());
+
+            if required == Authority::DecideApproval {
+                let agent = AuthenticatedPrincipal {
+                    kind: PrincipalKind::AgentConnection,
+                    principal_id: "agent-denied".to_string(),
+                    authority: BTreeSet::from([Authority::DecideApproval]),
+                };
+                assert!(matches!(
+                    authorize_method(&method, &baseline_capabilities(), &agent),
+                    Err(RpcError::PermissionDenied)
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn business_subscription_requires_capability_and_subscribe_authority() {
+        let params = crate::business::BusinessStreamParams {
+            stream: crate::business::BusinessStreamName::Jobs,
+            after_sequence: None,
+            max_items: 10,
+        };
+        let (tx, _rx) = mpsc::channel(1);
+        let denied = AuthenticatedPrincipal {
+            kind: PrincipalKind::AgentConnection,
+            principal_id: "agent".to_string(),
+            authority: BTreeSet::new(),
+        };
+        assert!(matches!(
+            execute_stream_method(
+                Uuid::nil(),
+                StreamMethod::BusinessEvents(params.clone()),
+                &tx,
+                &BTreeSet::new(),
+                &denied,
+            )
+            .await,
+            Err(RpcError::MissingCapability { .. })
+        ));
+        assert!(matches!(
+            execute_stream_method(
+                Uuid::nil(),
+                StreamMethod::BusinessEvents(params.clone()),
+                &tx,
+                &baseline_capabilities(),
+                &denied,
+            )
+            .await,
+            Err(RpcError::PermissionDenied)
+        ));
+        let allowed = AuthenticatedPrincipal {
+            kind: PrincipalKind::AgentConnection,
+            principal_id: "agent".to_string(),
+            authority: BTreeSet::from([Authority::Subscribe]),
+        };
+        assert!(matches!(
+            execute_stream_method(
+                Uuid::nil(),
+                StreamMethod::BusinessEvents(params),
+                &tx,
+                &baseline_capabilities(),
+                &allowed,
+            )
+            .await,
+            Err(RpcError::UnsupportedMethod { .. })
+        ));
+    }
 
     #[tokio::test]
     async fn outgoing_channel_with_capacity_one_reports_full_when_saturated() {
@@ -562,9 +941,15 @@ mod tests {
 
     #[tokio::test]
     async fn execute_ping_echoes_payload() {
-        let outcome = execute_method(Method::Ping(crate::protocol::PingParams {
-            payload: "hi".to_string(),
-        }))
+        let capabilities = baseline_capabilities();
+        let principal = AuthenticatedPrincipal::runtime_service("test");
+        let outcome = execute_method(
+            Method::Ping(crate::protocol::PingParams {
+                payload: "hi".to_string(),
+            }),
+            &capabilities,
+            &principal,
+        )
         .await;
         match outcome {
             CallOutcome::Ok {
@@ -577,6 +962,8 @@ mod tests {
     #[tokio::test]
     async fn echo_stream_over_the_configured_maximum_is_rejected_as_invalid_request() {
         let (tx, mut rx) = mpsc::channel(4);
+        let capabilities = baseline_capabilities();
+        let principal = AuthenticatedPrincipal::runtime_service("test");
         let result = execute_stream_method(
             Uuid::nil(),
             StreamMethod::EchoStream(crate::protocol::EchoStreamParams {
@@ -584,6 +971,8 @@ mod tests {
                 count: MAX_ECHO_STREAM_COUNT + 1,
             }),
             &tx,
+            &capabilities,
+            &principal,
         )
         .await;
         assert!(matches!(result, Err(RpcError::InvalidRequest { .. })));
@@ -594,6 +983,8 @@ mod tests {
     #[tokio::test]
     async fn echo_stream_sends_every_item_in_order() {
         let (tx, mut rx) = mpsc::channel(16);
+        let capabilities = baseline_capabilities();
+        let principal = AuthenticatedPrincipal::runtime_service("test");
         let handle = tokio::spawn(async move {
             execute_stream_method(
                 Uuid::nil(),
@@ -602,6 +993,8 @@ mod tests {
                     count: 5,
                 }),
                 &tx,
+                &capabilities,
+                &principal,
             )
             .await
         });

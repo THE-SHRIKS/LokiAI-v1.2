@@ -18,6 +18,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::auth::AuthToken;
+use crate::business::AuthenticatedPrincipal;
 use crate::frame::{DEFAULT_MAX_FRAME_BYTES, FrameError, read_frame, write_frame};
 use crate::protocol::{
     CallOutcome, EchoStreamItem, EchoStreamParams, EchoStreamSummary, HandshakeRejectReason,
@@ -192,6 +193,7 @@ pub struct Client {
     reader_task: JoinHandle<()>,
     negotiated_capabilities: std::collections::BTreeSet<String>,
     session_id: Uuid,
+    authenticated_principal: Option<AuthenticatedPrincipal>,
     stream_event_capacity: usize,
 }
 
@@ -205,6 +207,7 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("session_id", &self.session_id)
             .field("negotiated_capabilities", &self.negotiated_capabilities)
+            .field("authenticated_principal", &self.authenticated_principal)
             .finish_non_exhaustive()
     }
 }
@@ -230,6 +233,10 @@ impl Client {
 
     pub fn session_id(&self) -> Uuid {
         self.session_id
+    }
+
+    pub fn authenticated_principal(&self) -> Option<&AuthenticatedPrincipal> {
+        self.authenticated_principal.as_ref()
     }
 
     /// Opens the pipe (retrying `ERROR_PIPE_BUSY` up to
@@ -262,12 +269,13 @@ impl Client {
             .await
             .map_err(ConnectError::Frame)?;
 
-        let (negotiated_capabilities, session_id) =
+        let (negotiated_capabilities, session_id, authenticated_principal) =
             match read_frame(&mut reader, config.max_frame_bytes).await {
                 Ok(Some(WireMessage::HelloAck {
                     negotiated_capabilities,
                     session_id,
-                })) => (negotiated_capabilities, session_id),
+                    principal,
+                })) => (negotiated_capabilities, session_id, principal),
                 Ok(Some(WireMessage::HelloReject {
                     reason,
                     server_protocol_version,
@@ -308,6 +316,7 @@ impl Client {
             reader_task,
             negotiated_capabilities,
             session_id,
+            authenticated_principal,
             stream_event_capacity: config.stream_event_capacity,
         })
     }
@@ -438,8 +447,9 @@ where
                         _ => None,
                     }
                 };
-                if let Some(tx) = sender {
-                    let StreamItemPayload::EchoStream(echo_item) = item;
+                if let Some(tx) = sender
+                    && let StreamItemPayload::EchoStream(echo_item) = item
+                {
                     let _ = tx.send(StreamEvent::Item(echo_item)).await;
                 }
             }
@@ -453,6 +463,11 @@ where
                         StreamOutcome::Ok {
                             summary: StreamSummary::EchoStream(summary),
                         } => Ok(summary),
+                        StreamOutcome::Ok {
+                            summary: StreamSummary::BusinessEvents(_),
+                        } => Err(RpcError::Internal {
+                            message: "business stream reached echo-only client API".to_string(),
+                        }),
                         StreamOutcome::Err { error } => Err(error),
                     };
                     let _ = tx.send(StreamEvent::Ended(result)).await;

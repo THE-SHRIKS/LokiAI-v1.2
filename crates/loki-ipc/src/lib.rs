@@ -72,6 +72,7 @@ compile_error!(
 // clear message instead of a cascade of "module not found"/unresolved-
 // import errors from code that could never have compiled there anyway.
 pub mod auth;
+pub mod business;
 pub mod frame;
 pub mod protocol;
 pub mod time;

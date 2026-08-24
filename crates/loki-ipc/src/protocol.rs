@@ -29,6 +29,15 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::business::{
+    AgentRunRegisterParams, AgentRunUpdateParams, ApprovalDenyParams, ApprovalGrantParams,
+    ArtifactOperationParams, AuthenticatedPrincipal, BUSINESS_CAPABILITY, BuildRequestParams,
+    BusinessEvent, BusinessStreamParams, BusinessStreamSummary, DeploymentRequestParams,
+    DevicePageParams, DeviceParams, EmptyParams, IdempotentDeviceParams, IncidentParams,
+    JobCancelParams, JobParams, PageParams, RollbackRequestParams, TelemetryParams,
+    TestOperationParams, WorkIntentAckParams,
+};
+
 /// Semantic protocol version. The server rejects a client whose `major`
 /// differs (`Docs/ARCHITECTURE.md` §13: "Incompatible clients receive a
 /// precise upgrade-required state, not generic disconnection"); `minor`
@@ -60,7 +69,8 @@ impl std::fmt::Display for ProtocolVersion {
 }
 
 /// The protocol version this build of loki-ipc speaks.
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
+pub const PREVIOUS_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
 
 /// A capability every client must declare for the handshake to succeed.
 /// Real per-capability gating (e.g. "this client may subscribe to
@@ -72,6 +82,11 @@ pub const CORE_CAPABILITY: &str = "loki-ipc.core.v1";
 
 /// The capability set this build of loki-ipc declares by default.
 pub fn baseline_capabilities() -> BTreeSet<String> {
+    BTreeSet::from([CORE_CAPABILITY.to_string(), BUSINESS_CAPABILITY.to_string()])
+}
+
+/// The bounded previous edge supports transport health only, never business authority.
+pub fn previous_capabilities() -> BTreeSet<String> {
     BTreeSet::from([CORE_CAPABILITY.to_string()])
 }
 
@@ -87,11 +102,40 @@ pub type CorrelationId = Uuid;
 
 /// Unary (single-response) RPC methods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method", content = "params")]
+#[serde(
+    tag = "method",
+    content = "params",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Method {
     /// Proves the round trip works: server echoes `payload` back plus its
     /// own clock reading.
+    #[serde(rename = "Ping")]
     Ping(PingParams),
+    RuntimeGetStatus(EmptyParams),
+    DevicesList(PageParams),
+    DeviceGet(DeviceParams),
+    DeviceGetHealth(DevicePageParams),
+    DeviceReadLogs(DevicePageParams),
+    DeviceQueryTelemetry(TelemetryParams),
+    IncidentsList(PageParams),
+    IncidentGet(IncidentParams),
+    JobGet(JobParams),
+    AgentRunRegister(AgentRunRegisterParams),
+    AgentRunUpdate(AgentRunUpdateParams),
+    WorkIntentAcknowledge(WorkIntentAckParams),
+    HealthCheckRequest(IdempotentDeviceParams),
+    PreflightRequest(IdempotentDeviceParams),
+    JobCancel(JobCancelParams),
+    BuildRequest(BuildRequestParams),
+    RestartRequest(IdempotentDeviceParams),
+    FlashRequest(ArtifactOperationParams),
+    TestOnDeviceRequest(TestOperationParams),
+    DeploymentRequest(DeploymentRequestParams),
+    RollbackRequest(RollbackRequestParams),
+    ApprovalGrant(ApprovalGrantParams),
+    ApprovalDeny(ApprovalDenyParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,11 +145,18 @@ pub struct PingParams {
 
 /// Streaming (server-to-client, multi-response) RPC methods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method", content = "params")]
+#[serde(
+    tag = "method",
+    content = "params",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum StreamMethod {
     /// Proves server-to-client streaming works: the server sends `count`
     /// numbered items, each carrying `payload`, then a summary.
+    #[serde(rename = "EchoStream")]
     EchoStream(EchoStreamParams),
+    BusinessEvents(BusinessStreamParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +200,7 @@ pub enum MethodResult {
 #[serde(tag = "method", content = "item")]
 pub enum StreamItemPayload {
     EchoStream(EchoStreamItem),
+    BusinessEvent(BusinessEvent),
 }
 
 /// The successful terminal summary of a [`StreamMethod`] call.
@@ -156,6 +208,7 @@ pub enum StreamItemPayload {
 #[serde(tag = "method", content = "summary")]
 pub enum StreamSummary {
     EchoStream(EchoStreamSummary),
+    BusinessEvents(BusinessStreamSummary),
 }
 
 /// A named, typed RPC failure. Every rejection reason is explicit — never a
@@ -172,10 +225,21 @@ pub enum RpcError {
     Cancelled,
     /// The request parameters failed validation (e.g. `EchoStream.count`
     /// exceeding [`MAX_ECHO_STREAM_COUNT`]).
-    InvalidRequest { message: String },
+    InvalidRequest {
+        message: String,
+    },
+    MissingCapability {
+        required: String,
+    },
+    PermissionDenied,
+    UnsupportedMethod {
+        method: String,
+    },
     /// An unexpected server-side failure (e.g. the handler task panicked).
     /// Never includes raw internal detail beyond a short, redacted summary.
-    Internal { message: String },
+    Internal {
+        message: String,
+    },
 }
 
 impl std::fmt::Display for RpcError {
@@ -184,6 +248,9 @@ impl std::fmt::Display for RpcError {
             RpcError::DeadlineExceeded => write!(f, "deadline exceeded"),
             RpcError::Cancelled => write!(f, "cancelled"),
             RpcError::InvalidRequest { message } => write!(f, "invalid request: {message}"),
+            RpcError::MissingCapability { required } => write!(f, "missing capability: {required}"),
+            RpcError::PermissionDenied => write!(f, "permission denied"),
+            RpcError::UnsupportedMethod { method } => write!(f, "unsupported method: {method}"),
             RpcError::Internal { message } => write!(f, "internal error: {message}"),
         }
     }
@@ -285,6 +352,9 @@ pub enum WireMessage {
     HelloAck {
         negotiated_capabilities: BTreeSet<String>,
         session_id: Uuid,
+        /// Authenticated by server configuration/credential resolution. Never derived from `client_type`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        principal: Option<AuthenticatedPrincipal>,
     },
     /// Server -> client: handshake rejected. The connection is closed
     /// immediately after this frame.
@@ -329,6 +399,82 @@ pub enum WireMessage {
     /// `CallStream` early. Best-effort: if the call already finished, this
     /// is a silent no-op.
     CancelCall { correlation_id: CorrelationId },
+}
+
+impl WireMessage {
+    /// Enforces semantic bounds immediately after JSON decoding, before dispatch.
+    pub fn validate_contract(&self) -> Result<(), String> {
+        match self {
+            WireMessage::Hello {
+                client_capabilities,
+                client_type,
+                client_version,
+                token,
+                ..
+            } => {
+                if client_capabilities.len() > 64
+                    || client_capabilities
+                        .iter()
+                        .any(|value| value.is_empty() || value.len() > 100)
+                    || client_type.is_empty()
+                    || client_type.len() > 100
+                    || client_version.is_empty()
+                    || client_version.len() > 100
+                    || token.is_empty()
+                    || token.len() > 4096
+                {
+                    return Err("handshake fields exceed contract bounds".to_string());
+                }
+            }
+            WireMessage::HelloAck {
+                negotiated_capabilities,
+                principal,
+                ..
+            } => {
+                if negotiated_capabilities.len() > 64
+                    || negotiated_capabilities
+                        .iter()
+                        .any(|value| value.is_empty() || value.len() > 100)
+                    || principal.as_ref().is_some_and(|value| {
+                        value.principal_id.is_empty()
+                            || value.principal_id.len() > 200
+                            || value.authority.len() > 13
+                    })
+                {
+                    return Err("server principal projection exceeds contract bounds".to_string());
+                }
+            }
+            WireMessage::Call { method, .. } => {
+                crate::server::validate_method(method).map_err(|error| error.to_string())?
+            }
+            WireMessage::CallStream {
+                method: StreamMethod::BusinessEvents(params),
+                ..
+            } => {
+                if params.max_items == 0 || params.max_items > crate::business::MAX_STREAM_ITEMS {
+                    return Err("business stream item bound is invalid".to_string());
+                }
+            }
+            WireMessage::StreamItem {
+                item: StreamItemPayload::BusinessEvent(event),
+                ..
+            } if event.entity_id.is_empty()
+                || event.entity_id.len() > 200
+                || event.state.is_empty()
+                || event.state.len() > 100
+                || event.correlation_id.is_empty()
+                || event.correlation_id.len() > 200
+                || event.source_runtime_id.is_empty()
+                || event.source_runtime_id.len() > 200
+                || event.occurred_at.is_empty()
+                || event.occurred_at.len() > 50 =>
+            {
+                return Err("business event exceeds contract bounds".to_string());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
