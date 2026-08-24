@@ -59,7 +59,7 @@ tracing = "=0.1.44"
 # Microsoft-maintained Win32 bindings for DPAPI and BCrypt. DAT-002 needs
 # these OS APIs for a non-exportable-at-rest database key; no extra wrapper
 # or plaintext secret file is introduced.
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 [dev-dependencies]
 # Creates auto-cleaned-up temporary files/directories for this crate's

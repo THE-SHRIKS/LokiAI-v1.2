@@ -245,12 +245,70 @@ pub fn configure_sqlcipher(
     // SQLCipher requires the key before *any* schema/page access. The key is
     // only materialized for this one native pragma call and is never logged.
     let mut statement = format!(
-        "PRAGMA key = \"x'{}'\"; PRAGMA cipher_compatibility = 4;",
+        "PRAGMA key = \"x'{}'\";
+         PRAGMA cipher_compatibility = 4;
+         PRAGMA temp_store = MEMORY;",
         key.sqlcipher_hex()
     );
     let result = conn.execute_batch(&statement).map_err(StorageError::from);
     wipe_string(&mut statement);
-    result
+    result?;
+
+    let cipher_version: String = conn
+        .query_row("PRAGMA cipher_version", [], |row| row.get(0))
+        .map_err(|error| StorageError::CipherConfiguration {
+            detail: format!("cipher_version is unavailable: {error}"),
+        })?;
+    if cipher_version.trim().is_empty() {
+        return Err(StorageError::CipherConfiguration {
+            detail: "cipher_version is empty".to_string(),
+        });
+    }
+    let temp_store: i64 = conn
+        .query_row("PRAGMA temp_store", [], |row| row.get(0))
+        .map_err(|error| StorageError::CipherConfiguration {
+            detail: format!("temp_store cannot be verified: {error}"),
+        })?;
+    if temp_store != 2 {
+        return Err(StorageError::CipherConfiguration {
+            detail: format!("temp_store must be MEMORY (2), got {temp_store}"),
+        });
+    }
+    let cipher_page_size_text: String = conn
+        .query_row("PRAGMA cipher_page_size", [], |row| row.get(0))
+        .map_err(|error| StorageError::CipherConfiguration {
+            detail: format!("cipher_page_size cannot be verified: {error}"),
+        })?;
+    let cipher_page_size = cipher_page_size_text.parse::<i64>().map_err(|error| {
+        StorageError::CipherConfiguration {
+            detail: format!("cipher_page_size {cipher_page_size_text:?} is not numeric: {error}"),
+        }
+    })?;
+    if !(512..=65_536).contains(&cipher_page_size)
+        || (cipher_page_size & (cipher_page_size - 1)) != 0
+    {
+        return Err(StorageError::CipherConfiguration {
+            detail: format!("invalid cipher_page_size {cipher_page_size}"),
+        });
+    }
+    Ok(())
+}
+
+/// Runs SQLCipher's page/HMAC check and SQLite's logical integrity check.
+/// SQLCipher reports success as either no rows or a single `ok` row depending
+/// on the linked compatible release.
+pub(crate) fn verify_cipher_integrity(conn: &Connection, path: &Path) -> Result<(), StorageError> {
+    let mut cipher_stmt = conn.prepare("PRAGMA cipher_integrity_check")?;
+    let cipher_rows: Vec<String> = cipher_stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !(cipher_rows.is_empty() || (cipher_rows.len() == 1 && cipher_rows[0] == "ok")) {
+        return Err(StorageError::Corrupt {
+            path: path.display().to_string(),
+            detail: format!("cipher_integrity_check: {}", cipher_rows.join("; ")),
+        });
+    }
+    verify_integrity_or_err(conn, &path.display().to_string())
 }
 
 pub(crate) fn wipe_string(value: &mut String) {

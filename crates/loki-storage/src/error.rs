@@ -17,6 +17,24 @@ pub enum StorageError {
     Sqlite(rusqlite::Error),
     #[cfg(windows)]
     Secret(crate::secret::SecretError),
+    /// A protected key exists but its database is absent. This is a recovery
+    /// state, never permission to create a replacement database.
+    MissingDatabase { path: String },
+    /// An existing database is too short to be a valid encrypted or plaintext
+    /// SQLite file. Treating it as a first-run database would hide data loss.
+    TruncatedDatabase { path: String, bytes: u64 },
+    /// The supplied protected key unwrapped successfully but cannot decrypt
+    /// the existing database.
+    WrongDatabaseKey { path: String },
+    /// SQLCipher is unavailable or its runtime configuration differs from the
+    /// required production configuration.
+    CipherConfiguration { detail: String },
+    /// A durable maintenance operation already owns this database.
+    MaintenanceInProgress { path: String },
+    /// Live database/key files are absent, but durable lifecycle artifacts
+    /// prove this is not a pristine first use. An operator/recovery path must
+    /// resolve the retained state before opening.
+    RecoveryRequired { path: String, detail: String },
     /// The database file exists but failed an integrity check (or SQLite
     /// could not even recognize it as a database). Never silently treated
     /// as "create a fresh empty database instead" — see
@@ -53,6 +71,28 @@ impl fmt::Display for StorageError {
             StorageError::Sqlite(e) => write!(f, "sqlite error: {e}"),
             #[cfg(windows)]
             StorageError::Secret(e) => write!(f, "{e}"),
+            StorageError::MissingDatabase { path } => {
+                write!(
+                    f,
+                    "encrypted database is missing and requires recovery: {path}"
+                )
+            }
+            StorageError::TruncatedDatabase { path, bytes } => write!(
+                f,
+                "database is truncated and requires recovery: {path} ({bytes} bytes)"
+            ),
+            StorageError::WrongDatabaseKey { path } => {
+                write!(f, "protected key does not unlock database: {path}")
+            }
+            StorageError::CipherConfiguration { detail } => {
+                write!(f, "SQLCipher configuration verification failed: {detail}")
+            }
+            StorageError::MaintenanceInProgress { path } => {
+                write!(f, "database maintenance is already in progress: {path}")
+            }
+            StorageError::RecoveryRequired { path, detail } => {
+                write!(f, "database recovery is required at '{path}': {detail}")
+            }
             StorageError::Corrupt { path, detail } => {
                 write!(
                     f,
@@ -118,6 +158,18 @@ mod tests {
         let samples: Vec<StorageError> = vec![
             StorageError::Io(std::io::Error::other("x")),
             StorageError::Corrupt {
+                path: "p".into(),
+                detail: "d".into(),
+            },
+            StorageError::MissingDatabase { path: "p".into() },
+            StorageError::TruncatedDatabase {
+                path: "p".into(),
+                bytes: 0,
+            },
+            StorageError::WrongDatabaseKey { path: "p".into() },
+            StorageError::CipherConfiguration { detail: "d".into() },
+            StorageError::MaintenanceInProgress { path: "p".into() },
+            StorageError::RecoveryRequired {
                 path: "p".into(),
                 detail: "d".into(),
             },

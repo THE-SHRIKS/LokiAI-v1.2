@@ -114,11 +114,13 @@ fn key_rotation_preserves_data_and_changes_the_protected_key() {
 fn dpapi_blob_does_not_contain_the_plaintext_secret() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("token.protected");
-    loki_storage::secret::store_new_secret(&path, MARKER.as_bytes()).unwrap();
+    loki_storage::secret::store_new_ipc_token(&path, MARKER).unwrap();
     assert!(!contains(&fs::read(&path).unwrap(), MARKER.as_bytes()));
     assert_eq!(
-        loki_storage::secret::load_secret(&path).unwrap(),
-        MARKER.as_bytes()
+        loki_storage::secret::load_ipc_token(&path)
+            .unwrap()
+            .expose(),
+        MARKER
     );
 }
 
