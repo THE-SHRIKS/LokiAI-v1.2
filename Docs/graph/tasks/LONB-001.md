@@ -18,7 +18,9 @@ Accepted `LOC-001`, `LDEV-001`, `MCP-002`, and ADR-0002. Read `AGENTS.md`,
 
 ## Ownership
 
-New `crates/loki-local-setup/**`, workspace manifest/lockfile, and node evidence.
+New `crates/loki-local-setup/**`, workspace manifest/lockfile, node evidence, and
+narrow read-only active-reference validation methods in `loki-agents` and
+`loki-local-devices` (no mutation or contract expansion beyond this consumer).
 No renderer, cloud, device mutation, agent credential creation, or fabricated
 completion.
 

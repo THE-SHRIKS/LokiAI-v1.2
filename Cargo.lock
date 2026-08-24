@@ -318,6 +318,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-local-setup"
+version = "1.2.0"
+dependencies = [
+ "loki-agents",
+ "loki-local-authority",
+ "loki-local-devices",
+ "rusqlite",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "loki-monitoring"
 version = "1.2.0"
 dependencies = [
