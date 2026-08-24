@@ -1,10 +1,9 @@
 # LokiAI Main v1.2 — loki-storage (DAT-001).
 #
-# Runtime-owned SQLite schema, versioned migrations, a repository pattern
+# Runtime-owned SQLCipher schema, versioned migrations, a repository pattern
 # over device registry / job records / outbox-inbox, and integrity/backup
-# primitives. See Docs/graph/tasks/DAT-001.md for exact scope. Plaintext
-# SQLite only — full-database encryption is DAT-002 (blocked on OQ-007);
-# src/cipher.rs is the explicit, swappable seam that node extends.
+# primitives. DAT-002 adds Windows DPAPI key protection, safe plaintext
+# migration, rotation, and encrypted backup to DAT-001's storage foundation.
 #
 # Dependency policy: every entry below is justified per AGENTS.md rule 11
 # (why it's needed, license, maintenance state) rather than added for
@@ -40,9 +39,9 @@ description = "LokiAI Main v1.2 runtime-owned SQLite storage: schema, versioned 
 # `default-features = false` drops upstream's default `ffi-sqlite-wasm-rs`
 # (a WASM SQLite backend irrelevant to this native desktop crate) and
 # `cache`/`hashlink` (an optional statement-cache this node's bounded
-# repository pattern does not use); only `bundled` (static SQLite) and
-# `backup` (the Online Backup API `Storage::backup_to` uses for its
-# documented consistency guarantee) are enabled.
+# repository pattern does not use); SQLCipher is statically compiled with
+# vendored OpenSSL, while `backup` supports the consistency-guaranteed backup
+# API.
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "backup"] }
 
 # Structured diagnostics for migration/integrity/backup lifecycle events —

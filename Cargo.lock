@@ -231,6 +231,7 @@ name = "loki-agents"
 version = "1.2.0"
 dependencies = [
  "loki-local-authority",
+ "loki-storage",
  "rusqlite",
  "sha2",
  "tempfile",
@@ -242,6 +243,7 @@ name = "loki-approvals"
 version = "1.2.0"
 dependencies = [
  "loki-local-authority",
+ "loki-storage",
  "rusqlite",
  "sha2",
  "tempfile",
@@ -304,6 +306,7 @@ name = "loki-local-authority"
 version = "1.2.0"
 dependencies = [
  "loki-ipc",
+ "loki-storage",
  "rusqlite",
  "tempfile",
  "uuid",
@@ -314,6 +317,7 @@ name = "loki-local-devices"
 version = "1.2.0"
 dependencies = [
  "loki-local-authority",
+ "loki-storage",
  "rusqlite",
  "tempfile",
  "uuid",
@@ -326,6 +330,7 @@ dependencies = [
  "loki-agents",
  "loki-local-authority",
  "loki-local-devices",
+ "loki-storage",
  "rusqlite",
  "tempfile",
  "uuid",

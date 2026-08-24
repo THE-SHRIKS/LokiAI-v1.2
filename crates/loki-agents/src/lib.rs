@@ -129,6 +129,7 @@ pub struct RunEvent {
 pub enum AgentError {
     Authority(AuthorityError),
     Sqlite(rusqlite::Error),
+    Storage(loki_storage::StorageError),
     InvalidInput { field: &'static str, reason: String },
     NotFound,
     Revoked,
@@ -148,6 +149,7 @@ impl fmt::Display for AgentError {
             match self {
                 Self::Authority(_) => "local authority denied agent action",
                 Self::Sqlite(_) => "agent database error",
+                Self::Storage(_) => "encrypted agent database open failed",
                 Self::InvalidInput { .. } => "invalid agent input",
                 Self::NotFound => "agent record not found",
                 Self::Revoked => "agent connection revoked",
@@ -173,13 +175,23 @@ impl From<rusqlite::Error> for AgentError {
         Self::Sqlite(v)
     }
 }
+impl From<loki_storage::StorageError> for AgentError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        Self::Storage(value)
+    }
+}
 
 pub struct AgentRegistry {
     connection: Mutex<Connection>,
 }
 impl AgentRegistry {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, AgentError> {
-        Self::from_connection(Connection::open(path)?)
+    pub fn open(
+        path: impl AsRef<Path>,
+        protected_key_path: impl AsRef<Path>,
+    ) -> Result<Self, AgentError> {
+        let (connection, _key) =
+            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
+        Self::from_connection(connection)
     }
     pub fn open_in_memory() -> Result<Self, AgentError> {
         Self::from_connection(Connection::open_in_memory()?)
@@ -640,6 +652,7 @@ mod tests {
     fn restart_preserves_revocation() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("agents.db");
+        let key = d.path().join("agents.key.dpapi");
         let a = LocalAuthority::open_in_memory().unwrap();
         let ctx = LocalContext::current("ipc").unwrap();
         a.initialize_current(&ctx, 1000).unwrap();
@@ -647,7 +660,7 @@ mod tests {
         let id;
         let secret;
         {
-            let r = AgentRegistry::open(&p).unwrap();
+            let r = AgentRegistry::open(&p, &key).unwrap();
             let c = r
                 .register(&a, &ctx, &s.session_id, "agent", &all(), 3000)
                 .unwrap();
@@ -655,10 +668,17 @@ mod tests {
             secret = c.secret.0;
             r.revoke(&a, &ctx, &s.session_id, &id, 3100).unwrap();
         }
-        let r = AgentRegistry::open(&p).unwrap();
+        let r = AgentRegistry::open(&p, &key).unwrap();
         assert!(matches!(
             r.start_run(&id, &secret, "i", None, 4000),
             Err(AgentError::Revoked)
         ));
+        assert!(
+            !std::fs::read(&p)
+                .unwrap()
+                .windows(b"local_agents".len())
+                .any(|window| window == b"local_agents"),
+            "agent schema marker must not be plaintext on disk"
+        );
     }
 }

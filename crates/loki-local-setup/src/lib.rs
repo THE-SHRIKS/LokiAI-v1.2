@@ -77,6 +77,7 @@ pub struct SetupRecord {
 pub enum SetupError {
     Authority(AuthorityError),
     Sqlite(rusqlite::Error),
+    Storage(loki_storage::StorageError),
     Agent(loki_agents::AgentError),
     Device(loki_local_devices::DeviceBindingError),
     InvalidInput { field: &'static str, reason: String },
@@ -93,6 +94,7 @@ impl fmt::Display for SetupError {
             match self {
                 Self::Authority(_) => "local authority denied setup action",
                 Self::Sqlite(_) => "setup database error",
+                Self::Storage(_) => "encrypted setup database open failed",
                 Self::Agent(_) => "agent reference is not active",
                 Self::Device(_) => "device binding reference is not active",
                 Self::InvalidInput { .. } => "invalid setup input",
@@ -115,6 +117,11 @@ impl From<rusqlite::Error> for SetupError {
         Self::Sqlite(v)
     }
 }
+impl From<loki_storage::StorageError> for SetupError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        Self::Storage(value)
+    }
+}
 impl From<loki_agents::AgentError> for SetupError {
     fn from(v: loki_agents::AgentError) -> Self {
         Self::Agent(v)
@@ -131,8 +138,13 @@ pub struct LocalSetupStore {
 }
 #[allow(clippy::too_many_arguments)]
 impl LocalSetupStore {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, SetupError> {
-        Self::from_connection(Connection::open(path)?)
+    pub fn open(
+        path: impl AsRef<Path>,
+        protected_key_path: impl AsRef<Path>,
+    ) -> Result<Self, SetupError> {
+        let (connection, _key) =
+            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
+        Self::from_connection(connection)
     }
     pub fn open_in_memory() -> Result<Self, SetupError> {
         Self::from_connection(Connection::open_in_memory()?)
@@ -778,16 +790,24 @@ mod tests {
     fn restart_resumes_exact_state() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("setup.db");
+        let key = d.path().join("setup.key.dpapi");
         let f = fixture();
         let id;
         {
-            let s = LocalSetupStore::open(&p).unwrap();
+            let s = LocalSetupStore::open(&p, &key).unwrap();
             let r = s.start(&f.a, &f.c, &f.s, "install", 4000).unwrap();
             id = r.setup_id;
             s.confirm_owner(&f.a, &f.c, &f.s, &id, r.revision, 4100)
                 .unwrap();
         }
-        let s = LocalSetupStore::open(&p).unwrap();
+        let s = LocalSetupStore::open(&p, &key).unwrap();
         assert_eq!(s.get(&id).unwrap().state, SetupState::Agent);
+        assert!(
+            !std::fs::read(&p)
+                .unwrap()
+                .windows(b"local_setup".len())
+                .any(|window| window == b"local_setup"),
+            "setup schema marker must not be plaintext on disk"
+        );
     }
 }

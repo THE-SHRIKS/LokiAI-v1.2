@@ -18,6 +18,7 @@ const MAX_EVIDENCE: usize = 512;
 pub enum DeviceBindingError {
     Authority(AuthorityError),
     Sqlite(rusqlite::Error),
+    Storage(loki_storage::StorageError),
     InvalidInput { field: &'static str, reason: String },
     Replay,
     Conflict(String),
@@ -31,6 +32,7 @@ impl fmt::Display for DeviceBindingError {
         match self {
             Self::Authority(error) => write!(f, "local authority denied device binding: {error}"),
             Self::Sqlite(error) => write!(f, "local device database error: {error}"),
+            Self::Storage(error) => write!(f, "encrypted local device open failed: {error}"),
             Self::InvalidInput { field, reason } => {
                 write!(f, "invalid local device field '{field}': {reason}")
             }
@@ -54,6 +56,11 @@ impl From<AuthorityError> for DeviceBindingError {
 impl From<rusqlite::Error> for DeviceBindingError {
     fn from(value: rusqlite::Error) -> Self {
         Self::Sqlite(value)
+    }
+}
+impl From<loki_storage::StorageError> for DeviceBindingError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        Self::Storage(value)
     }
 }
 
@@ -95,8 +102,13 @@ pub struct LocalDeviceBindings {
 }
 
 impl LocalDeviceBindings {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, DeviceBindingError> {
-        Self::from_connection(Connection::open(path)?)
+    pub fn open(
+        path: impl AsRef<Path>,
+        protected_key_path: impl AsRef<Path>,
+    ) -> Result<Self, DeviceBindingError> {
+        let (connection, _key) =
+            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
+        Self::from_connection(connection)
     }
 
     pub fn open_in_memory() -> Result<Self, DeviceBindingError> {
@@ -520,10 +532,11 @@ mod tests {
     fn restart_preserves_binding_and_revocation() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("devices.sqlite3");
+        let key_path = directory.path().join("devices.key.dpapi");
         let (authority, context, session, _) = setup();
         let binding_id;
         {
-            let store = LocalDeviceBindings::open(&path).unwrap();
+            let store = LocalDeviceBindings::open(&path, &key_path).unwrap();
             binding_id = match store
                 .bind(&authority, &context, &session, &request("nonce-1"), 3_000)
                 .unwrap()
@@ -535,7 +548,7 @@ mod tests {
                 .revoke(&authority, &context, &session, &binding_id, 3_001)
                 .unwrap();
         }
-        let reopened = LocalDeviceBindings::open(&path).unwrap();
+        let reopened = LocalDeviceBindings::open(&path, &key_path).unwrap();
         assert!(matches!(
             reopened.require_consequential_match(
                 &authority,
@@ -551,5 +564,12 @@ mod tests {
             ),
             Err(DeviceBindingError::Revoked)
         ));
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .windows(b"local_device_bindings".len())
+                .any(|window| window == b"local_device_bindings"),
+            "device-binding schema marker must not be plaintext on disk"
+        );
     }
 }

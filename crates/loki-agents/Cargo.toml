@@ -9,6 +9,7 @@ description = "Scoped revocable local agent connections and run event registry (
 
 [dependencies]
 loki-local-authority = { path = "../loki-local-authority" }
+loki-storage = { path = "../loki-storage" }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 sha2 = "=0.10.9"
 uuid = { version = "=1.24.1", features = ["v4"] }
