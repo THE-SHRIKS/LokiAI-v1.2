@@ -255,7 +255,7 @@ which half of the program (Section 1a) a wave belongs to.
 | MCP-001 | IMPLEMENTATION | Provider-neutral stdio MCP server with `2026-07-28` per-request metadata/optional discovery plus one bounded previous-version edge adapter required by the certified clients; schemas, errors, diagnostics, and no transport-session authority | FND-002, CTR-001          | current/previous MCP protocol, transport/discovery/initialize-edge, malformed/version/client-metadata tests | accepted |
 | MCP-002 | IMPLEMENTATION | Scoped device/workspace/incident read and diagnostic resources/tools                                                                                                                                                                           | MCP-001, RUN-002, CON-002 | AS-005; auth/scope/pagination/size tests                                                                    | accepted |
 | AGT-001 | IMPLEMENTATION | Locally authorized, scoped, revocable agent connections plus run/parent-child/tool/change event registry                                                                                                                                       | MCP-002, LOC-001          | Codex/Claude configuration contract, unknown-principal denial, and run lifecycle tests                       | accepted — integrated at `c4f0c44`; full verification in `Docs/graph/evidence/W5/AGT-001/verification.md` |
-| AGT-002 | IMPLEMENTATION | Provider-neutral local incident work intents, supported local adapter delivery/acknowledgement, run linking, expiry, and user-action fallback; remote wake/resume remains deferred                                                             | AGT-001, INC-001, LNOT-001 | AS-015 local supported-client acknowledgement and unavailable-client fallback                               | proposed |
+| AGT-002 | IMPLEMENTATION | Provider-neutral local incident work intents, supported local adapter delivery/acknowledgement, run linking, expiry, and user-action fallback; remote wake/resume remains deferred                                                             | AGT-001, INC-001, LNOT-001 | AS-015 local supported-client acknowledgement and unavailable-client fallback                               | accepted — integrated at `49e86c7`; full verification in `Docs/graph/evidence/W6/AGT-002/verification.md` |
 | MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
 | MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | accepted |
 | INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | accepted |
@@ -903,4 +903,24 @@ unblocked_nodes: AGT-002 now has every implementation dependency available.
 new_or_changed_risks: none. The node adds no URL/path actions, network path,
   renderer authority, device authority, or remote-delivery claim. DAT-002's
   named second-identity and independent-review blocker remains unchanged.
+```
+
+```text
+node_id: AGT-002
+from: ready
+to: accepted
+timestamp: 2026-08-24T19:08:48+05:30
+actor: Codex orchestrator under the accepted local-only Part One scope
+starting_revision: 12bc249
+worker_result_revision: 6c90d72
+integrated_revision: 49e86c7
+evidence: Docs/graph/evidence/W6/AGT-002/verification.md;
+  Docs/graph/handoffs/AGT-002-1.md; seven focused work-intent tests; focused
+  and workspace warnings-denied Clippy; complete repository verify.
+reason: the authenticated local pull/acknowledgement path and deduplicated human
+  fallback pass AS-015's local slice without adding approval, device, shell,
+  provider, network, or remote-wake authority.
+unblocked_nodes: P1-INT-001 has all revised local implementation dependencies.
+new_or_changed_risks: none. Remote/cloud delivery remains deferred. DAT-002's
+  second-identity and independent-review blocker remains named and unchanged.
 ```
