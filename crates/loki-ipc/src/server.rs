@@ -27,6 +27,8 @@
 //! shutdown-vs-heartbeat race pattern in this workspace.
 
 use std::collections::{BTreeSet, HashMap};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,17 +37,18 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::acl::{self, AclScope};
-use crate::auth::{self, AuthToken};
+use crate::auth::{self, AuthToken, CredentialResolver, CredentialSet};
 use crate::business::{
-    AuthenticatedPrincipal, Authority, BUSINESS_CAPABILITY, MAX_STREAM_ITEMS, PrincipalKind,
-    bounded, safe_digest, safe_id, valid_page,
+    AuthenticatedPrincipal, Authority, BUSINESS_CAPABILITY, BusinessEvent, BusinessRpcResult,
+    BusinessStreamName, BusinessStreamParams, BusinessStreamSummary, MAX_STREAM_ITEMS,
+    PrincipalKind, bounded, safe_digest, safe_id, valid_page,
 };
 use crate::frame::{DEFAULT_MAX_FRAME_BYTES, FrameError, read_frame, write_frame};
 use crate::protocol::{
     CORE_CAPABILITY, CallOutcome, EchoStreamItem, EchoStreamSummary, HandshakeRejectReason,
     MAX_ECHO_STREAM_COUNT, Method, MethodResult, PROTOCOL_VERSION, PongResult, RpcError,
     StreamItemPayload, StreamMethod, StreamOutcome, StreamSummary, WireMessage,
-    baseline_capabilities,
+    baseline_capabilities, business_result_matches_method,
 };
 use crate::time;
 
@@ -65,18 +68,77 @@ const WRITER_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 struct SessionAuthority {
     negotiated_capabilities: BTreeSet<String>,
     principal: AuthenticatedPrincipal,
+    session_id: Uuid,
+    business_service: Arc<dyn BusinessService>,
 }
 
-/// Server-side configuration. See [`crate::acl`]/[`crate::auth`] for why
-/// both `acl_scope` and `token` exist.
+#[derive(Clone)]
+pub struct BusinessRequestContext {
+    pub correlation_id: Uuid,
+    pub session_id: Uuid,
+    pub principal: AuthenticatedPrincipal,
+}
+
+pub type BusinessCallFuture =
+    Pin<Box<dyn Future<Output = Result<BusinessRpcResult, RpcError>> + Send>>;
+pub type BusinessStreamFuture =
+    Pin<Box<dyn Future<Output = Result<BusinessStreamSummary, RpcError>> + Send>>;
+
+#[derive(Clone)]
+pub struct BusinessEventEmitter {
+    sender: mpsc::Sender<BusinessEvent>,
+}
+
+impl BusinessEventEmitter {
+    pub async fn send(&self, event: BusinessEvent) -> Result<(), RpcError> {
+        self.sender
+            .send(event)
+            .await
+            .map_err(|_| RpcError::Cancelled)
+    }
+}
+
+pub trait BusinessService: Send + Sync {
+    fn call(&self, method: Method, context: BusinessRequestContext) -> BusinessCallFuture;
+    fn stream(
+        &self,
+        params: BusinessStreamParams,
+        context: BusinessRequestContext,
+        emitter: BusinessEventEmitter,
+    ) -> BusinessStreamFuture;
+}
+
+struct UnsupportedBusinessService;
+
+impl BusinessService for UnsupportedBusinessService {
+    fn call(&self, method: Method, _context: BusinessRequestContext) -> BusinessCallFuture {
+        let name = method_name(&method).to_string();
+        Box::pin(async move { Err(RpcError::UnsupportedMethod { method: name }) })
+    }
+
+    fn stream(
+        &self,
+        _params: BusinessStreamParams,
+        _context: BusinessRequestContext,
+        _emitter: BusinessEventEmitter,
+    ) -> BusinessStreamFuture {
+        Box::pin(async {
+            Err(RpcError::UnsupportedMethod {
+                method: "business_events".to_string(),
+            })
+        })
+    }
+}
+
+/// Server-side configuration. The ACL protects the pipe handle while the
+/// credential resolver binds each successful handshake to its own principal.
 #[derive(Clone)]
 pub struct ServerConfig {
     /// Full pipe address, e.g. `r"\\.\pipe\LokiAI-runtime"`.
     pub pipe_name: String,
-    /// Shared secret every client must present in its `Hello`. Caller-
-    /// supplied — see [`crate::auth`]'s module docs for why this crate does
-    /// not generate/distribute it itself in production.
-    pub token: AuthToken,
+    /// Per-credential authentication and principal resolution. Production
+    /// composition replaces the core-only legacy resolver created by `new`.
+    pub credential_resolver: Arc<dyn CredentialResolver>,
     /// Which principal the pipe's DACL grants access to. Defaults to
     /// [`AclScope::CurrentUser`]; see [`ServerConfig::new`].
     pub acl_scope: AclScope,
@@ -86,26 +148,31 @@ pub struct ServerConfig {
     /// Bounded capacity of the per-connection outgoing frame queue — the
     /// backpressure knob described in this module's top doc comment.
     pub outgoing_channel_capacity: usize,
-    /// Server-created identity attached after credential authentication. Client metadata never mutates it.
-    pub principal: AuthenticatedPrincipal,
+    pub business_service: Arc<dyn BusinessService>,
 }
 
 impl ServerConfig {
     pub fn new(pipe_name: impl Into<String>, token: AuthToken) -> Self {
+        let principal = AuthenticatedPrincipal::runtime_service("legacy-core-client");
         Self {
             pipe_name: pipe_name.into(),
-            token,
+            credential_resolver: Arc::new(CredentialSet::single(token, principal)),
             acl_scope: AclScope::CurrentUser,
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
             out_buffer_size: 65536,
             in_buffer_size: 65536,
             outgoing_channel_capacity: 16,
-            principal: AuthenticatedPrincipal::runtime_service("unresolved-local-client"),
+            business_service: Arc::new(UnsupportedBusinessService),
         }
     }
 
-    pub fn with_principal(mut self, principal: AuthenticatedPrincipal) -> Self {
-        self.principal = principal;
+    pub fn with_credential_resolver(mut self, resolver: Arc<dyn CredentialResolver>) -> Self {
+        self.credential_resolver = resolver;
+        self
+    }
+
+    pub fn with_business_service(mut self, service: Arc<dyn BusinessService>) -> Self {
+        self.business_service = service;
         self
     }
 }
@@ -287,19 +354,20 @@ impl Connection {
             }
         };
 
-        let accepted = auth::evaluate_hello(
+        let accepted = auth::evaluate_hello_with_resolver(
             hello.client_protocol_version,
             &hello.client_capabilities,
             hello.nonce,
             &hello.token,
             PROTOCOL_VERSION,
             nonce,
-            &config.token,
+            config.credential_resolver.as_ref(),
             CORE_CAPABILITY,
+            time::unix_millis_now(),
         );
 
-        let negotiated_capabilities = match accepted {
-            Ok(accept) => accept.negotiated_capabilities,
+        let (negotiated_capabilities, principal) = match accepted {
+            Ok((accept, principal)) => (accept.negotiated_capabilities, principal),
             Err(reason) => {
                 reject(&mut writer, reason.clone()).await;
                 return Err(ConnectionError::HandshakeRejected(reason));
@@ -312,7 +380,7 @@ impl Connection {
             &WireMessage::HelloAck {
                 negotiated_capabilities: negotiated_capabilities.clone(),
                 session_id,
-                principal: Some(config.principal.clone()),
+                principal: Some(principal.clone()),
             },
         )
         .await
@@ -331,7 +399,9 @@ impl Connection {
             &config,
             SessionAuthority {
                 negotiated_capabilities,
-                principal: config.principal.clone(),
+                principal,
+                session_id,
+                business_service: Arc::clone(&config.business_service),
             },
         )
         .await
@@ -475,9 +545,12 @@ fn spawn_unary_call(
         let deadline = time::duration_until(deadline_unix_millis);
         let outcome = tokio::select! {
             outcome = execute_method(
+                correlation_id,
                 method,
                 &session_authority.negotiated_capabilities,
                 &session_authority.principal,
+                session_authority.session_id,
+                &session_authority.business_service,
             ) => outcome,
             _ = tokio::time::sleep(deadline) => CallOutcome::Err { error: RpcError::DeadlineExceeded },
             _ = &mut cancel_rx => CallOutcome::Err { error: RpcError::Cancelled },
@@ -495,9 +568,12 @@ fn spawn_unary_call(
 }
 
 async fn execute_method(
+    correlation_id: Uuid,
     method: Method,
     negotiated_capabilities: &std::collections::BTreeSet<String>,
     principal: &AuthenticatedPrincipal,
+    session_id: Uuid,
+    business_service: &Arc<dyn BusinessService>,
 ) -> CallOutcome {
     if let Err(error) = authorize_method(&method, negotiated_capabilities, principal) {
         return CallOutcome::Err { error };
@@ -509,11 +585,31 @@ async fn execute_method(
                 server_unix_millis: time::unix_millis_now(),
             }),
         },
-        business => CallOutcome::Err {
-            error: RpcError::UnsupportedMethod {
-                method: method_name(&business).to_string(),
-            },
-        },
+        business => {
+            let context = BusinessRequestContext {
+                correlation_id,
+                session_id,
+                principal: principal.clone(),
+            };
+            match business_service.call(business.clone(), context).await {
+                Ok(result)
+                    if result.validate_contract()
+                        && result.correlation_id() == correlation_id.to_string()
+                        && business_result_matches_method(&business, &result) =>
+                {
+                    CallOutcome::Ok {
+                        result: MethodResult::Business(result),
+                    }
+                }
+                Ok(_) => CallOutcome::Err {
+                    error: RpcError::Internal {
+                        message: "business producer returned an invalid or mismatched result"
+                            .to_string(),
+                    },
+                },
+                Err(error) => CallOutcome::Err { error },
+            }
+        }
     }
 }
 
@@ -535,6 +631,8 @@ fn spawn_stream_call(
                 &outgoing_tx,
                 &session_authority.negotiated_capabilities,
                 &session_authority.principal,
+                session_authority.session_id,
+                &session_authority.business_service,
             ) => result,
             _ = tokio::time::sleep(deadline) => Err(RpcError::DeadlineExceeded),
             _ = &mut cancel_rx => Err(RpcError::Cancelled),
@@ -561,6 +659,8 @@ async fn execute_stream_method(
     outgoing_tx: &mpsc::Sender<WireMessage>,
     negotiated_capabilities: &std::collections::BTreeSet<String>,
     principal: &AuthenticatedPrincipal,
+    session_id: Uuid,
+    business_service: &Arc<dyn BusinessService>,
 ) -> Result<StreamSummary, RpcError> {
     match method {
         StreamMethod::EchoStream(params) => {
@@ -592,24 +692,148 @@ async fn execute_stream_method(
             }))
         }
         StreamMethod::BusinessEvents(params) => {
-            if !negotiated_capabilities.contains(BUSINESS_CAPABILITY) {
-                return Err(RpcError::MissingCapability {
-                    required: BUSINESS_CAPABILITY.to_string(),
+            authorize_stream(&params, negotiated_capabilities, principal)?;
+            let (event_tx, mut event_rx) = mpsc::channel(16);
+            let context = BusinessRequestContext {
+                correlation_id,
+                session_id,
+                principal: principal.clone(),
+            };
+            let producer = business_service.stream(
+                params.clone(),
+                context,
+                BusinessEventEmitter { sender: event_tx },
+            );
+            tokio::pin!(producer);
+            let mut items_sent = 0_u16;
+            let mut last_sequence = params.after_sequence;
+            let producer_summary = loop {
+                tokio::select! {
+                    result = &mut producer => {
+                        let summary = result?;
+                        while let Some(event) = event_rx.recv().await {
+                            forward_business_event(
+                                correlation_id,
+                                &params,
+                                event,
+                                outgoing_tx,
+                                &mut items_sent,
+                                &mut last_sequence,
+                            ).await?;
+                        }
+                        break summary;
+                    }
+                    event = event_rx.recv() => {
+                        let Some(event) = event else {
+                            break producer.await?;
+                        };
+                        forward_business_event(
+                            correlation_id,
+                            &params,
+                            event,
+                            outgoing_tx,
+                            &mut items_sent,
+                            &mut last_sequence,
+                        ).await?;
+                    }
+                }
+            };
+            if !producer_summary.validate_contract(params.max_items)
+                || producer_summary.items_sent != items_sent
+                || producer_summary.last_sequence != last_sequence
+            {
+                return Err(RpcError::Internal {
+                    message: "business producer returned a mismatched stream summary".to_string(),
                 });
             }
-            if !principal.authorizes(Authority::Subscribe) {
-                return Err(RpcError::PermissionDenied);
-            }
-            if params.max_items == 0 || params.max_items > MAX_STREAM_ITEMS {
-                return Err(RpcError::InvalidRequest {
-                    message: "max_items is outside the bounded range".to_string(),
-                });
-            }
-            Err(RpcError::UnsupportedMethod {
-                method: "business_events".to_string(),
-            })
+            Ok(StreamSummary::BusinessEvents(producer_summary))
         }
     }
+}
+
+async fn forward_business_event(
+    correlation_id: Uuid,
+    params: &BusinessStreamParams,
+    event: BusinessEvent,
+    outgoing_tx: &mpsc::Sender<WireMessage>,
+    items_sent: &mut u16,
+    last_sequence: &mut Option<u64>,
+) -> Result<(), RpcError> {
+    if !event.validate_contract()
+        || event.stream != params.stream
+        || event.entity_id != params.scope_id
+        || event.correlation_id != correlation_id.to_string()
+        || last_sequence.is_some_and(|previous| event.sequence <= previous)
+        || *items_sent >= params.max_items
+    {
+        return Err(RpcError::Internal {
+            message: "business producer emitted an invalid or out-of-scope event".to_string(),
+        });
+    }
+    let seq = u32::from(*items_sent);
+    if !send_message(
+        outgoing_tx,
+        WireMessage::StreamItem {
+            correlation_id,
+            seq,
+            item: StreamItemPayload::BusinessEvent(event.clone()),
+        },
+    )
+    .await
+    {
+        return Err(RpcError::Internal {
+            message: "connection closed while streaming".to_string(),
+        });
+    }
+    *items_sent += 1;
+    *last_sequence = Some(event.sequence);
+    Ok(())
+}
+
+fn authorize_stream(
+    params: &BusinessStreamParams,
+    negotiated_capabilities: &BTreeSet<String>,
+    principal: &AuthenticatedPrincipal,
+) -> Result<(), RpcError> {
+    if !negotiated_capabilities.contains(BUSINESS_CAPABILITY) {
+        return Err(RpcError::MissingCapability {
+            required: BUSINESS_CAPABILITY.to_string(),
+        });
+    }
+    if params.max_items == 0
+        || params.max_items > MAX_STREAM_ITEMS
+        || !safe_id(&params.workspace_id, 200)
+        || !safe_id(&params.scope_id, 200)
+    {
+        return Err(RpcError::InvalidRequest {
+            message: "business stream parameters failed bounds validation".to_string(),
+        });
+    }
+    if params.workspace_id != principal.workspace_id
+        || !principal.scope_ids.contains(&params.scope_id)
+        || !principal.authorizes(Authority::Subscribe)
+    {
+        return Err(RpcError::PermissionDenied);
+    }
+    let domain_authority = match params.stream {
+        BusinessStreamName::RuntimeStatus => Authority::ReadRuntime,
+        BusinessStreamName::DeviceProjection | BusinessStreamName::DeviceHealth => {
+            Authority::ReadDevices
+        }
+        BusinessStreamName::Telemetry | BusinessStreamName::Logs => Authority::ReadTelemetry,
+        BusinessStreamName::Incidents => Authority::ReadIncidents,
+        BusinessStreamName::Jobs => Authority::ReadJobs,
+        BusinessStreamName::Approvals => Authority::ReadApprovals,
+        BusinessStreamName::Notifications => Authority::ReadNotifications,
+        BusinessStreamName::WorkIntents => Authority::ReadWorkIntents,
+    };
+    if !principal.authorizes(domain_authority)
+        || (params.stream == BusinessStreamName::Approvals
+            && principal.kind != PrincipalKind::DesktopInstallation)
+    {
+        return Err(RpcError::PermissionDenied);
+    }
+    Ok(())
 }
 
 fn authorize_method(
@@ -787,6 +1011,41 @@ mod tests {
         requests: Vec<Method>,
     }
 
+    fn unsupported_service() -> Arc<dyn BusinessService> {
+        Arc::new(UnsupportedBusinessService)
+    }
+
+    struct MismatchedService;
+
+    impl BusinessService for MismatchedService {
+        fn call(&self, _method: Method, context: BusinessRequestContext) -> BusinessCallFuture {
+            Box::pin(async move {
+                Ok(BusinessRpcResult::RuntimeStatus {
+                    meta: crate::business::ReadMeta {
+                        source_runtime_id: "runtime-1".to_string(),
+                        observed_at: "2026-08-24T12:00:00Z".to_string(),
+                        correlation_id: context.correlation_id.to_string(),
+                    },
+                    state: crate::business::RuntimeState::Connected,
+                    runtime_id: "runtime-1".to_string(),
+                })
+            })
+        }
+
+        fn stream(
+            &self,
+            _params: BusinessStreamParams,
+            _context: BusinessRequestContext,
+            _emitter: BusinessEventEmitter,
+        ) -> BusinessStreamFuture {
+            Box::pin(async {
+                Err(RpcError::UnsupportedMethod {
+                    method: "business_events".to_string(),
+                })
+            })
+        }
+    }
+
     fn expected_authority(method: &Method) -> Authority {
         match method {
             Method::RuntimeGetStatus(_) => Authority::ReadRuntime,
@@ -831,6 +1090,8 @@ mod tests {
             let denied = AuthenticatedPrincipal {
                 kind: PrincipalKind::DesktopInstallation,
                 principal_id: "desktop-denied".to_string(),
+                workspace_id: "workspace-1".to_string(),
+                scope_ids: BTreeSet::from(["scope-1".to_string()]),
                 authority: BTreeSet::new(),
             };
             assert!(matches!(
@@ -849,6 +1110,8 @@ mod tests {
             let allowed = AuthenticatedPrincipal {
                 kind: PrincipalKind::DesktopInstallation,
                 principal_id: "desktop-allowed".to_string(),
+                workspace_id: "workspace-1".to_string(),
+                scope_ids: BTreeSet::from(["scope-1".to_string()]),
                 authority: BTreeSet::from([required]),
             };
             assert!(authorize_method(&method, &baseline_capabilities(), &allowed).is_ok());
@@ -857,6 +1120,8 @@ mod tests {
                 let agent = AuthenticatedPrincipal {
                     kind: PrincipalKind::AgentConnection,
                     principal_id: "agent-denied".to_string(),
+                    workspace_id: "workspace-1".to_string(),
+                    scope_ids: BTreeSet::from(["scope-1".to_string()]),
                     authority: BTreeSet::from([Authority::DecideApproval]),
                 };
                 assert!(matches!(
@@ -871,6 +1136,8 @@ mod tests {
     async fn business_subscription_requires_capability_and_subscribe_authority() {
         let params = crate::business::BusinessStreamParams {
             stream: crate::business::BusinessStreamName::Jobs,
+            workspace_id: "workspace-1".to_string(),
+            scope_id: "job-1".to_string(),
             after_sequence: None,
             max_items: 10,
         };
@@ -878,6 +1145,8 @@ mod tests {
         let denied = AuthenticatedPrincipal {
             kind: PrincipalKind::AgentConnection,
             principal_id: "agent".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            scope_ids: BTreeSet::from(["job-1".to_string()]),
             authority: BTreeSet::new(),
         };
         assert!(matches!(
@@ -887,6 +1156,8 @@ mod tests {
                 &tx,
                 &BTreeSet::new(),
                 &denied,
+                Uuid::nil(),
+                &unsupported_service(),
             )
             .await,
             Err(RpcError::MissingCapability { .. })
@@ -898,6 +1169,8 @@ mod tests {
                 &tx,
                 &baseline_capabilities(),
                 &denied,
+                Uuid::nil(),
+                &unsupported_service(),
             )
             .await,
             Err(RpcError::PermissionDenied)
@@ -905,7 +1178,9 @@ mod tests {
         let allowed = AuthenticatedPrincipal {
             kind: PrincipalKind::AgentConnection,
             principal_id: "agent".to_string(),
-            authority: BTreeSet::from([Authority::Subscribe]),
+            workspace_id: "workspace-1".to_string(),
+            scope_ids: BTreeSet::from(["job-1".to_string()]),
+            authority: BTreeSet::from([Authority::Subscribe, Authority::ReadJobs]),
         };
         assert!(matches!(
             execute_stream_method(
@@ -914,10 +1189,72 @@ mod tests {
                 &tx,
                 &baseline_capabilities(),
                 &allowed,
+                Uuid::nil(),
+                &unsupported_service(),
             )
             .await,
             Err(RpcError::UnsupportedMethod { .. })
         ));
+    }
+
+    #[test]
+    fn every_stream_requires_its_domain_authority_and_bound_workspace_scope() {
+        let cases = [
+            (BusinessStreamName::RuntimeStatus, Authority::ReadRuntime),
+            (BusinessStreamName::DeviceProjection, Authority::ReadDevices),
+            (BusinessStreamName::DeviceHealth, Authority::ReadDevices),
+            (BusinessStreamName::Telemetry, Authority::ReadTelemetry),
+            (BusinessStreamName::Logs, Authority::ReadTelemetry),
+            (BusinessStreamName::Incidents, Authority::ReadIncidents),
+            (BusinessStreamName::Jobs, Authority::ReadJobs),
+            (BusinessStreamName::Approvals, Authority::ReadApprovals),
+            (
+                BusinessStreamName::Notifications,
+                Authority::ReadNotifications,
+            ),
+            (BusinessStreamName::WorkIntents, Authority::ReadWorkIntents),
+        ];
+        for (stream, required) in cases {
+            let params = BusinessStreamParams {
+                stream,
+                workspace_id: "workspace-1".to_string(),
+                scope_id: "scope-1".to_string(),
+                after_sequence: None,
+                max_items: 10,
+            };
+            let allowed = AuthenticatedPrincipal {
+                kind: PrincipalKind::DesktopInstallation,
+                principal_id: "desktop-1".to_string(),
+                workspace_id: "workspace-1".to_string(),
+                scope_ids: BTreeSet::from(["scope-1".to_string()]),
+                authority: BTreeSet::from([Authority::Subscribe, required]),
+            };
+            assert!(authorize_stream(&params, &baseline_capabilities(), &allowed).is_ok());
+            let wrong_domain = AuthenticatedPrincipal {
+                authority: BTreeSet::from([Authority::Subscribe]),
+                ..allowed.clone()
+            };
+            assert!(matches!(
+                authorize_stream(&params, &baseline_capabilities(), &wrong_domain),
+                Err(RpcError::PermissionDenied)
+            ));
+            let wrong_workspace = AuthenticatedPrincipal {
+                workspace_id: "workspace-2".to_string(),
+                ..allowed.clone()
+            };
+            assert!(matches!(
+                authorize_stream(&params, &baseline_capabilities(), &wrong_workspace),
+                Err(RpcError::PermissionDenied)
+            ));
+            let wrong_scope = AuthenticatedPrincipal {
+                scope_ids: BTreeSet::from(["scope-2".to_string()]),
+                ..allowed
+            };
+            assert!(matches!(
+                authorize_stream(&params, &baseline_capabilities(), &wrong_scope),
+                Err(RpcError::PermissionDenied)
+            ));
+        }
     }
 
     #[tokio::test]
@@ -944,11 +1281,14 @@ mod tests {
         let capabilities = baseline_capabilities();
         let principal = AuthenticatedPrincipal::runtime_service("test");
         let outcome = execute_method(
+            Uuid::nil(),
             Method::Ping(crate::protocol::PingParams {
                 payload: "hi".to_string(),
             }),
             &capabilities,
             &principal,
+            Uuid::nil(),
+            &unsupported_service(),
         )
         .await;
         match outcome {
@@ -957,6 +1297,35 @@ mod tests {
             } => assert_eq!(pong.payload, "hi"),
             other => panic!("unexpected outcome: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn mismatched_business_producer_result_fails_closed() {
+        let principal = AuthenticatedPrincipal {
+            kind: PrincipalKind::DesktopInstallation,
+            principal_id: "desktop-1".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            scope_ids: BTreeSet::from(["device-1".to_string()]),
+            authority: BTreeSet::from([Authority::ReadDevices]),
+        };
+        let outcome = execute_method(
+            Uuid::nil(),
+            Method::DevicesList(crate::business::PageParams {
+                limit: 10,
+                cursor: None,
+            }),
+            &baseline_capabilities(),
+            &principal,
+            Uuid::nil(),
+            &(Arc::new(MismatchedService) as Arc<dyn BusinessService>),
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            CallOutcome::Err {
+                error: RpcError::Internal { .. }
+            }
+        ));
     }
 
     #[tokio::test]
@@ -973,6 +1342,8 @@ mod tests {
             &tx,
             &capabilities,
             &principal,
+            Uuid::nil(),
+            &unsupported_service(),
         )
         .await;
         assert!(matches!(result, Err(RpcError::InvalidRequest { .. })));
@@ -995,6 +1366,8 @@ mod tests {
                 &tx,
                 &capabilities,
                 &principal,
+                Uuid::nil(),
+                &unsupported_service(),
             )
             .await
         });

@@ -10,7 +10,13 @@ import {
 
 const fixture = JSON.parse(
   readFileSync(new URL('../fixtures/business-rpc.json', import.meta.url), 'utf8'),
-) as { requests: unknown[]; results: unknown[]; streams: unknown[]; events: unknown[] };
+) as {
+  requests: unknown[];
+  results: unknown[];
+  streams: unknown[];
+  events: unknown[];
+  principals: unknown[];
+};
 
 describe('canonical business RPC', () => {
   it('accepts explicit bounded methods', () => {
@@ -60,7 +66,12 @@ describe('canonical business RPC', () => {
       }).success,
     ).toBe(false);
     expect(
-      BusinessStreamRequestSchema.safeParse({ stream: 'telemetry', max_items: 1_025 }).success,
+      BusinessStreamRequestSchema.safeParse({
+        stream: 'telemetry',
+        workspace_id: 'workspace-1',
+        scope_id: 'device-1',
+        max_items: 1_025,
+      }).success,
     ).toBe(false);
     expect(
       BusinessRpcRequestSchema.safeParse({
@@ -133,9 +144,35 @@ describe('canonical business RPC', () => {
     const helloPrincipal = {
       kind: 'agent_connection',
       principal_id: 'agent-1',
+      workspace_id: 'workspace-1',
+      scope_ids: ['device-1'],
       authority: ['root'],
     };
     expect(AuthenticatedPrincipalSchema.safeParse(helloPrincipal).success).toBe(false);
+  });
+
+  it('enforces UTF-8 byte limits and UTC timestamps on outputs', () => {
+    const oversizedUtf8 = '😀'.repeat(501);
+    expect(
+      BusinessRpcResultSchema.safeParse({
+        kind: 'operation',
+        method: 'restart_request',
+        outcome: 'rejected',
+        correlation_id: 'corr-1',
+        policy_reason: oversizedUtf8,
+      }).success,
+    ).toBe(false);
+    expect(
+      BusinessEventSchema.safeParse({
+        stream: 'runtime_status',
+        sequence: 1,
+        correlation_id: 'corr-1',
+        occurred_at: '2026-08-24T12:00:00+05:30',
+        entity_id: 'runtime-1',
+        state: 'connected',
+        source_runtime_id: 'runtime-1',
+      }).success,
+    ).toBe(false);
   });
 
   it('validates bounded structured results', () => {
@@ -164,5 +201,8 @@ describe('canonical business RPC', () => {
     expect(fixture.events.every((value) => BusinessEventSchema.safeParse(value).success)).toBe(
       true,
     );
+    expect(
+      fixture.principals.every((value) => AuthenticatedPrincipalSchema.safeParse(value).success),
+    ).toBe(true);
   });
 });

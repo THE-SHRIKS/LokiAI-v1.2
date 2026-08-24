@@ -38,6 +38,7 @@ use std::collections::BTreeSet;
 
 use uuid::Uuid;
 
+use crate::business::AuthenticatedPrincipal;
 use crate::protocol::{HandshakeRejectReason, ProtocolVersion, WireMessage};
 
 /// A local shared secret used to authenticate a connecting client.
@@ -104,6 +105,79 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+#[derive(Clone)]
+pub struct CredentialRecord {
+    token: AuthToken,
+    pub principal: AuthenticatedPrincipal,
+    pub expires_at_unix_millis: Option<u64>,
+    pub revoked: bool,
+}
+
+impl CredentialRecord {
+    pub fn active(token: AuthToken, principal: AuthenticatedPrincipal) -> Self {
+        Self {
+            token,
+            principal,
+            expires_at_unix_millis: None,
+            revoked: false,
+        }
+    }
+
+    pub fn expiring_at(mut self, expires_at_unix_millis: u64) -> Self {
+        self.expires_at_unix_millis = Some(expires_at_unix_millis);
+        self
+    }
+
+    pub fn revoked(mut self) -> Self {
+        self.revoked = true;
+        self
+    }
+}
+
+pub trait CredentialResolver: Send + Sync {
+    fn resolve(
+        &self,
+        presented_token: &str,
+        now_unix_millis: u64,
+    ) -> Option<AuthenticatedPrincipal>;
+}
+
+#[derive(Clone)]
+pub struct CredentialSet {
+    records: Vec<CredentialRecord>,
+}
+
+impl CredentialSet {
+    pub fn new(records: Vec<CredentialRecord>) -> Self {
+        Self { records }
+    }
+
+    pub fn single(token: AuthToken, principal: AuthenticatedPrincipal) -> Self {
+        Self::new(vec![CredentialRecord::active(token, principal)])
+    }
+}
+
+impl CredentialResolver for CredentialSet {
+    fn resolve(
+        &self,
+        presented_token: &str,
+        now_unix_millis: u64,
+    ) -> Option<AuthenticatedPrincipal> {
+        let mut resolved = None;
+        for record in &self.records {
+            let token_matches = record.token == *presented_token;
+            let active = !record.revoked
+                && record
+                    .expires_at_unix_millis
+                    .is_none_or(|expiry| now_unix_millis < expiry);
+            if token_matches && active {
+                resolved = Some(record.principal.clone());
+            }
+        }
+        resolved
+    }
+}
+
 /// The outcome of evaluating a client's [`WireMessage::Hello`].
 #[derive(Debug)]
 pub struct HandshakeAccept {
@@ -145,13 +219,58 @@ pub fn evaluate_hello(
     }
 
     let negotiated_capabilities = client_capabilities
-        .intersection(&crate::protocol::baseline_capabilities())
+        .intersection(&crate::protocol::capabilities_for_version(
+            client_protocol_version,
+        ))
         .cloned()
         .collect();
 
     Ok(HandshakeAccept {
         negotiated_capabilities,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_hello_with_resolver(
+    client_protocol_version: ProtocolVersion,
+    client_capabilities: &BTreeSet<String>,
+    hello_nonce: Uuid,
+    hello_token: &str,
+    server_protocol_version: ProtocolVersion,
+    expected_nonce: Uuid,
+    credential_resolver: &dyn CredentialResolver,
+    required_capability: &str,
+    now_unix_millis: u64,
+) -> Result<(HandshakeAccept, AuthenticatedPrincipal), HandshakeRejectReason> {
+    if hello_nonce != expected_nonce {
+        return Err(HandshakeRejectReason::StaleNonce);
+    }
+    let principal = credential_resolver
+        .resolve(hello_token, now_unix_millis)
+        .ok_or(HandshakeRejectReason::AuthenticationFailed)?;
+    if !server_protocol_version.is_compatible_with(&client_protocol_version) {
+        return Err(HandshakeRejectReason::VersionMismatch {
+            server_version: server_protocol_version,
+            client_version: client_protocol_version,
+        });
+    }
+    if !client_capabilities.contains(required_capability) {
+        return Err(HandshakeRejectReason::MissingCapability {
+            required: required_capability.to_string(),
+        });
+    }
+    let negotiated_capabilities = client_capabilities
+        .intersection(&crate::protocol::capabilities_for_version(
+            client_protocol_version,
+        ))
+        .cloned()
+        .collect();
+    Ok((
+        HandshakeAccept {
+            negotiated_capabilities,
+        },
+        principal,
+    ))
 }
 
 /// Extracts the fields [`evaluate_hello`] needs from a raw
@@ -212,7 +331,8 @@ fn wire_message_kind(message: &WireMessage) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{CORE_CAPABILITY, baseline_capabilities};
+    use crate::business::BUSINESS_CAPABILITY;
+    use crate::protocol::{CORE_CAPABILITY, PROTOCOL_VERSION, baseline_capabilities};
 
     fn accept(
         client_version: ProtocolVersion,
@@ -433,5 +553,39 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"ab"));
         assert!(!constant_time_eq(b"", b"a"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn revoked_and_expired_credentials_fail_closed() {
+        let principal = AuthenticatedPrincipal::runtime_service("runtime-1");
+        let resolver = CredentialSet::new(vec![
+            CredentialRecord::active(AuthToken::new("revoked"), principal.clone()).revoked(),
+            CredentialRecord::active(AuthToken::new("expired"), principal).expiring_at(1_000),
+        ]);
+        assert!(resolver.resolve("revoked", 500).is_none());
+        assert!(resolver.resolve("expired", 1_000).is_none());
+        assert!(resolver.resolve("unknown", 500).is_none());
+    }
+
+    #[test]
+    fn v1_0_cannot_negotiate_business_even_when_it_advertises_it() {
+        let nonce = Uuid::new_v4();
+        let token = AuthToken::new("secret");
+        let accepted = evaluate_hello(
+            ProtocolVersion::new(1, 0),
+            &baseline_capabilities(),
+            nonce,
+            token.as_str(),
+            PROTOCOL_VERSION,
+            nonce,
+            &token,
+            CORE_CAPABILITY,
+        )
+        .expect("same-major core handshake");
+        assert!(
+            !accepted
+                .negotiated_capabilities
+                .contains(BUSINESS_CAPABILITY)
+        );
     }
 }

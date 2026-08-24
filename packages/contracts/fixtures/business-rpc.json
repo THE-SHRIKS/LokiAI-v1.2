@@ -331,16 +331,76 @@
     }
   ],
   "streams": [
-    { "stream": "runtime_status", "after_sequence": null, "max_items": 10 },
-    { "stream": "device_projection", "after_sequence": null, "max_items": 10 },
-    { "stream": "device_health", "after_sequence": null, "max_items": 10 },
-    { "stream": "telemetry", "after_sequence": null, "max_items": 10 },
-    { "stream": "logs", "after_sequence": null, "max_items": 10 },
-    { "stream": "incidents", "after_sequence": null, "max_items": 10 },
-    { "stream": "jobs", "after_sequence": null, "max_items": 10 },
-    { "stream": "approvals", "after_sequence": null, "max_items": 10 },
-    { "stream": "notifications", "after_sequence": null, "max_items": 10 },
-    { "stream": "work_intents", "after_sequence": null, "max_items": 10 }
+    {
+      "stream": "runtime_status",
+      "workspace_id": "workspace-1",
+      "scope_id": "runtime-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "device_projection",
+      "workspace_id": "workspace-1",
+      "scope_id": "device-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "device_health",
+      "workspace_id": "workspace-1",
+      "scope_id": "device-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "telemetry",
+      "workspace_id": "workspace-1",
+      "scope_id": "device-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "logs",
+      "workspace_id": "workspace-1",
+      "scope_id": "device-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "incidents",
+      "workspace_id": "workspace-1",
+      "scope_id": "incident-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "jobs",
+      "workspace_id": "workspace-1",
+      "scope_id": "job-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "approvals",
+      "workspace_id": "workspace-1",
+      "scope_id": "approval-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "notifications",
+      "workspace_id": "workspace-1",
+      "scope_id": "notification-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "work_intents",
+      "workspace_id": "workspace-1",
+      "scope_id": "work-intent-1",
+      "after_sequence": null,
+      "max_items": 10
+    }
   ],
   "events": [
     {
@@ -351,6 +411,22 @@
       "entity_id": "runtime-1",
       "state": "connected",
       "source_runtime_id": "runtime-1"
+    }
+  ],
+  "principals": [
+    {
+      "kind": "desktop_installation",
+      "principal_id": "desktop-1",
+      "workspace_id": "workspace-1",
+      "scope_ids": ["device-1", "runtime-1"],
+      "authority": ["read_runtime", "read_devices", "subscribe"]
+    },
+    {
+      "kind": "agent_connection",
+      "principal_id": "agent-1",
+      "workspace_id": "workspace-1",
+      "scope_ids": ["job-1"],
+      "authority": ["read_jobs"]
     }
   ]
 }

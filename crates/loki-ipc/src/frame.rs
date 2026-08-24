@@ -65,6 +65,9 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &WireMessage,
 ) -> Result<(), FrameError> {
+    message
+        .validate_contract()
+        .map_err(FrameError::InvalidContract)?;
     let payload = serde_json::to_vec(message).map_err(FrameError::Malformed)?;
     let len = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge {
         len: u32::MAX,

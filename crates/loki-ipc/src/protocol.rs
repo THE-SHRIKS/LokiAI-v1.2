@@ -32,10 +32,10 @@ use uuid::Uuid;
 use crate::business::{
     AgentRunRegisterParams, AgentRunUpdateParams, ApprovalDenyParams, ApprovalGrantParams,
     ArtifactOperationParams, AuthenticatedPrincipal, BUSINESS_CAPABILITY, BuildRequestParams,
-    BusinessEvent, BusinessStreamParams, BusinessStreamSummary, DeploymentRequestParams,
-    DevicePageParams, DeviceParams, EmptyParams, IdempotentDeviceParams, IncidentParams,
-    JobCancelParams, JobParams, PageParams, RollbackRequestParams, TelemetryParams,
-    TestOperationParams, WorkIntentAckParams,
+    BusinessEvent, BusinessRpcResult, BusinessStreamParams, BusinessStreamSummary,
+    DeploymentRequestParams, DevicePageParams, DeviceParams, EmptyParams, IdempotentDeviceParams,
+    IncidentParams, JobCancelParams, JobParams, OperationMethod, PageParams, RollbackRequestParams,
+    TelemetryParams, TestOperationParams, WorkIntentAckParams,
 };
 
 /// Semantic protocol version. The server rejects a client whose `major`
@@ -88,6 +88,16 @@ pub fn baseline_capabilities() -> BTreeSet<String> {
 /// The bounded previous edge supports transport health only, never business authority.
 pub fn previous_capabilities() -> BTreeSet<String> {
     BTreeSet::from([CORE_CAPABILITY.to_string()])
+}
+
+/// Capabilities legal on the negotiated same-major minor edge. A peer cannot
+/// self-upgrade by advertising a capability introduced after its version.
+pub fn capabilities_for_version(version: ProtocolVersion) -> BTreeSet<String> {
+    if version.major == PROTOCOL_VERSION.major && version.minor >= PROTOCOL_VERSION.minor {
+        baseline_capabilities()
+    } else {
+        previous_capabilities()
+    }
 }
 
 /// Opaque per-call/per-connection correlation identifier
@@ -193,6 +203,59 @@ pub struct EchoStreamSummary {
 #[serde(tag = "method", content = "result")]
 pub enum MethodResult {
     Ping(PongResult),
+    Business(BusinessRpcResult),
+}
+
+pub fn business_result_matches_method(method: &Method, result: &BusinessRpcResult) -> bool {
+    match (method, result) {
+        (Method::RuntimeGetStatus(_), BusinessRpcResult::RuntimeStatus { .. })
+        | (Method::DevicesList(_), BusinessRpcResult::DevicesList { .. })
+        | (Method::DeviceGet(_), BusinessRpcResult::DeviceGet { .. })
+        | (Method::DeviceGetHealth(_), BusinessRpcResult::DeviceHealth { .. })
+        | (Method::DeviceReadLogs(_), BusinessRpcResult::DeviceLogs { .. })
+        | (Method::DeviceQueryTelemetry(_), BusinessRpcResult::DeviceTelemetry { .. })
+        | (Method::IncidentsList(_), BusinessRpcResult::IncidentsList { .. })
+        | (Method::IncidentGet(_), BusinessRpcResult::IncidentGet { .. })
+        | (Method::JobGet(_), BusinessRpcResult::JobGet { .. })
+        | (
+            Method::AgentRunRegister(_) | Method::AgentRunUpdate(_),
+            BusinessRpcResult::AgentRun { .. },
+        )
+        | (Method::WorkIntentAcknowledge(_), BusinessRpcResult::WorkIntentAcknowledged { .. }) => {
+            true
+        }
+        (
+            method,
+            BusinessRpcResult::Operation {
+                method: result_method,
+                ..
+            },
+        ) => matches!(
+            (method, result_method),
+            (
+                Method::HealthCheckRequest(_),
+                OperationMethod::HealthCheckRequest
+            ) | (
+                Method::PreflightRequest(_),
+                OperationMethod::PreflightRequest
+            ) | (Method::JobCancel(_), OperationMethod::JobCancel)
+                | (Method::BuildRequest(_), OperationMethod::BuildRequest)
+                | (Method::RestartRequest(_), OperationMethod::RestartRequest)
+                | (Method::FlashRequest(_), OperationMethod::FlashRequest)
+                | (
+                    Method::TestOnDeviceRequest(_),
+                    OperationMethod::TestOnDeviceRequest
+                )
+                | (
+                    Method::DeploymentRequest(_),
+                    OperationMethod::DeploymentRequest
+                )
+                | (Method::RollbackRequest(_), OperationMethod::RollbackRequest)
+                | (Method::ApprovalGrant(_), OperationMethod::ApprovalGrant)
+                | (Method::ApprovalDeny(_), OperationMethod::ApprovalDeny)
+        ),
+        _ => false,
+    }
 }
 
 /// One streamed item for a [`StreamMethod`] call.
@@ -436,9 +499,15 @@ impl WireMessage {
                         .iter()
                         .any(|value| value.is_empty() || value.len() > 100)
                     || principal.as_ref().is_some_and(|value| {
-                        value.principal_id.is_empty()
-                            || value.principal_id.len() > 200
-                            || value.authority.len() > 13
+                        !crate::business::safe_id(&value.principal_id, 200)
+                            || !crate::business::safe_id(&value.workspace_id, 200)
+                            || value.scope_ids.is_empty()
+                            || value.scope_ids.len() > 128
+                            || value
+                                .scope_ids
+                                .iter()
+                                .any(|scope| !crate::business::safe_id(scope, 200))
+                            || value.authority.len() > 16
                     })
                 {
                     return Err("server principal projection exceeds contract bounds".to_string());
@@ -451,25 +520,37 @@ impl WireMessage {
                 method: StreamMethod::BusinessEvents(params),
                 ..
             } => {
-                if params.max_items == 0 || params.max_items > crate::business::MAX_STREAM_ITEMS {
+                if params.max_items == 0
+                    || params.max_items > crate::business::MAX_STREAM_ITEMS
+                    || !crate::business::safe_id(&params.workspace_id, 200)
+                    || !crate::business::safe_id(&params.scope_id, 200)
+                {
                     return Err("business stream item bound is invalid".to_string());
                 }
+            }
+            WireMessage::CallResult {
+                outcome:
+                    CallOutcome::Ok {
+                        result: MethodResult::Business(result),
+                    },
+                ..
+            } if !result.validate_contract() => {
+                return Err("business result exceeds contract bounds".to_string());
             }
             WireMessage::StreamItem {
                 item: StreamItemPayload::BusinessEvent(event),
                 ..
-            } if event.entity_id.is_empty()
-                || event.entity_id.len() > 200
-                || event.state.is_empty()
-                || event.state.len() > 100
-                || event.correlation_id.is_empty()
-                || event.correlation_id.len() > 200
-                || event.source_runtime_id.is_empty()
-                || event.source_runtime_id.len() > 200
-                || event.occurred_at.is_empty()
-                || event.occurred_at.len() > 50 =>
-            {
+            } if !event.validate_contract() => {
                 return Err("business event exceeds contract bounds".to_string());
+            }
+            WireMessage::StreamEnd {
+                outcome:
+                    StreamOutcome::Ok {
+                        summary: StreamSummary::BusinessEvents(summary),
+                    },
+                ..
+            } if !summary.validate_contract(crate::business::MAX_STREAM_ITEMS) => {
+                return Err("business stream summary exceeds contract bounds".to_string());
             }
             _ => {}
         }

@@ -28,11 +28,20 @@ export const MAX_RPC_PAGE_SIZE = 100;
 export const MAX_RPC_TEXT_BYTES = 2_000;
 export const MAX_RPC_STREAM_ITEMS = 1_024;
 
-const IdempotencyKeySchema = z
+const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength;
+const Utf8TextSchema = (maxBytes: number, allowEmpty = false) =>
+  z
+    .string()
+    .refine(
+      (value) => (allowEmpty || value.length > 0) && utf8Bytes(value) <= maxBytes,
+      `must be ${allowEmpty ? '' : 'non-empty and '}at most ${maxBytes} UTF-8 bytes`,
+    );
+const SafeIdSchema = z
   .string()
   .min(1)
   .max(200)
   .regex(/^[A-Za-z0-9._:-]+$/);
+const IdempotencyKeySchema = SafeIdSchema;
 const CursorSchema = z
   .string()
   .min(1)
@@ -56,21 +65,9 @@ const OperationBaseSchema = z
 
 const BuildRequestSchema = z
   .object({
-    source_snapshot_id: z
-      .string()
-      .min(1)
-      .max(200)
-      .regex(/^[A-Za-z0-9._:-]+$/),
-    target_id: z
-      .string()
-      .min(1)
-      .max(200)
-      .regex(/^[A-Za-z0-9._:-]+$/),
-    recipe_id: z
-      .string()
-      .min(1)
-      .max(200)
-      .regex(/^[A-Za-z0-9._:-]+$/),
+    source_snapshot_id: SafeIdSchema,
+    target_id: SafeIdSchema,
+    recipe_id: SafeIdSchema,
     idempotency_key: IdempotencyKeySchema,
   })
   .strict();
@@ -90,7 +87,7 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
     .object({
       method: z.literal('device_query_telemetry'),
       params: DeviceBoundedReadSchema.extend({
-        signal_ids: z.array(z.string().min(1).max(128)).max(64),
+        signal_ids: z.array(Utf8TextSchema(128)).max(64),
       }).strict(),
     })
     .strict(),
@@ -122,7 +119,7 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
         .object({
           run_id: AgentRunIdSchema,
           phase: z.enum(['planning', 'working', 'waiting', 'completed', 'failed']),
-          summary: z.string().min(1).max(MAX_RPC_TEXT_BYTES),
+          summary: Utf8TextSchema(MAX_RPC_TEXT_BYTES),
           idempotency_key: IdempotencyKeySchema,
         })
         .strict(),
@@ -155,11 +152,7 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
     .object({
       method: z.literal('test_on_device_request'),
       params: OperationBaseSchema.extend({
-        test_suite_id: z
-          .string()
-          .min(1)
-          .max(200)
-          .regex(/^[A-Za-z0-9._:-]+$/),
+        test_suite_id: SafeIdSchema,
       }).strict(),
     })
     .strict(),
@@ -167,8 +160,8 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
     .object({
       method: z.literal('deployment_request'),
       params: ArtifactOperationSchema.extend({
-        verification_plan_id: z.string().min(1).max(200),
-        rollback_plan_id: z.string().min(1).max(200),
+        verification_plan_id: Utf8TextSchema(200),
+        rollback_plan_id: Utf8TextSchema(200),
       }).strict(),
     })
     .strict(),
@@ -177,7 +170,7 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
       method: z.literal('rollback_request'),
       params: OperationBaseSchema.extend({
         deployment_id: DeploymentIdSchema,
-        recovery_policy_id: z.string().min(1).max(200),
+        recovery_policy_id: Utf8TextSchema(200),
       }).strict(),
     })
     .strict(),
@@ -200,7 +193,7 @@ export const BusinessRpcRequestSchema = z.discriminatedUnion('method', [
         .object({
           approval_id: ApprovalIdSchema,
           bound_request_digest: BoundRequestDigestSchema,
-          reason: z.string().min(1).max(MAX_RPC_TEXT_BYTES),
+          reason: Utf8TextSchema(MAX_RPC_TEXT_BYTES),
           idempotency_key: IdempotencyKeySchema,
         })
         .strict(),
@@ -217,7 +210,13 @@ export const PRINCIPAL_KINDS = [
 export const AuthenticatedPrincipalSchema = z
   .object({
     kind: z.enum(PRINCIPAL_KINDS),
-    principal_id: z.string().min(1).max(200),
+    principal_id: SafeIdSchema,
+    workspace_id: SafeIdSchema,
+    scope_ids: z
+      .array(SafeIdSchema)
+      .min(1)
+      .max(128)
+      .refine((values) => new Set(values).size === values.length, 'scope_ids must be unique'),
     authority: z
       .array(
         z.enum([
@@ -233,10 +232,14 @@ export const AuthenticatedPrincipalSchema = z
           'request_build',
           'request_device_operation',
           'decide_approval',
+          'read_approvals',
+          'read_notifications',
+          'read_work_intents',
           'subscribe',
         ]),
       )
-      .max(13),
+      .max(16)
+      .refine((values) => new Set(values).size === values.length, 'authority must be unique'),
   })
   .strict();
 
@@ -251,7 +254,7 @@ const DeviceSummarySchema = z
   .object({
     device_id: DeviceIdSchema,
     lifecycle_state: DeviceLifecycleStateSchema,
-    connector_id: z.string().min(1).max(200),
+    connector_id: Utf8TextSchema(200),
     last_seen_at: IsoUtcTimestampSchema,
   })
   .strict();
@@ -267,7 +270,7 @@ const IncidentSummarySchema = z
       'resolved',
       'closed',
     ]),
-    severity: z.string().min(1).max(100),
+    severity: Utf8TextSchema(100),
     updated_at: IsoUtcTimestampSchema,
   })
   .strict();
@@ -276,7 +279,7 @@ const JobSummarySchema = z
     job_id: JobIdSchema,
     state: JobStateSchema,
     updated_at: IsoUtcTimestampSchema,
-    error_code: z.string().min(1).max(100).nullable().optional(),
+    error_code: Utf8TextSchema(100).nullable().optional(),
   })
   .strict();
 const OperationMethodSchema = z.enum([
@@ -326,10 +329,10 @@ export const BusinessRpcResultSchema = z.discriminatedUnion('kind', [
         .array(
           z
             .object({
-              check_id: z.string().min(1).max(128),
+              check_id: Utf8TextSchema(128),
               status: HealthCheckStatusSchema,
               observed_at: IsoUtcTimestampSchema,
-              evidence_ref: z.string().min(1).max(512).nullable().optional(),
+              evidence_ref: Utf8TextSchema(512).nullable().optional(),
             })
             .strict(),
         )
@@ -348,8 +351,8 @@ export const BusinessRpcResultSchema = z.discriminatedUnion('kind', [
             .object({
               sequence: z.number().int().nonnegative(),
               observed_at: IsoUtcTimestampSchema,
-              level: z.string().min(1).max(32),
-              message: z.string().max(MAX_RPC_TEXT_BYTES),
+              level: Utf8TextSchema(32),
+              message: Utf8TextSchema(MAX_RPC_TEXT_BYTES, true),
               untrusted: z.boolean(),
             })
             .strict(),
@@ -368,11 +371,11 @@ export const BusinessRpcResultSchema = z.discriminatedUnion('kind', [
           z
             .object({
               sequence: z.number().int().nonnegative(),
-              signal_id: z.string().min(1).max(128),
+              signal_id: Utf8TextSchema(128),
               observed_at: IsoUtcTimestampSchema,
-              value_text: z.string().max(512),
-              unit: z.string().min(1).max(64).nullable().optional(),
-              quality: z.string().min(1).max(64),
+              value_text: Utf8TextSchema(512, true),
+              unit: Utf8TextSchema(64).nullable().optional(),
+              quality: Utf8TextSchema(64),
             })
             .strict(),
         )
@@ -420,7 +423,7 @@ export const BusinessRpcResultSchema = z.discriminatedUnion('kind', [
       method: OperationMethodSchema,
       outcome: z.enum(['rejected', 'approval_required', 'accepted', 'deduplicated']),
       correlation_id: CorrelationIdSchema,
-      policy_reason: z.string().min(1).max(MAX_RPC_TEXT_BYTES),
+      policy_reason: Utf8TextSchema(MAX_RPC_TEXT_BYTES),
       approval_id: ApprovalIdSchema.nullable().optional(),
       job_id: JobIdSchema.nullable().optional(),
       bound_request_digest: BoundRequestDigestSchema.nullable().optional(),
@@ -444,6 +447,8 @@ export const BUSINESS_STREAM_NAMES = [
 export const BusinessStreamRequestSchema = z
   .object({
     stream: z.enum(BUSINESS_STREAM_NAMES),
+    workspace_id: SafeIdSchema,
+    scope_id: SafeIdSchema,
     after_sequence: z.number().int().nonnegative().nullable().optional(),
     max_items: z.number().int().min(1).max(MAX_RPC_STREAM_ITEMS),
   })
@@ -454,8 +459,8 @@ export const BusinessEventSchema = z
     sequence: z.number().int().nonnegative(),
     correlation_id: CorrelationIdSchema,
     occurred_at: IsoUtcTimestampSchema,
-    entity_id: z.string().min(1).max(200),
-    state: z.string().min(1).max(100),
+    entity_id: SafeIdSchema,
+    state: Utf8TextSchema(100),
     source_runtime_id: RuntimeIdSchema,
   })
   .strict();
