@@ -15,6 +15,7 @@ members = [
   "crates/loki-monitoring",
   "crates/loki-incidents",
   "crates/loki-local-authority",
+  "crates/loki-local-devices",
 ]
 
 [workspace.package]
