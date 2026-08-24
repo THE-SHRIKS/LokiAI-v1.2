@@ -19,6 +19,7 @@ members = [
   "crates/loki-approvals",
   "crates/loki-agents",
   "crates/loki-local-setup",
+  "crates/loki-local-notifications",
 ]
 
 [workspace.package]
