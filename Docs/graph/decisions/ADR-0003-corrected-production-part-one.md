@@ -59,7 +59,10 @@ and cloud/remote portions of `AS-014`/`AS-015` remain deferred.
 
 Part One physical evidence is the minimum L6 subset necessary to prove the
 confirmed connector and real operations for `AS-003-L`, `AS-006`, and `AS-008`.
-It does not replace Part Two's broader release HIL matrix.
+It does not replace Part Two's broader release HIL matrix. Because `AS-009` is
+explicitly retained whole above, its interrupted-operation and recovery
+evidence is also mandatory; "minimum L6 subset" does not defer, weaken, or
+replace physical evidence required by `AS-009`.
 
 ## Required gates
 
