@@ -269,6 +269,21 @@ impl LocalDeviceBindings {
         }
         Ok(binding)
     }
+
+    pub fn require_active_binding(
+        &self,
+        binding_id: &str,
+    ) -> Result<LocalDeviceBinding, DeviceBindingError> {
+        validate("binding_id", binding_id, MAX_ID)?;
+        let connection = self.connection.lock().map_err(|_| {
+            DeviceBindingError::Conflict("device-binding database lock poisoned".to_string())
+        })?;
+        let binding = get_binding(&connection, binding_id)?.ok_or(DeviceBindingError::NotFound)?;
+        if binding.revoked_at_ms.is_some() {
+            return Err(DeviceBindingError::Revoked);
+        }
+        Ok(binding)
+    }
 }
 
 fn validate_request(request: &BindRequest, now_ms: i64) -> Result<(), DeviceBindingError> {

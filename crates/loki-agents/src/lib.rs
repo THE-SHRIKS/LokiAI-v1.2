@@ -268,6 +268,22 @@ impl AgentRegistry {
         Ok(())
     }
 
+    pub fn require_active_connection(&self, connection_id: &str) -> Result<(), AgentError> {
+        let connection = self.lock()?;
+        let revoked: Option<Option<i64>> = connection
+            .query_row(
+                "SELECT revoked_at_ms FROM agent_connections WHERE connection_id=?1",
+                [connection_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match revoked {
+            None => Err(AgentError::NotFound),
+            Some(Some(_)) => Err(AgentError::Revoked),
+            Some(None) => Ok(()),
+        }
+    }
+
     pub fn start_run(
         &self,
         connection_id: &str,
