@@ -4,6 +4,7 @@ use std::fmt;
 pub enum AuthorityError {
     Io(std::io::Error),
     Sqlite(rusqlite::Error),
+    Storage(loki_storage::StorageError),
     InvalidInput { field: &'static str, reason: String },
     WrongPrincipal,
     SessionNotFound,
@@ -20,6 +21,7 @@ impl fmt::Display for AuthorityError {
         match self {
             Self::Io(error) => write!(f, "local authority I/O error: {error}"),
             Self::Sqlite(error) => write!(f, "local authority database error: {error}"),
+            Self::Storage(error) => write!(f, "encrypted local authority open failed: {error}"),
             Self::InvalidInput { field, reason } => {
                 write!(f, "invalid local authority field '{field}': {reason}")
             }
@@ -42,6 +44,7 @@ impl std::error::Error for AuthorityError {
         match self {
             Self::Io(error) => Some(error),
             Self::Sqlite(error) => Some(error),
+            Self::Storage(error) => Some(error),
             _ => None,
         }
     }
@@ -56,5 +59,11 @@ impl From<std::io::Error> for AuthorityError {
 impl From<rusqlite::Error> for AuthorityError {
     fn from(value: rusqlite::Error) -> Self {
         Self::Sqlite(value)
+    }
+}
+
+impl From<loki_storage::StorageError> for AuthorityError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        Self::Storage(value)
     }
 }

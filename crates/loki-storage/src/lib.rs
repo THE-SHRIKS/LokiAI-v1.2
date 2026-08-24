@@ -11,11 +11,9 @@
 //!
 //! ## What this crate deliberately is not
 //!
-//! - **Not encrypted.** Plaintext SQLite only — full-database encryption is
-//!   `DAT-002` (blocked on `OQ-007`). [`cipher::Cipher`] is the explicit,
-//!   swappable seam `DAT-002` extends; this crate does not invent an
-//!   encryption scheme to fill that gap
-//!   (`Docs/graph/tasks/DAT-001.md` §1).
+//! - **Not a credential store.** Managed Windows opens use SQLCipher and a
+//!   DPAPI-protected database key, but credentials remain outside the database
+//!   and belong to the operating-system protection boundary.
 //! - **Not an IPC surface.** This is a plain Rust library with no network/
 //!   transport code. `RUN-002` is expected to consume it, not the other way
 //!   around (`Docs/graph/tasks/DAT-001.md` §5).

@@ -100,6 +100,7 @@ pub struct ApprovalRecord {
 pub enum ApprovalError {
     Authority(AuthorityError),
     Sqlite(rusqlite::Error),
+    Storage(loki_storage::StorageError),
     InvalidInput { field: &'static str, reason: String },
     PolicyDenied,
     ApprovalNotRequired,
@@ -117,6 +118,7 @@ impl fmt::Display for ApprovalError {
         match self {
             Self::Authority(error) => write!(f, "local authority denied approval action: {error}"),
             Self::Sqlite(error) => write!(f, "approval database error: {error}"),
+            Self::Storage(error) => write!(f, "encrypted approval database open failed: {error}"),
             Self::InvalidInput { field, reason } => {
                 write!(f, "invalid approval field '{field}': {reason}")
             }
@@ -144,14 +146,24 @@ impl From<rusqlite::Error> for ApprovalError {
         Self::Sqlite(value)
     }
 }
+impl From<loki_storage::StorageError> for ApprovalError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        Self::Storage(value)
+    }
+}
 
 pub struct ApprovalStore {
     connection: Mutex<Connection>,
 }
 
 impl ApprovalStore {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, ApprovalError> {
-        Self::from_connection(Connection::open(path)?)
+    pub fn open(
+        path: impl AsRef<Path>,
+        protected_key_path: impl AsRef<Path>,
+    ) -> Result<Self, ApprovalError> {
+        let (connection, _key) =
+            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
+        Self::from_connection(connection)
     }
     pub fn open_in_memory() -> Result<Self, ApprovalError> {
         Self::from_connection(Connection::open_in_memory()?)
@@ -512,6 +524,42 @@ mod tests {
                 3_200
             ),
             Err(ApprovalError::BindingMismatch)
+        ));
+    }
+
+    #[test]
+    fn encrypted_restart_preserves_grant_and_single_use_state() {
+        let (authority, context, session, _) = setup();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("approvals.sqlite3");
+        let key_path = directory.path().join("approvals.key.dpapi");
+        let req = request();
+        let approval_id;
+        {
+            let store = ApprovalStore::open(&path, &key_path).unwrap();
+            let record = store
+                .create(&authority, &context, &session, &req, 3_000, 10_000)
+                .unwrap();
+            approval_id = record.approval_id;
+            store
+                .grant(&authority, &context, &session, &approval_id, 3_100)
+                .unwrap();
+        }
+
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .windows(b"local_approvals".len())
+                .any(|window| window == b"local_approvals"),
+            "approval schema marker must not be plaintext on disk"
+        );
+        let reopened = ApprovalStore::open(&path, &key_path).unwrap();
+        reopened
+            .consume(&authority, &context, &session, &approval_id, &req, 3_200)
+            .unwrap();
+        assert!(matches!(
+            reopened.consume(&authority, &context, &session, &approval_id, &req, 3_300),
+            Err(ApprovalError::AlreadyConsumed)
         ));
     }
 

@@ -12,8 +12,12 @@ pub struct LocalAuthority {
 }
 
 impl LocalAuthority {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, AuthorityError> {
-        let connection = Connection::open(path)?;
+    pub fn open(
+        path: impl AsRef<Path>,
+        protected_key_path: impl AsRef<Path>,
+    ) -> Result<Self, AuthorityError> {
+        let (connection, _key) =
+            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
         Self::from_connection(connection)
     }
 
@@ -408,11 +412,12 @@ mod tests {
     fn restart_preserves_installation_and_revocation_metadata() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("authority.sqlite3");
+        let key_path = directory.path().join("authority.key.dpapi");
         let owner = context(OWNER, "ipc-1");
         let installation_id;
         let session_id;
         {
-            let authority = LocalAuthority::open(&path).unwrap();
+            let authority = LocalAuthority::open(&path, &key_path).unwrap();
             installation_id = authority
                 .initialize_current(&owner, 1_000)
                 .unwrap()
@@ -425,7 +430,7 @@ mod tests {
                 .revoke_session(&owner, &session_id, 3_000)
                 .unwrap();
         }
-        let reopened = LocalAuthority::open(&path).unwrap();
+        let reopened = LocalAuthority::open(&path, &key_path).unwrap();
         assert_eq!(
             reopened
                 .initialize_current(&owner, 4_000)
@@ -437,6 +442,13 @@ mod tests {
             reopened.authorize_local(&owner, &session_id, LocalCapability::ReadLocalState, 4_000),
             Err(AuthorityError::SessionRevoked)
         ));
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .windows(b"local_authority_state".len())
+                .any(|window| window == b"local_authority_state"),
+            "authority schema marker must not be plaintext on disk"
+        );
     }
 
     #[test]

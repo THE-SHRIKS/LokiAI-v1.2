@@ -12,6 +12,7 @@ description = "Windows-bound local installation authority for LokiAI's local-onl
 # pipe DACL derive identity from the same OS token boundary. Internal path
 # dependency; no new licence or upstream maintenance surface.
 loki-ipc = { path = "../loki-ipc" }
+loki-storage = { path = "../loki-storage" }
 
 # Durable transactional session metadata. Exact version matches loki-storage;
 # MIT licensed and already reviewed/pinned in this workspace.

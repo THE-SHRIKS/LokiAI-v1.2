@@ -11,6 +11,7 @@ description = "Durable local-only LokiAI setup state machine (LONB-001)."
 loki-agents = { path = "../loki-agents" }
 loki-local-authority = { path = "../loki-local-authority" }
 loki-local-devices = { path = "../loki-local-devices" }
+loki-storage = { path = "../loki-storage" }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 uuid = { version = "=1.24.1", features = ["v4"] }
 
