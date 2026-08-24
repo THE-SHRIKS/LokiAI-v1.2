@@ -53,6 +53,7 @@ silently editing a worker's contract.
 | `DAT-002-REV-001` | [`DAT-002-REV-001.md`](DAT-002-REV-001.md) | `FAILED_VERIFICATION` | Two critical and seven high encrypted-data lifecycle findings; review recorded under W4 evidence. |
 | `DAT-002-CORR-001` | [`DAT-002-CORR-001.md`](DAT-002-CORR-001.md) | ready | Correct two critical and seven high encrypted-data findings before re-review. |
 | `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | ready | Canonical authenticated business RPC contract and real named-pipe matrix. |
+| `BLD-ARCH-ADR-001` | [`BLD-ARCH-ADR-001.md`](BLD-ARCH-ADR-001.md) | running | Read-only containment workspace architecture replan; no host mutation authorized. |
 | Remaining Part One (W0–W6) nodes | created just-in-time as each becomes dependency-ready | correction program active | Continue every ready local branch. Cloud alone remains deferred. Device-changing operations and locked-boundary decisions retain their exact human gates. |
 | `P1-INT-001` (Part One completion gate) | [`P1-INT-001.md`](P1-INT-001.md) | `NEEDS_REPLAN` | Prior package-test evidence remains valid but did not prove production composition or the required connector/build/artifact/operation/deployment paths. |
 | Part Two (`UI-001` and W7–W10 descendants) | not created | dependency + human-approval pending | Blocked on `P1-INT-001` acceptance **and** a separate human go-ahead per `../TASK_GRAPH.md` section 1a; do not create Part Two packets before both exist |
