@@ -259,7 +259,7 @@ which half of the program (Section 1a) a wave belongs to.
 | MON-001 | IMPLEMENTATION | Bounded telemetry/log ingestion, quality/freshness, buffering, storage, and subscriptions                                                                                                                                                      | CON-001, DAT-001          | loss/gap/backpressure/restart/retention tests                                                               | accepted |
 | MON-002 | IMPLEMENTATION | Versioned monitoring rules, windows, debounce/cooldown, missing-data semantics                                                                                                                                                                 | MON-001                   | deterministic rule evaluation and restart tests                                                             | accepted |
 | INC-001 | IMPLEMENTATION | Incident correlation, bounded evidence, assignment, timeline, verification, reopen/close, and work-intent emission                                                                                                                             | MON-002                   | AS-008 and state-transition tests                                                                           | accepted |
-| LNOT-001 | IMPLEMENTATION | Deduplicated durable local notification intents, preferences, delivery/read state, safe local action references, and runtime-offline alerts; no remote delivery claim                                                                          | INC-001, DSK-001, DAT-002 | notification privacy/dedup/action-reference/runtime-offline tests                                           | proposed |
+| LNOT-001 | IMPLEMENTATION | Deduplicated durable local notification intents, preferences, delivery/read state, safe local action references, and runtime-offline alerts; no remote delivery claim                                                                          | INC-001, DSK-001, DAT-002 | notification privacy/dedup/action-reference/runtime-offline tests                                           | accepted — integrated at `185edd8`; full verification in `Docs/graph/evidence/W6/LNOT-001/verification.md` |
 | CLD-002 | IMPLEMENTATION | Durable cloud outbox/inbox sync, conflicts, runtime heartbeat/freshness, control-plane projections, reconnect and backpressure                                                                                                                 | CLD-001, RUN-003, DAT-002 | AS-014 and cloud contract/revocation/deduplication tests                                                    | deferred — excluded from local-only Part One by ADR-0002 |
 | NOT-001 | IMPLEMENTATION | Cloud-coordinated action-center and Windows notification delivery, preferences, delivery/read state, secure deep links, and offline alerts                                                                                                      | CLD-002, INC-001, DSK-001 | notification privacy/dedup/deep-link/runtime-offline tests                                                  | deferred — remote delivery excluded from local-only Part One by ADR-0002 |
 
@@ -882,4 +882,25 @@ unblocked_nodes: LNOT-001 can use the integrated encrypted storage foundation.
 new_or_changed_risks: DAT-002 remains blocked, not accepted, because its
   second-Windows-identity DPAPI test and independent data-security review are
   still unavailable. Cloud remains deferred and fail-closed.
+```
+
+```text
+node_id: LNOT-001
+from: ready
+to: accepted
+timestamp: 2026-08-24T18:57:39+05:30
+actor: Codex orchestrator under the accepted local-only Part One scope
+starting_revision: 974dfbe
+worker_result_revision: 7da0088
+integrated_revision: 185edd8
+evidence: Docs/graph/evidence/W6/LNOT-001/verification.md;
+  Docs/graph/handoffs/LNOT-001-1.md; seven focused notification tests;
+  warnings-denied focused and workspace Clippy; complete repository verify.
+reason: the encrypted local action-center projection passed restart,
+  privacy, deduplication, safe-action-reference, preference, state, and expiry
+  gates without claiming cloud delivery or OS notification presentation.
+unblocked_nodes: AGT-002 now has every implementation dependency available.
+new_or_changed_risks: none. The node adds no URL/path actions, network path,
+  renderer authority, device authority, or remote-delivery claim. DAT-002's
+  named second-identity and independent-review blocker remains unchanged.
 ```
