@@ -324,6 +324,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-local-notifications"
+version = "1.2.0"
+dependencies = [
+ "loki-connectors-sdk",
+ "loki-incidents",
+ "loki-storage",
+ "rusqlite",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "loki-local-setup"
 version = "1.2.0"
 dependencies = [
