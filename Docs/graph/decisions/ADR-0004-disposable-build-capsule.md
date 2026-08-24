@@ -1,9 +1,9 @@
 # ADR-0004 — Disposable per-job VHDX build capsule
 
-Status: `proposed`  
+Status: `accepted for implementation`
 Date: `2026-08-24`  
 Decision owners: `human architecture/security owner; orchestrator`  
-Supersedes: `BLD-001-CORR-001-R1` workspace ACL design after acceptance
+Supersedes: rejected `BLD-001-CORR-001-R1` workspace ACL design
 
 ## Context
 
@@ -46,7 +46,7 @@ fails closed. Production provisioning uses native signed Windows APIs.
 
 ## Verification
 
-`BLD-001-R2` must pass real existing-root before/after DACL hashes; concurrent
+`BLD-001-R2-HOST-VERIFY` must pass real existing-root before/after DACL hashes; concurrent
 cross-job denial; source/toolchain read-only and output-only write; host secret,
 database, pipe, registry, signing, USB/serial and arbitrary-file denial; path/
 reparse/mount/volume substitution; socket/DNS denial; hostile Win32k/UI calls;
@@ -56,7 +56,13 @@ independent security review with no critical/high finding.
 
 ## Human acceptance
 
-- Decision: `pending`
+- Decision: `accepted by human architecture/security owner on 2026-08-24`
 - Required approval phrase: `I approve BLD-ARCH-ADR-001 Design A disposable
   per-job VHDX capsule with all retained containment controls and no
   VM/unrestricted fallback.`
+- Binding execution conditions: no changes to `C:\` ACLs or system paths; no
+  Windows-account, group, UAC, registry, administrator-level, or host-policy
+  changes; worktrees and temporary storage remain on `L:\`; and every elevated
+  operation or VHDX create/attach/mount/detach action requires a separate,
+  exact-operation human approval before execution. These conditions narrow the
+  accepted design and do not weaken any containment control above.

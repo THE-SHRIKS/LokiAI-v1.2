@@ -1,6 +1,6 @@
 # ADR-0005 — Verified SQLCipher Secure Arena on Windows
 
-Status: `proposed — human acceptance required`  
+Status: `accepted for implementation; operational validation separately gated`
 Date: `2026-08-24`  
 Decision owner: human product/security owner
 
@@ -18,7 +18,7 @@ bundled failure path also provides a high-confidence, not debugger-proven,
 recursive warning hypothesis because Windows stderr formatting re-enters the
 SQLCipher allocator after a failed lock.
 
-## Decision proposed
+## Decision
 
 Use one fixed, page-aligned SQLite secure arena owned by the LokiAI runtime:
 
@@ -58,5 +58,13 @@ derived from real supported-host measurement; they are not guessed in this ADR.
 
 ## Human decision
 
-Implementation is forbidden until the human accepts the exact wording recorded
-in `Docs/graph/handoffs/DAT-002-MEM-ADR-001-1.md`.
+Accepted by reference by the human product/security owner on 2026-08-24 after
+the exact decision from `Docs/graph/handoffs/DAT-002-MEM-ADR-001-1.md` had been
+presented. The later approval added the binding execution conditions below.
+
+Binding execution conditions: no changes to `C:\` ACLs or system paths; no
+Windows-account, group, UAC, registry, administrator-level, or host-wide policy
+changes; worktrees and temporary storage remain on `L:\`; and any elevated or
+VM operation requires a separate exact-operation approval. A working-set change
+is permitted only inside the current LokiAI process as already bounded by this
+ADR; it must be non-persistent and must not change host-wide policy.

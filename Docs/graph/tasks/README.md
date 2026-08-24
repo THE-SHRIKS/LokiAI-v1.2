@@ -51,10 +51,15 @@ silently editing a worker's contract.
 | `P1-GRAPH-AUD-001` | [`P1-GRAPH-AUD-001.md`](P1-GRAPH-AUD-001.md) | `NEEDS_REPLAN` | Independent audit produced the accepted correction frontier and ADR-0003. |
 | `P1-RUNTIME-AUD-001` | [`P1-RUNTIME-AUD-001.md`](P1-RUNTIME-AUD-001.md) | complete | No architecture change required; seven production integration nodes defined. |
 | `DAT-002-REV-001` | [`DAT-002-REV-001.md`](DAT-002-REV-001.md) | `FAILED_VERIFICATION` | Two critical and seven high encrypted-data lifecycle findings; review recorded under W4 evidence. |
-| `DAT-002-CORR-001` | [`DAT-002-CORR-001.md`](DAT-002-CORR-001.md) | ready | Correct two critical and seven high encrypted-data findings before re-review. |
-| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | ready | Canonical authenticated business RPC contract and real named-pipe matrix. |
-| `BLD-ARCH-ADR-001` | [`BLD-ARCH-ADR-001.md`](BLD-ARCH-ADR-001.md) | human decision | Design A disposable VHDX capsule recommended in ADR-0004; no host mutation performed. |
-| `CON-003-PRE-001` | [`CON-003-PRE-001.md`](CON-003-PRE-001.md) | running | Read-only connected-board/toolchain audit; no COM open, reset or flash authorized. |
+| `DAT-002-CORR-001` | [`DAT-002-CORR-001.md`](DAT-002-CORR-001.md) | `NEEDS_REPLAN` | Required lifecycle exposed the SQLCipher secure-memory quota failure; ADR-0005 replaces the unsafe allocation model without accepting this failed node. |
+| `DAT-002-MEM-ADR-001` | ADR-0005 decision record | accepted 2026-08-24 | Fixed verified secure arena accepted for implementation; operational Windows/VM validation remains separately gated. |
+| `DAT-002-MEM-IMPL-001` | packet pending | proposed | Packet may be created from the accepted ADR baseline; no elevation or VM operation is authorized. |
+| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | `FAILED_VERIFICATION`, correction active | REV-002 found three high live-session/scope/parity defects; correction is active in its isolated worktree. |
+| `BLD-ARCH-ADR-001` | [`BLD-ARCH-ADR-001.md`](BLD-ARCH-ADR-001.md) | accepted 2026-08-24 | ADR-0004 Design A accepted for implementation; every elevated/VHDX operation remains separately gated. |
+| `BLD-001-R2-CODE` | packet pending | proposed | Unprivileged protocol/journal/state-machine/fixture implementation only; no VHDX invocation, elevation, install or host mutation. |
+| `BLD-001-R2-HOST-VERIFY` | packet pending | `BLOCKED_DEPENDENCY` | Requires accepted R2 code plus separate exact VHDX/elevation approval and an approved signer/provisioning environment. |
+| `CON-003-PRE-001` | [`CON-003-PRE-001.md`](CON-003-PRE-001.md) | accepted | Read-only audit exit passed; COM5 is only a transport candidate and exact SKU remains unverified. |
+| `CON-ID-CONTRACT-001` | [`CON-ID-CONTRACT-001.md`](CON-ID-CONTRACT-001.md) | ready | Protocol v1.0.0 accepted; no COM open, reset, flash or device configuration is authorized. |
 | Remaining Part One (W0–W6) nodes | created just-in-time as each becomes dependency-ready | correction program active | Continue every ready local branch. Cloud alone remains deferred. Device-changing operations and locked-boundary decisions retain their exact human gates. |
 | `P1-INT-001` (Part One completion gate) | [`P1-INT-001.md`](P1-INT-001.md) | `NEEDS_REPLAN` | Prior package-test evidence remains valid but did not prove production composition or the required connector/build/artifact/operation/deployment paths. |
 | Part Two (`UI-001` and W7–W10 descendants) | not created | dependency + human-approval pending | Blocked on `P1-INT-001` acceptance **and** a separate human go-ahead per `../TASK_GRAPH.md` section 1a; do not create Part Two packets before both exist |

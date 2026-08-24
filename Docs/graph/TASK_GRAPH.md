@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **`P1-INT-001` is reopened as `NEEDS_REPLAN`. Its recorded test evidence remains valid only for separately tested packages; it did not prove that the production runtime, Electron, MCP, connector, monitoring, jobs, approvals, agents, incidents, and local-delivery services run together. Production Electron/MCP paths still return `runtime_unavailable`, `CON-002` is mock-backed, and mandatory connector/build/artifact/operation/deployment nodes remain unaccepted. ADR-0003 restores every non-cloud W0-W6 capability to Part One. Independent `DAT-002-REV-001` found two critical and seven high findings, so DAT remains blocked while `DAT-002-CORR-001` is ready. `P1-RPC-CONTRACT-001` is also ready. Cloud remains deferred; Part Two has not started.**
+Status: **`P1-INT-001` remains reopened as `NEEDS_REPLAN`; package code is not production integration evidence. `P1-RPC-CONTRACT-001` correction is active. The human accepted ADR-0004 disposable VHDX containment, ADR-0005 verified SQLCipher secure arena, and Connector Identity Protocol v1.0.0 on 2026-08-24 under binding no-C-drive/no-account/no-admin/no-host-policy conditions and separate approval for elevated, VHDX, VM, or device-mutating operations. DAT secure-memory implementation packet creation and connector-contract implementation are now eligible; build host verification remains blocked on its separate operation approval and environment. Production Electron/MCP paths still return `runtime_unavailable`, connector discovery remains mock-backed, and build/artifact/operation/deployment nodes remain unaccepted. Cloud remains deferred; Part Two has not started.**
 Graph owner: **Orchestrator**  
 Updated: **2026-08-24**
 
@@ -290,12 +290,15 @@ which half of the program (Section 1a) a wave belongs to.
 | DAT-002-REV-001 | VERIFICATION | Independently review DAT-002 and define the real second-identity evidence procedure. | DAT-002 checkpoint | independent security verdict and environment procedure | `FAILED_VERIFICATION` — two critical and seven high findings |
 | P1-SCOPE-ADR-001 | DECISION | Accept corrected cloud-only deferral, named local scenarios, physical evidence boundary and required W0-W6 nodes. | P1-GRAPH-AUD-001 | accepted ADR-0003 | accepted |
 | DAT-002-CORR-001 | IMPLEMENTATION | Correct critical/high encrypted-data lifecycle findings before a new independent review and second-identity matrix. | DAT-002-REV-001 | fault-injection, concurrency, recovery, ACL and cipher evidence | `NEEDS_REPLAN` — H1-H8 correction exposed reproducible SQLCipher secure-memory `VirtualLock` quota failure/stack overflow during required recover-then-rotate lifecycle; no downgrade accepted |
-| DAT-002-MEM-ADR-001 | DECISION | Select a production-safe Windows SQLCipher secure-memory lifecycle that retains verified memory security without global resource side effects or false defaults. | DAT-002-REV-002, DAT-002-CORR-001 | bundled-source root cause, official platform evidence, bounded options/threat/operations analysis and human gate | audit complete — ADR-0005 Design A fixed verified secure arena proposed; awaits human acceptance |
+| DAT-002-MEM-ADR-001 | DECISION | Select a production-safe Windows SQLCipher secure-memory lifecycle that retains verified memory security without global resource side effects or false defaults. | DAT-001, ADR-0001 | bundled-source root cause, official platform evidence, bounded options/threat/operations analysis and human gate | accepted — ADR-0005 Design A approved 2026-08-24 with no-C-drive/no-account/no-admin/no-host-policy conditions and separate approval for elevated/VM operations; failed DAT correction/review evidence was consumed as input, not treated as an accepted predecessor |
+| DAT-002-MEM-IMPL-001 | IMPLEMENTATION | Implement the accepted fixed verified SQLCipher secure arena before any runtime storage/key access. | DAT-002-MEM-ADR-001, DAT-001 | fail-closed arena lifecycle, real page-lock attestation, exhaustion/recovery/shutdown evidence and independent review | proposed — packet pending; no elevated or VM operation authorized |
 | P1-RPC-CONTRACT-001 | CONTRACT | Canonical authenticated, versioned, bounded business RPC methods/streams and server-created principal context. | CTR-001, RUN-002, ADR-0003 | TS/Rust fixtures plus real named-pipe compatibility/security matrix | `FAILED_VERIFICATION` at REV-002 — three high live-session, unary-scope/entity-coupling and strict-result-parity defects; correction active |
-| BLD-ARCH-ADR-001 | DECISION | Replace per-job existing-volume-root ACL mutation with an accepted production containment-workspace design while retaining every control. | BLD-001-CORR-001-R1 | options, threat/operations analysis, recommended design and human acceptance | review complete; ADR-0004 awaits human acceptance |
-| CON-003-PRE-001 | VERIFICATION | Audit connected-board read-only evidence, toolchains, OQ-001 inputs and the production connector/physical-test plan without device side effects. | CON-001, CON-002 | source/tool inventory, exact marking blocker and staged approval matrix | complete — COM5 transport candidate and local toolchain inventory verified read-only; exact SKU and real identity contract remain blockers |
-| CON-ID-CONTRACT-001 | CONTRACT | Add device-neutral bounded transport-candidate, probe-result and device-derived identity-evidence contracts; provisional locators remain unstable and sensitive. | CON-001, CON-003-PRE-001 | TS/Rust contract fixtures, boundary validation, no connector-derived stable identity | `BLOCKED_DEPENDENCY` — public protocol v1.0.0 addition requires explicit human acceptance |
+| BLD-ARCH-ADR-001 | DECISION | Replace per-job existing-volume-root ACL mutation with an accepted production containment-workspace design while retaining every control. | ADR-0001, JOB-001, CON-001, RUN-002 | options, threat/operations analysis, recommended design and human acceptance | accepted — ADR-0004 disposable per-job VHDX capsule approved 2026-08-24; failed R1 evidence was consumed as input, not treated as an accepted predecessor; every elevated/VHDX operation still requires separate exact approval |
+| CON-003-PRE-001 | VERIFICATION | Audit connected-board read-only evidence, toolchains, OQ-001 inputs and the production connector/physical-test plan without device side effects. | CON-001, CON-002 | source/tool inventory, exact marking blocker and staged approval matrix | accepted — handoff result COMPLETE and read-only audit exit passed; COM5 transport candidate/toolchain inventory verified, while exact SKU remains blocked |
+| CON-ID-CONTRACT-001 | CONTRACT | Add device-neutral bounded transport-candidate, probe-result and device-derived identity-evidence contracts; provisional locators remain unstable and sensitive. | CON-001, CON-003-PRE-001 | TS/Rust contract fixtures, boundary validation, no connector-derived stable identity | ready — Connector Identity Protocol v1.0.0 approved 2026-08-24 under the binding no-C-drive/no-account/no-admin/no-host-policy conditions; exact physical SKU remains separate |
 | CON-002-R1 | IMPLEMENTATION | Replace mock-backed connector-ID discovery with real candidate ingestion, identify-by-candidate, stable-identity reconciliation and explicit busy/permission/disconnect behavior. | CON-ID-CONTRACT-001 | registry conformance, duplicate/reconnect/failure tests using production probe boundary | proposed |
+| BLD-001-R2-CODE | IMPLEMENTATION | Implement the unprivileged typed VHDX-capsule broker/executor protocol, lifecycle journal/state machine and hostile fixtures without invoking host mutation. | BLD-ARCH-ADR-001, JOB-001, CON-001, RUN-002 | static/unit/contract evidence; no elevation, VHDX API invocation, install, signing credential or host mutation | proposed — packet pending within the no-host-operation boundary |
+| BLD-001-R2-HOST-VERIFY | VERIFICATION | Verify the signed broker and real disposable VHDX lifecycle with the complete hostile, cross-job, fault and reboot matrix. | BLD-001-R2-CODE | real supported-Windows evidence and independent review with no critical/high findings | `BLOCKED_DEPENDENCY` — requires separate exact VHDX/elevation approval plus approved signer/provisioning environment |
 | P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | proposed |
 | P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
 | P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001, P1-RPC-CONTRACT-001 | real process startup/restart/reconcile/failure tests | proposed |
@@ -968,4 +971,62 @@ unblocked_nodes: the graph prerequisite for UI-001 is satisfied, but the separat
 new_or_changed_risks: none. This is not SEC-001/SEC-002, packaging, release,
   cloud, contained-build, exact-board, flash, device-operation, or deployment
   certification. Part Two was not started.
+```
+
+```text
+node_id: DAT-002-MEM-ADR-001
+from: awaiting human acceptance
+to: accepted
+timestamp: 2026-08-24T22:52:06+05:30
+actor: human product/security owner
+evidence: Docs/graph/decisions/ADR-0005-verified-sqlcipher-secure-arena.md;
+  Docs/graph/handoffs/DAT-002-MEM-ADR-001-1.md
+reason: after the exact decision had been presented earlier, the human approved
+  the documented design by reference and added the binding conditions below.
+conditions: no C-drive ACL/system changes; no Windows account/group/UAC/registry/
+  administrator/host-wide-policy changes; L-drive worktrees and temporary storage;
+  separate exact approval before elevated or VM operations. Current-process-only,
+  bounded, observable and non-persistent working-set handling remains permitted by
+  ADR-0005 and may not become host-wide policy.
+unblocked_nodes: packet creation for DAT-002-MEM-IMPL-001.
+new_or_changed_risks: implementation, separately approved real Windows/VM evidence, independent
+  DAT-002-MEM review, full DAT review and second-identity validation remain open.
+```
+
+```text
+node_id: BLD-ARCH-ADR-001
+from: awaiting human acceptance
+to: accepted
+timestamp: 2026-08-24T22:52:06+05:30
+actor: human architecture/security owner
+evidence: Docs/graph/decisions/ADR-0004-disposable-build-capsule.md;
+  Docs/graph/handoffs/BLD-ARCH-ADR-001-1.md
+reason: after the exact decision had been presented earlier, the human approved
+  the documented Design A by reference with all retained controls and no
+  VM/unrestricted fallback. This accepts the architecture, not any host operation.
+conditions: no C-drive ACL/system changes; no Windows account/group/UAC/registry/
+  administrator/host-policy changes; L-drive worktrees and temporary storage;
+  every elevated or VHDX operation requires separate exact-operation approval.
+unblocked_nodes: packet creation for BLD-001-R2-CODE; BLD-001-R2-HOST-VERIFY
+  and every host mutation remain separately gated.
+new_or_changed_risks: signed broker implementation, real L8 hostile evidence,
+  supported-Windows recovery evidence and independent review remain open.
+```
+
+```text
+node_id: CON-ID-CONTRACT-001
+from: BLOCKED_DEPENDENCY
+to: ready
+timestamp: 2026-08-24T22:52:06+05:30
+actor: human product/security owner; Codex orchestrator
+evidence: Docs/graph/tasks/CON-ID-CONTRACT-001.md;
+  Docs/graph/handoffs/CON-ID-CONTRACT-001-1.md
+reason: after the exact cross-language compatibility decision had been presented
+  earlier, the human approved Connector Identity Protocol v1.0.0 by reference
+  and added the binding conditions below.
+conditions: no C-drive ACL/system changes; no Windows account/admin/host-policy
+  changes; no serial open, reset, flash or device configuration under this node.
+unblocked_nodes: CON-ID-CONTRACT-001 implementation in its isolated worktree.
+new_or_changed_risks: exact ESP32-S3 SKU and every physical mutation remain
+  separately gated; USB/COM metadata cannot establish stable device identity.
 ```
