@@ -1,0 +1,17 @@
+[package]
+name = "loki-agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Scoped revocable local agent connections and run event registry (AGT-001)."
+
+[dependencies]
+loki-local-authority = { path = "../loki-local-authority" }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+sha2 = "=0.10.9"
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
