@@ -55,6 +55,14 @@ impl HostPaths {
         self.base_dir.join("ipc.token")
     }
 
+    pub fn protected_token_file(&self) -> PathBuf {
+        self.base_dir.join("ipc.token.protected")
+    }
+
+    pub fn database_key_file(&self) -> PathBuf {
+        self.base_dir.join("database.key.protected")
+    }
+
     /// The `DAT-001` SQLite database this host instance owns.
     pub fn database_file(&self) -> PathBuf {
         self.base_dir.join("loki-runtime.sqlite3")
@@ -81,6 +89,14 @@ mod tests {
         assert_eq!(
             paths.token_file(),
             PathBuf::from(r"C:\tmp\lokiai-test\ipc.token")
+        );
+        assert_eq!(
+            paths.protected_token_file(),
+            PathBuf::from(r"C:\tmp\lokiai-test\ipc.token.protected")
+        );
+        assert_eq!(
+            paths.database_key_file(),
+            PathBuf::from(r"C:\tmp\lokiai-test\database.key.protected")
         );
         assert_eq!(
             paths.database_file(),

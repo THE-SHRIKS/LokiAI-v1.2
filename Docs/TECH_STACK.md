@@ -62,6 +62,34 @@ it is newer.
 | Packaging | Electron Forge core/packager and fuses; WiX Toolset Burn bundle | Forge is Electron's recommended packaging path. WiX provides a signed product bundle capable of installing desktop plus runtime/service/MCP components. |
 | Updates | LokiAI-signed component manifest and payloads with staged rollout | Update is atomic across compatible component versions. HTTPS alone is insufficient. |
 
+### 3.1 DAT-002 native encryption dependency record
+
+The accepted Windows build pins `rusqlite 0.40.2` with
+`bundled-sqlcipher-vendored-openssl`. The lockfile resolves
+`libsqlite3-sys 0.38.2`, `openssl-sys 0.9.117`, and
+`openssl-src 300.6.1+3.6.3`; it does not silently load a machine-wide SQLite.
+This native chain exists only to provide SQLCipher Community full-database
+encryption for the three runtime-owned bounded-context files. Windows key
+generation/protection uses the pinned `windows-sys 0.61.2` bindings to CNG and
+DPAPI rather than another secret-store dependency.
+
+- Licence/notice posture: SQLCipher Community carries its BSD-style notice;
+  SQLite is public domain; rusqlite is MIT; OpenSSL 3 is Apache-2.0. The release
+  notice and SBOM must reproduce the dependency-supplied notices, versions, and
+  source/component digests.
+- Maintenance/security posture: the Rust wrapper/native source revisions are
+  lockfile-pinned and subject to the workspace dependency/security audit. A
+  SQLCipher/OpenSSL security update is a reviewed native rebuild, not an
+  implicit system-library change.
+- Native-build impact: Windows source builds require the pinned Rust/MSVC
+  toolchain plus a compatible Perl/C build environment for vendored OpenSSL.
+  Installers ship the compiled native result; Perl is not an end-user runtime
+  prerequisite.
+- Removal path: replace the `rusqlite` SQLCipher feature and managed-key layer
+  only through a new accepted encrypted-database ADR with migration, recovery,
+  compatibility, notice, and data-at-rest evidence. Plain SQLite is not a
+  permitted fallback.
+
 ## 4. Existing renderer drift
 
 `LokiAI Desktop UI/package.json` is an accepted visual prototype, not the locked

@@ -263,10 +263,13 @@ fn run_mode_composes_a_real_ipc_listener_that_accepts_a_connection_then_shuts_do
     );
 
     let runtime_dir = local_app_data.path().join("LokiAI").join("runtime");
-    let raw_token = std::fs::read_to_string(runtime_dir.join("ipc.token"))
-        .expect("ipc token file must exist once the bound-and-serving line was logged")
-        .trim()
-        .to_string();
+    let legacy_token_path = runtime_dir.join("ipc.token");
+    let raw_token = loki_runtime::host::token::load_or_create(&legacy_token_path)
+        .expect("DPAPI-protected IPC token must be readable once serving was logged");
+    assert!(
+        !legacy_token_path.exists(),
+        "the runtime must not recreate the legacy plaintext token"
+    );
     let pipe_name = loki_runtime::host::discovery::well_known_pipe_name().expect(
         "failed to resolve the well-known pipe name (same-user, same function the child used)",
     );

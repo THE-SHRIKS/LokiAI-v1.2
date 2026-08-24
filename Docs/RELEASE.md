@@ -63,6 +63,16 @@ protocol callback, updates, and component atomicity remain satisfied.
 - Runtime reports update state to desktop and activity log.
 - The user sees version, channel, expected restart/downtime, and release notes.
 
+### SQLCipher Community notice requirement
+
+Every package containing the DAT-002 native database component must include the
+complete upstream SQLCipher Community BSD-style copyright/licence notice and the
+applicable SQLite, rusqlite, and OpenSSL notices generated from the exact locked
+sources. The SBOM/component manifest records at least `rusqlite 0.40.2`,
+`libsqlite3-sys 0.38.2`, `openssl-sys 0.9.117`, and
+`openssl-src 300.6.1+3.6.3`, plus source/component digests. LokiAI does not claim
+SQLCipher commercial support or FIPS validation.
+
 ## 5. Product rollout
 
 v1.2 progression:
@@ -110,6 +120,8 @@ equivalent provenance and a new candidate record.
 - [ ] Clean reproducible build from release revision.
 - [ ] Lockfiles and pinned toolchains present.
 - [ ] Dependency/license/security scans pass.
+- [ ] SQLCipher Community and transitive native-component notices are present
+  and match the locked sources; no FIPS/commercial-support claim is made.
 - [ ] SBOM and component manifest generated.
 - [ ] Artifacts/installers/update metadata signed and verified.
 - [ ] No secrets or customer data in package/evidence.

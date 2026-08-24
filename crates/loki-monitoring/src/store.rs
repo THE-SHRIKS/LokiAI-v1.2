@@ -53,6 +53,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 /// `loki_storage::Storage`'s.
 pub struct SqliteTelemetryStore {
     conn: Mutex<Connection>,
+    _key: Option<loki_storage::DatabaseKey>,
 }
 
 impl SqliteTelemetryStore {
@@ -61,11 +62,13 @@ impl SqliteTelemetryStore {
     /// already-applied migrations are skipped (mirrors
     /// `loki_storage::Storage::run_migrations`'s idempotency).
     pub fn open(path: &Path) -> Result<Self, MonitoringError> {
-        let conn = Connection::open(path)?;
+        let key_path = loki_storage::secret::database_key_path(path);
+        let (conn, key) = loki_storage::open_or_migrate_sqlcipher(path, &key_path)?;
         configure(&conn)?;
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: Some(key),
         })
     }
 
@@ -77,6 +80,7 @@ impl SqliteTelemetryStore {
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: None,
         })
     }
 

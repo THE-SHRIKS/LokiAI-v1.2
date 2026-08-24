@@ -9,12 +9,12 @@
 
 mod common;
 
+use loki_storage::Storage;
 use loki_storage::devices::DeviceRepository;
 use loki_storage::inbox::InboxRepository;
 use loki_storage::jobs::JobRepository;
 use loki_storage::outbox::OutboxRepository;
 use loki_storage::states::{JobState, OutboxStatus};
-use loki_storage::{Cipher, Storage};
 
 #[test]
 fn migration_applies_cleanly_on_an_empty_db() {
@@ -53,7 +53,7 @@ fn migration_applies_cleanly_on_an_empty_db() {
     // A second, independent handle onto the same file confirms the schema
     // was durably written to disk, not only visible to the writer's own
     // in-process connection.
-    let second_handle = Storage::open(&path, Cipher::None).unwrap();
+    let second_handle = Storage::open(&path, common::cipher_for(&path)).unwrap();
     assert_eq!(
         second_handle.integrity_check().unwrap(),
         loki_storage::IntegrityStatus::Ok
@@ -81,7 +81,7 @@ fn running_migrations_twice_is_idempotent() {
 fn fresh_storage_reports_which_versions_it_applied() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("fresh.db");
-    let storage = Storage::open(&path, Cipher::None).unwrap();
+    let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
 
     let report = storage.run_migrations(common::T0).unwrap();
     assert_eq!(

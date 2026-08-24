@@ -12,7 +12,7 @@ mod common;
 use std::fs;
 
 use loki_storage::devices::DeviceRepository;
-use loki_storage::{Cipher, Storage, StorageError};
+use loki_storage::{Storage, StorageError};
 
 #[test]
 fn garbage_file_is_detected_as_corrupt_not_silently_replaced() {
@@ -24,7 +24,7 @@ fn garbage_file_is_detected_as_corrupt_not_silently_replaced() {
     )
     .unwrap();
 
-    let result = Storage::open(&path, Cipher::None);
+    let result = Storage::open(&path, common::cipher_for(&path));
     match result {
         Err(StorageError::Corrupt {
             path: reported_path,
@@ -44,7 +44,7 @@ fn truncated_sqlite_header_is_detected_as_corrupt() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("truncated.db");
     {
-        let storage = Storage::open(&path, Cipher::None).unwrap();
+        let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
         storage.run_migrations(common::T0).unwrap();
         storage
             .insert_device(&common::sample_device("dev-1"))
@@ -58,7 +58,7 @@ fn truncated_sqlite_header_is_detected_as_corrupt() {
     );
     fs::write(&path, &bytes[..16]).unwrap();
 
-    let result = Storage::open(&path, Cipher::None);
+    let result = Storage::open(&path, common::cipher_for(&path));
     assert!(
         matches!(result, Err(StorageError::Corrupt { .. })),
         "truncated file must be detected as corrupt"
@@ -71,7 +71,7 @@ fn missing_path_creates_a_fresh_database_not_an_error() {
     let path = dir.path().join("does-not-exist-yet.db");
     assert!(!path.exists());
 
-    let storage = Storage::open(&path, Cipher::None)
+    let storage = Storage::open(&path, common::cipher_for(&path))
         .expect("opening a non-existent path must create a fresh database");
     let report = storage.run_migrations(common::T0).unwrap();
     assert!(path.exists());
@@ -84,7 +84,7 @@ fn zero_byte_file_is_a_legitimate_empty_database_not_corruption() {
     let path = dir.path().join("empty.db");
     fs::write(&path, b"").unwrap();
 
-    let storage = Storage::open(&path, Cipher::None)
+    let storage = Storage::open(&path, common::cipher_for(&path))
         .expect("a zero-byte file is a valid empty SQLite database, not corruption");
     storage.run_migrations(common::T0).unwrap();
     assert_eq!(

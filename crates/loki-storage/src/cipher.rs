@@ -23,7 +23,9 @@
 ///
 /// `#[non_exhaustive]` because this type is expected to grow a variant in a
 /// later node; a caller must not assume today's single variant is final.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+use crate::key::DatabaseKey;
+
+#[derive(Default)]
 #[non_exhaustive]
 pub enum Cipher {
     /// No encryption. The only variant this node (`DAT-001`) implements.
@@ -32,6 +34,9 @@ pub enum Cipher {
     /// request or inventing a scheme (`AGENTS.md` rule 1).
     #[default]
     None,
+    /// SQLCipher Community Edition with a key obtained from the Windows
+    /// DPAPI-backed secret store. A raw passphrase is never accepted here.
+    SqlCipher(DatabaseKey),
 }
 
 #[cfg(test)]
@@ -40,6 +45,6 @@ mod tests {
 
     #[test]
     fn default_is_none() {
-        assert_eq!(Cipher::default(), Cipher::None);
+        assert!(matches!(Cipher::default(), Cipher::None));
     }
 }

@@ -15,6 +15,8 @@ pub enum StorageError {
     /// The underlying SQLite driver reported an error (constraint
     /// violation, malformed SQL, busy timeout exceeded, ...).
     Sqlite(rusqlite::Error),
+    #[cfg(windows)]
+    Secret(crate::secret::SecretError),
     /// The database file exists but failed an integrity check (or SQLite
     /// could not even recognize it as a database). Never silently treated
     /// as "create a fresh empty database instead" — see
@@ -49,6 +51,8 @@ impl fmt::Display for StorageError {
         match self {
             StorageError::Io(e) => write!(f, "storage I/O error: {e}"),
             StorageError::Sqlite(e) => write!(f, "sqlite error: {e}"),
+            #[cfg(windows)]
+            StorageError::Secret(e) => write!(f, "{e}"),
             StorageError::Corrupt { path, detail } => {
                 write!(
                     f,
@@ -79,6 +83,8 @@ impl std::error::Error for StorageError {
         match self {
             StorageError::Io(e) => Some(e),
             StorageError::Sqlite(e) => Some(e),
+            #[cfg(windows)]
+            StorageError::Secret(e) => Some(e),
             _ => None,
         }
     }
@@ -93,6 +99,13 @@ impl From<rusqlite::Error> for StorageError {
 impl From<std::io::Error> for StorageError {
     fn from(e: std::io::Error) -> Self {
         StorageError::Io(e)
+    }
+}
+
+#[cfg(windows)]
+impl From<crate::secret::SecretError> for StorageError {
+    fn from(e: crate::secret::SecretError) -> Self {
+        StorageError::Secret(e)
     }
 }
 

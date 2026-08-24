@@ -3,12 +3,12 @@
 
 mod common;
 
+use loki_storage::Storage;
 use loki_storage::devices::DeviceRepository;
 use loki_storage::ids::DeviceId;
 use loki_storage::jobs::JobRepository;
 use loki_storage::outbox::{NewOutboxMessage, OutboxRepository};
 use loki_storage::states::{DeviceLifecycleState, OutboxStatus};
-use loki_storage::{Cipher, Storage};
 
 #[test]
 fn restart_with_existing_data_preserves_it() {
@@ -19,7 +19,7 @@ fn restart_with_existing_data_preserves_it() {
         // "Process 1": open, migrate, write, then drop (simulates a clean
         // process exit — the `Connection` inside `Storage` closes when
         // `storage` is dropped at the end of this block).
-        let storage = Storage::open(&path, Cipher::None).unwrap();
+        let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
         storage.run_migrations(common::T0).unwrap();
         storage
             .insert_device(&common::sample_device("dev-1"))
@@ -50,7 +50,7 @@ fn restart_with_existing_data_preserves_it() {
     }
 
     // "Process 2": open the same path fresh.
-    let storage = Storage::open(&path, Cipher::None).unwrap();
+    let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
 
     // Re-running migrations on restart must be a no-op, not a re-apply.
     let report = storage.run_migrations(common::T1).unwrap();
@@ -98,7 +98,7 @@ fn restart_across_more_than_two_opens_keeps_accumulating_data_correctly() {
     let path = dir.path().join("multi-restart.db");
 
     for i in 1..=3 {
-        let storage = Storage::open(&path, Cipher::None).unwrap();
+        let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
         storage.run_migrations(common::T0).unwrap();
         storage
             .insert_device(&common::sample_device(&format!("dev-{i}")))
@@ -110,6 +110,6 @@ fn restart_across_more_than_two_opens_keeps_accumulating_data_correctly() {
         );
     }
 
-    let storage = Storage::open(&path, Cipher::None).unwrap();
+    let storage = Storage::open(&path, common::cipher_for(&path)).unwrap();
     assert_eq!(storage.list_devices().unwrap().len(), 3);
 }

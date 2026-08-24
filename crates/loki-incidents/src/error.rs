@@ -82,3 +82,9 @@ impl From<rusqlite::Error> for IncidentError {
         IncidentError::Storage(value.to_string())
     }
 }
+
+impl From<loki_storage::StorageError> for IncidentError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        IncidentError::Storage(value.to_string())
+    }
+}
