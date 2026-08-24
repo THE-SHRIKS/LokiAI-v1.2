@@ -45,13 +45,21 @@ pub mod error;
 pub mod ids;
 pub mod inbox;
 pub mod jobs;
+pub mod key;
+#[cfg(windows)]
+pub mod managed;
 mod migrations;
 pub mod outbox;
+#[cfg(windows)]
+pub mod secret;
 pub mod states;
 mod storage;
 pub mod timestamp;
 
 pub use cipher::Cipher;
 pub use error::StorageError;
+pub use key::DatabaseKey;
+#[cfg(windows)]
+pub use managed::{backup_sqlcipher_database, open_or_migrate_sqlcipher, rotate_sqlcipher_key};
 pub use migrations::MigrationReport;
-pub use storage::{IntegrityStatus, Storage};
+pub use storage::{IntegrityStatus, Storage, configure_connection, configure_sqlcipher};

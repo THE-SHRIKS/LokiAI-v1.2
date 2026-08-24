@@ -35,6 +35,11 @@ description = "LokiAI Main v1.2 telemetry/log ingestion: bounded buffering, fres
 # already validates. Path dependency: same workspace, same version.
 loki-connectors-sdk = { path = "../loki-connectors-sdk" }
 
+# DAT-002's single reviewed SQLCipher/DPAPI boundary. Monitoring keeps its
+# bounded-context database, but must not duplicate key handling or issue an
+# unkeyed SQLite open. Path dependency: same workspace/version/licence.
+loki-storage = { path = "../loki-storage" }
+
 # Bounded, non-blocking multi-consumer event fan-out for the subscription
 # mechanism (Deliverable 3, "backpressure: a slow consumer does not crash or
 # unboundedly memory-balloon the producer side") — `tokio::sync::broadcast`
@@ -71,7 +76,7 @@ tracing = "=0.1.44"
 # doc comment for the full reasoning). `backup` is not enabled: this crate
 # has no backup primitive of its own (that stays DAT-001/loki-storage's
 # concern for the database it owns).
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
 # Creates auto-cleaned-up temporary files for this crate's restart test

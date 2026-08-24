@@ -32,6 +32,11 @@ description = "LokiAI Main v1.2 incident correlation and evidence engine: Docs/S
 # touch crates/loki-monitoring/**").
 loki-monitoring = { path = "../loki-monitoring" }
 
+# DAT-002's single reviewed SQLCipher/DPAPI boundary. Incidents keeps its
+# bounded-context database, but must not duplicate key handling or issue an
+# unkeyed SQLite open. Path dependency: same workspace/version/licence.
+loki-storage = { path = "../loki-storage" }
+
 # DeviceId (affected scope / correlation key), CapabilityId (work-intent
 # "requested capability" — reuses CON-001's already-defined, open capability
 # vocabulary rather than inventing a new one, resolving this node's own stop
@@ -57,7 +62,7 @@ uuid = { version = "=1.24.1", features = ["v4"] }
 # persists through its own self-contained database instead — see
 # src/store.rs's doc comment, following the exact precedent
 # Docs/graph/handoffs/{MON-001,MON-002}-1.md §5/§7 already recorded).
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
 # Creates auto-cleaned-up temporary files for this crate's restart test

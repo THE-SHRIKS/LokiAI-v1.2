@@ -12,6 +12,13 @@ use loki_incidents::work_intent::DeliveryRequirements;
 use rusqlite::Connection;
 use support::*;
 
+fn encrypted_connection(path: &std::path::Path) -> Connection {
+    let key = loki_storage::secret::load_or_create_key_for_database(path).unwrap();
+    let connection = Connection::open(path).unwrap();
+    loki_storage::configure_sqlcipher(&connection, &key).unwrap();
+    connection
+}
+
 #[test]
 fn a_failed_incident_write_rolls_back_evidence_and_work_intent_together() {
     let dir = tempfile::tempdir().unwrap();
@@ -20,7 +27,7 @@ fn a_failed_incident_write_rolls_back_evidence_and_work_intent_together() {
 
     // Force a real failure at the final incident-row stage, after the
     // transaction has attempted its evidence and work-intent inserts.
-    let fault_connection = Connection::open(&path).unwrap();
+    let fault_connection = encrypted_connection(&path);
     fault_connection
         .execute_batch(
             "CREATE TRIGGER force_incident_insert_failure
@@ -53,7 +60,7 @@ fn a_failed_incident_write_rolls_back_evidence_and_work_intent_together() {
         "the injected database failure must surface"
     );
 
-    let proof_connection = Connection::open(&path).unwrap();
+    let proof_connection = encrypted_connection(&path);
     for table in [
         "incidents",
         "incident_timeline",
@@ -96,7 +103,7 @@ fn an_unrepresentable_expiry_is_an_error_not_a_panic_or_partial_write() {
     );
     assert!(result.is_err(), "overflow must be returned, never panic");
 
-    let proof_connection = Connection::open(&path).unwrap();
+    let proof_connection = encrypted_connection(&path);
     for table in [
         "incidents",
         "incident_timeline",

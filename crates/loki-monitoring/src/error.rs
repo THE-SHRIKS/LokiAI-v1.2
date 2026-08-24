@@ -47,3 +47,9 @@ impl From<rusqlite::Error> for MonitoringError {
         MonitoringError::Storage(value.to_string())
     }
 }
+
+impl From<loki_storage::StorageError> for MonitoringError {
+    fn from(value: loki_storage::StorageError) -> Self {
+        MonitoringError::Storage(value.to_string())
+    }
+}

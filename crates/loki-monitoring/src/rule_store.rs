@@ -78,6 +78,7 @@ pub struct EvaluationRecord {
 /// history. See this module's doc for why it owns its own connection.
 pub struct RuleStore {
     conn: Mutex<Connection>,
+    _key: Option<loki_storage::DatabaseKey>,
 }
 
 impl RuleStore {
@@ -87,11 +88,13 @@ impl RuleStore {
     /// database file, or a distinct path to keep them fully separate — both
     /// are valid; this module does not require the former.
     pub fn open(path: &Path) -> Result<Self, MonitoringError> {
-        let conn = Connection::open(path)?;
+        let key_path = loki_storage::secret::database_key_path(path);
+        let (conn, key) = loki_storage::open_or_migrate_sqlcipher(path, &key_path)?;
         configure(&conn)?;
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: Some(key),
         })
     }
 
@@ -103,6 +106,7 @@ impl RuleStore {
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: None,
         })
     }
 

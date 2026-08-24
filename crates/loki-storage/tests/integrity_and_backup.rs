@@ -9,7 +9,7 @@ use std::fs;
 
 use loki_storage::devices::DeviceRepository;
 use loki_storage::ids::DeviceId;
-use loki_storage::{Cipher, IntegrityStatus, Storage};
+use loki_storage::{IntegrityStatus, Storage};
 
 #[test]
 fn integrity_check_passes_on_a_healthy_freshly_migrated_database() {
@@ -43,7 +43,7 @@ fn backup_produces_a_fully_independent_readable_copy() {
 
     // A brand-new, independent Storage handle on the backup path — not the
     // same in-process connection as `source` — must see the same data.
-    let restored = Storage::open(&backup_path, Cipher::None).unwrap();
+    let restored = Storage::open(&backup_path, common::cipher_for(&_source_path)).unwrap();
     assert_eq!(restored.integrity_check().unwrap(), IntegrityStatus::Ok);
 
     let device = restored
@@ -76,13 +76,13 @@ fn backup_produces_a_fully_independent_readable_copy() {
 
 #[test]
 fn backup_of_an_empty_freshly_migrated_database_is_still_a_valid_database() {
-    let (_dir, _path, source) = common::open_temp_storage();
+    let (_dir, source_path, source) = common::open_temp_storage();
 
     let backup_dir = tempfile::tempdir().unwrap();
     let backup_path = backup_dir.path().join("backup-empty.db");
     source.backup_to(&backup_path).unwrap();
 
-    let restored = Storage::open(&backup_path, Cipher::None).unwrap();
+    let restored = Storage::open(&backup_path, common::cipher_for(&source_path)).unwrap();
     assert_eq!(restored.integrity_check().unwrap(), IntegrityStatus::Ok);
     assert_eq!(restored.list_devices().unwrap().len(), 0);
 }

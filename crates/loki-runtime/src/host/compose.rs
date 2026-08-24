@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use loki_ipc::auth::AuthToken;
 use loki_ipc::{Server, ServerConfig};
-use loki_storage::{Cipher, Storage};
+use loki_storage::Storage;
 
 use crate::host::clock::{now_utc_iso8601, unix_millis_now};
 use crate::host::discovery::{self, RecordedState};
@@ -102,7 +102,8 @@ impl ComposedHost {
     pub fn open(config: &HostConfig) -> Result<Self, HostStartError> {
         config.paths.ensure_base_dir()?;
 
-        let storage = Storage::open(&config.paths.database_file(), Cipher::None)?;
+        let database_file = config.paths.database_file();
+        let storage = Storage::open_managed(&database_file, &config.paths.database_key_file())?;
         let report = storage.run_migrations(&now_utc_iso8601())?;
         tracing::info!(applied = ?report.applied_versions, "background host: storage migrated");
 
@@ -115,7 +116,10 @@ impl ComposedHost {
             started_at_unix_millis,
         )?;
 
-        let raw_token = token::load_or_create(&config.paths.token_file())?;
+        let raw_token = token::load_or_create_with_legacy(
+            &config.paths.protected_token_file(),
+            &config.paths.token_file(),
+        )?;
         let server_config = ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
         let server = Server::bind(server_config)?;
 

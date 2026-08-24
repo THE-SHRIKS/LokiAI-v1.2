@@ -27,6 +27,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 /// that is `RUN-002`'s consumer-side concern, not this node's.
 pub struct Storage {
     conn: Mutex<Connection>,
+    key: Option<crate::key::DatabaseKey>,
 }
 
 impl std::fmt::Debug for Storage {
@@ -40,6 +41,17 @@ impl std::fmt::Debug for Storage {
 }
 
 impl Storage {
+    /// Opens using the Windows DPAPI-managed key, including recoverable
+    /// plaintext migration for a pre-DAT-002 database.
+    #[cfg(windows)]
+    pub fn open_managed(path: &Path, protected_key_path: &Path) -> Result<Self, StorageError> {
+        let (conn, key) = crate::managed::open_or_migrate_sqlcipher(path, protected_key_path)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            key: Some(key),
+        })
+    }
+
     /// Opens (creating if absent) the SQLite database at `path`.
     ///
     /// If `path` already exists, this refuses to silently treat a corrupt
@@ -61,12 +73,18 @@ impl Storage {
     /// guarantees a garbage file surfaces as [`StorageError::Corrupt`], not
     /// an unmapped raw driver error from an unrelated pragma.
     pub fn open(path: &Path, cipher: Cipher) -> Result<Self, StorageError> {
-        if cipher != Cipher::None {
-            return Err(StorageError::UnsupportedCipher);
-        }
-
         let existed_before_open = path.exists();
         let conn = Connection::open(path)?;
+
+        let key = match cipher {
+            Cipher::SqlCipher(key) => {
+                configure_sqlcipher(&conn, &key)?;
+                key
+            }
+            // Plaintext disk databases are forbidden after DAT-002.  This is
+            // intentionally not a compatibility fallback.
+            Cipher::None => return Err(StorageError::UnsupportedCipher),
+        };
 
         if existed_before_open {
             verify_integrity_or_err(&conn, &path.display().to_string())?;
@@ -82,19 +100,25 @@ impl Storage {
 
         Ok(Self {
             conn: Mutex::new(conn),
+            key: Some(key),
         })
     }
 
     /// Opens a private in-memory database. Useful for tests and any
     /// ephemeral use — there is no file, so there is no restart durability.
     pub fn open_in_memory(cipher: Cipher) -> Result<Self, StorageError> {
-        if cipher != Cipher::None {
-            return Err(StorageError::UnsupportedCipher);
-        }
         let conn = Connection::open_in_memory()?;
+        let key = match cipher {
+            Cipher::SqlCipher(key) => {
+                configure_sqlcipher(&conn, &key)?;
+                Some(key)
+            }
+            Cipher::None => None,
+        };
         configure_connection(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            key,
         })
     }
 
@@ -141,10 +165,13 @@ impl Storage {
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
 
         let mut dest = Connection::open(destination)?;
+        let key = self.key.as_ref().ok_or(StorageError::UnsupportedCipher)?;
+        configure_sqlcipher(&dest, key)?;
         {
             let backup = rusqlite::backup::Backup::new(&conn, &mut dest)?;
             backup.run_to_completion(64, Duration::from_millis(50), None)?;
         }
+        verify_integrity_or_err(&dest, &destination.display().to_string())?;
 
         tracing::info!(destination = %destination.display(), "storage: backup completed");
         Ok(())
@@ -199,7 +226,7 @@ pub enum IntegrityStatus {
     Corrupt(Vec<String>),
 }
 
-fn configure_connection(conn: &Connection) -> Result<(), StorageError> {
+pub fn configure_connection(conn: &Connection) -> Result<(), StorageError> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
     // journal_mode=WAL is a no-op for `:memory:` connections (SQLite keeps
     // those in "memory" journal mode); execute_batch does not error on
@@ -209,6 +236,32 @@ fn configure_connection(conn: &Connection) -> Result<(), StorageError> {
          PRAGMA foreign_keys=ON;",
     )?;
     Ok(())
+}
+
+pub fn configure_sqlcipher(
+    conn: &Connection,
+    key: &crate::key::DatabaseKey,
+) -> Result<(), StorageError> {
+    // SQLCipher requires the key before *any* schema/page access. The key is
+    // only materialized for this one native pragma call and is never logged.
+    let mut statement = format!(
+        "PRAGMA key = \"x'{}'\"; PRAGMA cipher_compatibility = 4;",
+        key.sqlcipher_hex()
+    );
+    let result = conn.execute_batch(&statement).map_err(StorageError::from);
+    wipe_string(&mut statement);
+    result
+}
+
+pub(crate) fn wipe_string(value: &mut String) {
+    // SAFETY: no references into the String are live, length/capacity do not
+    // change, and every byte is valid to overwrite. The String is dropped
+    // immediately after callers finish with it.
+    let bytes = unsafe { value.as_mut_vec() };
+    for byte in bytes {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
 fn run_integrity_check(conn: &Connection) -> Result<IntegrityStatus, StorageError> {

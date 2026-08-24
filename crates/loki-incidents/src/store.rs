@@ -50,6 +50,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 /// why it owns its own connection/database.
 pub struct IncidentStore {
     conn: Mutex<Connection>,
+    _key: Option<loki_storage::DatabaseKey>,
 }
 
 impl IncidentStore {
@@ -57,11 +58,13 @@ impl IncidentStore {
     /// this crate's own migrations. Safe to call on every process start —
     /// already-applied migrations are skipped.
     pub fn open(path: &Path) -> Result<Self, IncidentError> {
-        let conn = Connection::open(path)?;
+        let key_path = loki_storage::secret::database_key_path(path);
+        let (conn, key) = loki_storage::open_or_migrate_sqlcipher(path, &key_path)?;
         configure(&conn)?;
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: Some(key),
         })
     }
 
@@ -73,6 +76,7 @@ impl IncidentStore {
         migrations::apply_all(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            _key: None,
         })
     }
 

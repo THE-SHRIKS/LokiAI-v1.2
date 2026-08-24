@@ -23,6 +23,13 @@ use loki_storage::{Cipher, Storage};
 pub const T0: &str = "2026-01-01T00:00:00Z";
 pub const T1: &str = "2026-01-02T00:00:00Z";
 
+pub fn cipher_for(path: &std::path::Path) -> Cipher {
+    let key_path = path.with_extension("key.protected");
+    let key = loki_storage::secret::load_or_create_database_key(&key_path, false)
+        .expect("create/load DPAPI-protected test key");
+    Cipher::SqlCipher(key)
+}
+
 /// Opens a fresh file-backed `Storage` in a new temporary directory (kept
 /// alive by the returned `TempDir` — dropping it deletes the directory) and
 /// applies every migration. Returns the temp dir alongside the DB path so
@@ -31,7 +38,7 @@ pub const T1: &str = "2026-01-02T00:00:00Z";
 pub fn open_temp_storage() -> (tempfile::TempDir, std::path::PathBuf, Storage) {
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path().join("loki-storage-test.db");
-    let storage = Storage::open(&path, Cipher::None).expect("open storage");
+    let storage = Storage::open(&path, cipher_for(&path)).expect("open encrypted storage");
     storage.run_migrations(T0).expect("run migrations");
     (dir, path, storage)
 }
