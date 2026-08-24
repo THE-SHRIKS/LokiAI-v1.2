@@ -1,6 +1,6 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **The revised local-only Part One gate `P1-INT-001` is accepted at `38fd260`; its complete evidence is `Docs/graph/evidence/P1/P1-INT-001/verification.md`. The accepted local integrated baseline includes CTR-001, DSK-001/002, RUN-001/002/003, RUN-001-CORR-001, DAT-001, CON-001/002, MCP-001/002, JOB-001, MON-001/002, INC-001, LOC-001, LDEV-001, APR-001, AGT-001/002, LONB-001, and LNOT-001. ADR-0002's cloud-dependent slice is deferred, not deleted. `DAT-002` remains blocked, not accepted: its integrated current-user SQLCipher/DPAPI paths pass, while cross-Windows/service-identity verification and independent review remain unavailable. OQ-001/exact-board work and BLD-001 plus its descendants remain blocked/deferred. Part Two has not started and still requires separate human approval.**
+Status: **`P1-INT-001` is reopened as `NEEDS_REPLAN`. Its recorded test evidence remains valid only for separately tested packages; it did not prove that the production runtime, Electron, MCP, connector, monitoring, jobs, approvals, agents, incidents, and local-delivery services run together. Production Electron/MCP paths still return `runtime_unavailable`, `CON-002` is mock-backed, and mandatory connector/build/artifact/operation/deployment nodes remain unaccepted. ADR-0003 restores every non-cloud W0-W6 capability to Part One. Independent `DAT-002-REV-001` found two critical and seven high findings, so DAT remains blocked while `DAT-002-CORR-001` is ready. `P1-RPC-CONTRACT-001` is also ready. Cloud remains deferred; Part Two has not started.**
 Graph owner: **Orchestrator**  
 Updated: **2026-08-24**
 
@@ -10,7 +10,9 @@ Updated: **2026-08-24**
   `LokiAI Desktop UI/`.
 - It is not evidence of working auth, hardware, monitoring, incidents,
   deployments, or agent integration.
-- The repository has no Git baseline and no desktop/runtime/service structure.
+- The repository has a Git baseline plus Electron, runtime, IPC, contracts, and
+  local domain-service packages. These packages are not yet composed into one
+  production Part One system.
 - Tasks below are production implementation nodes. Device-changing verification
   waits for the user's confirmed physical board; independent software work does
   not stop.
@@ -25,11 +27,14 @@ whole program, not a single-session convenience:
   runtime and local IPC, persistence and protected local data, local installation
   authority and setup _services_ (not their UI wiring), the connector platform and
   local device binding, the MCP server and agent-run services, monitoring/incidents/
-  local notification intents, and durable jobs/policy/approvals. Per accepted
+  local notification intents, durable jobs/policy/approvals, the contained build
+  executor, artifact registry, and verified device-operation/deployment services.
+  Per accepted
   `ADR-0002`, cloud contracts/login/workspaces/enrollment/sync/remote delivery are
-  deferred. Per the earlier human deferral, `BLD-001` and its artifact/device-
-  operation/deployment descendants are also named deferred work, not silently
-  accepted. Part One explicitly does **not**
+  deferred. The human owner's 2026-08-24 production-completion instruction
+  supersedes the earlier temporary deferral of `BLD-001` and its descendants;
+  those nodes are required again and remain blocked/proposed until proven. Part
+  One explicitly does **not**
   include wiring any of this into the renderer routes — `UI-001` (renderer
   application/contract boundary) is the first Part Two node.
 - **Part One completion gate — `P1-INT-001`:** a dedicated milestone node (Section
@@ -279,7 +284,19 @@ which half of the program (Section 1a) a wave belongs to.
 
 | ID         | Type        | Outcome | Depends on | Exit evidence | Status |
 | ---------- | ----------- | ------- | ---------- | ------------- | ------ |
-| P1-INT-001 | INTEGRATION | The accepted, non-deferred local Part One services run together on one non-UI baseline: contracts, Electron shell/preload, Rust runtime/authenticated local IPC, encrypted persistence implementation, Windows-bound local authority/setup, connector discovery/local device binding, MCP/agent runs, monitoring/incidents/local notification intents, and durable jobs/local policy/approvals. Required checks: (1) every dependency-ready local node is accepted; blocked nodes are listed without being relabeled; (2) integration follows `Docs/graph/INTEGRATION.md`; (3) all node tests plus cross-service restart/revocation/expiry scenarios pass; (4) consumed contracts have compatibility fixtures; (5) secret scan, dependency/licence review, IPC/preload/local-authority/approval regressions pass. Cloud, remote delivery, contained builds, artifact/device-operation/deployment, exact-board, and mandatory blocked DAT-002 review evidence are explicitly outside this revised certification and remain fail-closed. This gate is not `SEC-001`/`SEC-002` or a release claim. | DAT-002, LOC-001, LDEV-001, LONB-001, AGT-001, APR-001, LNOT-001, AGT-002 | local integrator record; cross-service results; contract matrix; security regression/scan results; explicit deferred/blocker register | accepted — tested baseline and evidence at `38fd260`; DAT-002 remains explicitly blocked and excluded from acceptance |
+| P1-INT-001 | INTEGRATION | Prove the cloud-deferred Part One services run together through their real production process boundaries on one non-UI baseline: authenticated desktop/runtime and MCP/runtime communication; encrypted persistence; real connector discovery/identity/health; monitoring/incidents; durable jobs/policy/approvals; contained builds; artifact provenance; consequential operations; verification/recovery/deployment; agent delivery; and fail-closed unavailable behavior. Package/unit tests are necessary but cannot substitute for cross-process, containment, or physical evidence. | DAT-002, LOC-001, LDEV-001, LONB-001, AGT-001, APR-001, LNOT-001, AGT-002, BLD-001, ART-001, OPS-001, MCP-003, DEP-001, CON-003, production composition correction nodes | real process integration record; contract matrix; containment and physical evidence; security reviews; explicit cloud deferral | `NEEDS_REPLAN` — prior acceptance at `38fd260` is invalid as a production integration claim; its package-test evidence is retained but insufficient |
+| P1-GRAPH-AUD-001 | VERIFICATION | Reconstruct the authoritative cloud-deferred production Part One DAG and correction frontier. | reopened P1 audit | complete W0-W6 coverage and executable dependency order | `NEEDS_REPLAN` — correction DAG recorded |
+| P1-RUNTIME-AUD-001 | VERIFICATION | Define production runtime composition and authenticated Electron/MCP business-IPC correction nodes. | accepted local packages | source-traced node decomposition and real-process tests | complete — no locked-boundary change required |
+| DAT-002-REV-001 | VERIFICATION | Independently review DAT-002 and define the real second-identity evidence procedure. | DAT-002 checkpoint | independent security verdict and environment procedure | `FAILED_VERIFICATION` — two critical and seven high findings |
+| P1-SCOPE-ADR-001 | DECISION | Accept corrected cloud-only deferral, named local scenarios, physical evidence boundary and required W0-W6 nodes. | P1-GRAPH-AUD-001 | accepted ADR-0003 | accepted |
+| DAT-002-CORR-001 | IMPLEMENTATION | Correct critical/high encrypted-data lifecycle findings before a new independent review and second-identity matrix. | DAT-002-REV-001 | fault-injection, concurrency, recovery, ACL and cipher evidence | ready |
+| P1-RPC-CONTRACT-001 | CONTRACT | Canonical authenticated, versioned, bounded business RPC methods/streams and server-created principal context. | CTR-001, RUN-002, ADR-0003 | TS/Rust fixtures plus real named-pipe compatibility/security matrix | ready |
+| P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | proposed |
+| P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
+| P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001, P1-RPC-CONTRACT-001 | real process startup/restart/reconcile/failure tests | proposed |
+| P1-ELECTRON-RUNTIME-001 | IMPLEMENTATION | Replace Electron hardcoded unavailable providers with the authenticated production runtime client. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real Electron-main/runtime status, list, subscription and reconnect evidence | proposed |
+| P1-MCP-RUNTIME-001 | IMPLEMENTATION | Replace MCP unavailable/deny-all production defaults with per-request runtime authorization using a revocable agent credential. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real MCP stdio-to-runtime positive and denial matrix | proposed |
+| P1-RUNTIME-E2E-001 | INTEGRATION | Prove compiled runtime, production Node client, Electron main and MCP traverse real process boundaries. | P1-ELECTRON-RUNTIME-001, P1-MCP-RUNTIME-001 | kill/restart, reconnect, revoke, empty/unavailable and credential-leak evidence | proposed |
 
 ### UI, review, packaging, and release
 
