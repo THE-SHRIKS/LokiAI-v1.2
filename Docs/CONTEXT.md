@@ -104,7 +104,7 @@ visual baseline and should be wired to production behavior rather than replaced.
 
 | ID | Decision | Why it matters | Required before |
 |---|---|---|---|
-| OQ-001 | Exact ESP32-S3 module and development-board SKU; `N1R8` may not uniquely define flash/PSRAM layout | Flash partitions, bootloader arguments, voltage assumptions, and recovery steps depend on it | Connector flash implementation |
+| OQ-001 | Exact ESP32-S3 module and development-board SKU; `N1R8` may not uniquely define flash/PSRAM layout. Read-only Windows discovery on 2026-08-24 confirms an Espressif native USB JTAG/serial device (`VID_303A&PID_1001`, COM5), but USB descriptors do not identify the exact board/module SKU. | Flash partitions, bootloader arguments, voltage assumptions, and recovery steps depend on it | Connector flash implementation |
 | OQ-002 | LokiAI cloud API base URLs, identity provider, tenant model, and existing v1.1 API contracts | Desktop authentication and workspace sync must integrate rather than replace them | AUTH and cloud-client nodes |
 | OQ-003 | Meaning and integration surface of “Gravity” | The provider adapter cannot be designed from a name alone | Gravity adapter node |
 | OQ-004 | Windows distribution channel: direct signed installer, Microsoft Store, or both | Signing, update, and service-install behavior differ | Packaging architecture gate |
