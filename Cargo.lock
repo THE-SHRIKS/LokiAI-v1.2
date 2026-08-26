@@ -276,6 +276,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-build-executor"
+version = "1.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "loki-connector-registry"
 version = "1.2.0"
 dependencies = [
