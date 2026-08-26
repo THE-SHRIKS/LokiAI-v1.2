@@ -56,6 +56,32 @@ async-trait = "=0.1.92"
 # surface — see manifest.rs's module doc).
 semver = "=1.0.28"
 
+# Exact connector-identity wire compatibility and safe validated emission.
+# MIT OR Apache-2.0; maintained by the serde project and already pinned in
+# the LokiAI workspace. Deserialization is kept behind validating parsers.
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+# Computes the public, non-reversible device fingerprint from sensitive raw
+# device-derived material. RustCrypto implementation; MIT OR Apache-2.0,
+# no network/runtime side effects, already pinned elsewhere in this workspace.
+sha2 = "=0.10.9"
+
+# The approved Connector Identity Protocol v1.0.0 (`Docs/graph/tasks/
+# CON-ID-CONTRACT-001.md` Section 10, human-accepted) requires an
+# "installation-scoped HMAC-SHA256 public device identity", not a bare
+# unkeyed hash: keying the fingerprint with the per-installation secret
+# already established by `Docs/ARCHITECTURE.md` ("A per-installation secret
+# stored in OS-protected storage") means the same physical device produces a
+# different public `device_id` per installation, so a public identity value
+# leaked from one installation cannot be correlated to another. This crate
+# only accepts the installation key material as an opaque input — it does
+# not generate, store, or load the secret itself, which stays out of this
+# contract-only crate's scope. RustCrypto implementation; MIT OR Apache-2.0;
+# same maintainer/family as `sha2`; version pinned to the release compatible
+# with the pinned `digest 0.10` transitively required by `sha2 0.10.9`.
+hmac = "=0.12.1"
+
 [dev-dependencies]
 # Drives this crate's own `#[tokio::test]` async tests (the `Connector`
 # trait's methods are async). Reuses the async runtime

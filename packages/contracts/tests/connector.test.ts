@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   CAPABILITY_RISK_LEVELS,
@@ -10,6 +12,13 @@ import {
   KnownConnectorCapabilityIdSchema,
   SUPPORT_TIERS,
   SupportTierSchema,
+  IdentityProbeResultSchema,
+  PublicDeviceIdentitySchema,
+  TransportCandidateSchema,
+  redactIdentityProbeResult,
+  redactSensitiveLocator,
+  redactTransportCandidate,
+  type IdentityProbeResult,
 } from '../src/connector.js';
 import { expectInvalid, expectValid, omit } from './helpers.js';
 
@@ -144,5 +153,110 @@ describe('ConnectorCapabilityDescriptorSchema', () => {
 
   it('rejects an oversized payload for a bounded string field', () => {
     expectInvalid(ConnectorCapabilityDescriptorSchema, { ...valid, schema_ref: 'x'.repeat(300) });
+  });
+});
+
+describe('device-derived connector identity contract', () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL('../fixtures/connector-identity-v1.json', import.meta.url)),
+      'utf8',
+    ),
+  ) as Record<string, unknown>;
+
+  it('accepts the shared verified cross-language fixture exactly', () => {
+    expect(IdentityProbeResultSchema.parse(fixture)).toEqual(fixture);
+  });
+
+  it('never accepts a provisional candidate as stable identity', () => {
+    const candidate = fixture.candidate as Record<string, unknown>;
+    expectInvalid(PublicDeviceIdentitySchema, candidate);
+    expectInvalid(TransportCandidateSchema, { ...candidate, candidate_id_stability: 'stable' });
+  });
+
+  it.each(['unknown', 'partial', 'ambiguous', 'conflicting'])(
+    'fails closed when %s carries a public identity',
+    (status) => expectInvalid(IdentityProbeResultSchema, { ...fixture, status }),
+  );
+
+  it('requires multiple evidence items for ambiguous and conflicting states', () => {
+    for (const status of ['ambiguous', 'conflicting']) {
+      expectInvalid(IdentityProbeResultSchema, { ...fixture, status, public_identity: null });
+    }
+  });
+
+  it('rejects conflicting fingerprints in a verified result', () => {
+    const evidence = fixture.evidence as Array<Record<string, unknown>>;
+    expectInvalid(IdentityProbeResultSchema, {
+      ...fixture,
+      evidence: [...evidence, { ...evidence[0], fingerprint_digest: 'b'.repeat(64) }],
+    });
+  });
+
+  it('rejects a forged evidence digest independently of resolution status', () => {
+    const evidence = fixture.evidence as Array<Record<string, unknown>>;
+    expectInvalid(IdentityProbeResultSchema, {
+      ...fixture,
+      evidence: [{ ...evidence[0], evidence_digest: 'b'.repeat(64) }],
+    });
+  });
+
+  it('rejects absent raw-material handling, extra fields, and bad UTC time', () => {
+    const candidate = fixture.candidate as Record<string, unknown>;
+    const locator = candidate.locator as Record<string, unknown>;
+    const evidence = fixture.evidence as Array<Record<string, unknown>>;
+    expectInvalid(IdentityProbeResultSchema, {
+      ...fixture,
+      candidate: { ...candidate, locator: omit(locator, 'sensitivity') },
+    });
+    expectInvalid(IdentityProbeResultSchema, { ...fixture, unexpected: true });
+    expectInvalid(IdentityProbeResultSchema, {
+      ...fixture,
+      candidate: { ...candidate, discovered_at: 'not-utc' },
+    });
+    expectInvalid(IdentityProbeResultSchema, {
+      ...fixture,
+      evidence: [{ ...evidence[0], raw_material_handling: undefined }],
+    });
+  });
+
+  describe('sensitive locator redaction', () => {
+    // Wire parsing (`IdentityProbeResultSchema`) legitimately carries the
+    // real locator once, for the one case a connector needs it to open the
+    // device — confirmed by the shared fixture round-trip test above. Any
+    // other use (logging, evidence persistence) must go through the
+    // explicit redaction helpers instead of the raw parsed object.
+    const parsed = IdentityProbeResultSchema.parse(fixture) as IdentityProbeResult;
+
+    it('parsed wire data still carries the real locator (the one legitimate transport use)', () => {
+      expect(parsed.candidate.locator.value).toBe('fixture-locator-not-a-real-device');
+    });
+
+    it('redactSensitiveLocator strips the raw value but preserves security semantics', () => {
+      const redacted = redactSensitiveLocator(parsed.candidate.locator);
+      expect(redacted.value).toBe('[REDACTED]');
+      expect(redacted.sensitivity).toBe('sensitive');
+      expect(redacted.stability).toBe('unstable');
+    });
+
+    it('redactTransportCandidate strips the raw locator but preserves every other field', () => {
+      const redacted = redactTransportCandidate(parsed.candidate);
+      expect(redacted.locator.value).toBe('[REDACTED]');
+      expect({ ...redacted, locator: parsed.candidate.locator }).toEqual(parsed.candidate);
+    });
+
+    it('redactIdentityProbeResult strips the raw locator from the whole result and never leaks it via JSON.stringify', () => {
+      const redacted = redactIdentityProbeResult(parsed);
+      expect(redacted.candidate.locator.value).toBe('[REDACTED]');
+      const serialized = JSON.stringify(redacted);
+      expect(serialized).not.toContain('fixture-locator-not-a-real-device');
+      expect(serialized).toContain('[REDACTED]');
+      // Nothing else about the result is altered.
+      expect({ ...redacted, candidate: parsed.candidate }).toEqual(parsed);
+    });
+
+    it('the unredacted parsed object DOES leak the raw locator via plain JSON.stringify, which is exactly why callers must opt into redaction', () => {
+      expect(JSON.stringify(parsed)).toContain('fixture-locator-not-a-real-device');
+    });
   });
 });

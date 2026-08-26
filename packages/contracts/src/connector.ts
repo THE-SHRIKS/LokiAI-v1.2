@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IsoUtcTimestampSchema } from './timestamp.js';
 import { DeviceLifecycleStateSchema } from './states.js';
 
 /**
@@ -152,3 +153,203 @@ export const ConnectorCapabilityDescriptorSchema = z.object({
   recovery_supported: z.boolean(),
 });
 export type ConnectorCapabilityDescriptor = z.infer<typeof ConnectorCapabilityDescriptorSchema>;
+
+// --- Discovery and device-derived identity (CON-ID-CONTRACT-001) -------------------
+
+const CONNECTOR_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const SLUG_PATTERN = /^[a-z][a-z0-9_]*$/;
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+
+const StrictSlugSchema = z.string().min(1).max(64).regex(SLUG_PATTERN);
+const ConnectorVersionSchema = z.string().min(5).max(64).regex(CONNECTOR_VERSION_PATTERN);
+const Sha256HexSchema = z.string().length(64).regex(SHA256_HEX_PATTERN);
+const BoundedUtcTimestampSchema = IsoUtcTimestampSchema.refine((value) => value.length <= 30, {
+  message: 'UTC timestamp exceeds 30 characters',
+});
+
+/**
+ * An OS/transport locator is discovery input only. The literal fields make
+ * its security semantics impossible to omit or silently upgrade on the wire.
+ */
+export const SensitiveUnstableLocatorSchema = z
+  .object({
+    value: z.string().min(1).max(512),
+    sensitivity: z.literal('sensitive'),
+    stability: z.literal('unstable'),
+  })
+  .strict();
+export type SensitiveUnstableLocator = z.infer<typeof SensitiveUnstableLocatorSchema>;
+
+/** Side-effect-free transport candidate. `candidate_id` is explicitly ephemeral. */
+export const TransportCandidateSchema = z
+  .object({
+    schema_version: z.literal('1.0.0'),
+    candidate_id: z.string().min(1).max(128),
+    candidate_id_stability: z.literal('ephemeral'),
+    connector_id: z.string().min(1).max(128),
+    connector_version: ConnectorVersionSchema,
+    transport_kind: StrictSlugSchema,
+    locator: SensitiveUnstableLocatorSchema,
+    discovered_at: BoundedUtcTimestampSchema,
+  })
+  .strict();
+export type TransportCandidate = z.infer<typeof TransportCandidateSchema>;
+
+export const IDENTITY_CONFIDENCE_LEVELS = ['weak', 'moderate', 'strong'] as const;
+export const IdentityConfidenceSchema = z.enum(IDENTITY_CONFIDENCE_LEVELS);
+
+/**
+ * Device-family evidence remains opaque to the shared layer. Raw material is
+ * consumed inside the connector SDK and never enters this wire projection.
+ *
+ * `fingerprint_method` is `hmac_sha256_device_material_v1`, not a bare
+ * unkeyed hash: per the approved Connector Identity Protocol v1.0.0
+ * (`Docs/graph/tasks/CON-ID-CONTRACT-001.md` Section 10), the public device
+ * identity is *installation-scoped* — the connector SDK keys the HMAC with
+ * the per-installation secret (`Docs/ARCHITECTURE.md`) so the same physical
+ * device yields a different public identity per installation. This wire
+ * schema only validates shape; it never computes or carries the key.
+ */
+export const DeviceIdentityEvidenceSchema = z
+  .object({
+    evidence_type: StrictSlugSchema,
+    fingerprint_method: z.literal('hmac_sha256_device_material_v1'),
+    raw_material_handling: z.literal('consumed_not_persisted'),
+    fingerprint_digest: Sha256HexSchema,
+    confidence: IdentityConfidenceSchema,
+    connector_id: z.string().min(1).max(128),
+    connector_version: ConnectorVersionSchema,
+    observed_at: BoundedUtcTimestampSchema,
+    evidence_digest: Sha256HexSchema,
+  })
+  .strict();
+export type DeviceIdentityEvidence = z.infer<typeof DeviceIdentityEvidenceSchema>;
+
+export const IDENTITY_RESOLUTION_STATUSES = [
+  'unknown',
+  'partial',
+  'verified',
+  'ambiguous',
+  'conflicting',
+] as const;
+export const IdentityResolutionStatusSchema = z.enum(IDENTITY_RESOLUTION_STATUSES);
+
+/** Safe projection; it contains no raw locator or fingerprint material. */
+export const PublicDeviceIdentitySchema = z
+  .object({
+    scheme: z.literal('lokiai_device_hmac_sha256_v1'),
+    device_id: z.string().regex(/^dev1_[0-9a-f]{64}$/),
+    fingerprint_digest: Sha256HexSchema,
+  })
+  .strict()
+  .refine((value) => value.device_id === `dev1_${value.fingerprint_digest}`, {
+    message: 'device_id must be derived from fingerprint_digest',
+  });
+export type PublicDeviceIdentity = z.infer<typeof PublicDeviceIdentitySchema>;
+
+/**
+ * Fail-closed probe result. Only `verified` may carry a public stable identity;
+ * all verified evidence must agree on the same device-derived fingerprint.
+ */
+export const IdentityProbeResultSchema = z
+  .object({
+    schema_version: z.literal('1.0.0'),
+    candidate: TransportCandidateSchema,
+    status: IdentityResolutionStatusSchema,
+    evidence: z.array(DeviceIdentityEvidenceSchema).max(16),
+    public_identity: PublicDeviceIdentitySchema.nullable(),
+    reason_code: StrictSlugSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    for (const item of value.evidence) {
+      if (item.evidence_digest !== item.fingerprint_digest) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['evidence'],
+          message: 'evidence_digest must match the canonical device fingerprint evidence',
+        });
+        break;
+      }
+    }
+    const verified = value.status === 'verified';
+    if (verified !== (value.public_identity !== null)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['public_identity'],
+        message: 'only verified results carry identity',
+      });
+    }
+    if (verified && value.evidence.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['evidence'],
+        message: 'verified identity requires evidence',
+      });
+    }
+    if (
+      (value.status === 'ambiguous' || value.status === 'conflicting') &&
+      value.evidence.length < 2
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['evidence'],
+        message: 'ambiguous/conflicting requires multiple evidence items',
+      });
+    }
+    if (value.status === 'unknown' && value.evidence.length !== 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['evidence'],
+        message: 'unknown must not carry evidence',
+      });
+    }
+    if (verified && value.public_identity) {
+      for (const item of value.evidence) {
+        if (item.fingerprint_digest !== value.public_identity.fingerprint_digest) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['evidence'],
+            message: 'verified evidence fingerprints must agree',
+          });
+          break;
+        }
+      }
+    }
+  });
+export type IdentityProbeResult = z.infer<typeof IdentityProbeResultSchema>;
+
+// --- Sensitive-locator redaction (security review follow-up, CON-ID-CONTRACT-001) --
+//
+// `SensitiveUnstableLocatorSchema` intentionally validates the *wire* shape,
+// which legitimately carries the real locator once: a connector genuinely
+// needs the real COM port / USB descriptor / transport locator to open the
+// device. TypeScript objects returned by `.parse()` are plain data with no
+// serialization hook to redact automatically (unlike the Rust SDK's
+// `Serialize` impl in `crates/loki-connectors-sdk/src/identity.rs`, which
+// redacts by default and exposes an explicit `serialize_for_transport()` for
+// this one legitimate case). These helpers are the TypeScript-side
+// equivalent of that explicit, opt-in boundary: any code that logs, persists
+// as evidence, or otherwise projects a candidate/probe result for anything
+// other than opening the device MUST route it through one of these before
+// it leaves connector-owning code, rather than passing the parsed wire
+// object straight into `JSON.stringify`/logging.
+
+const REDACTED_LOCATOR_VALUE = '[REDACTED]';
+
+/** Redacts the raw `value` of a single locator. */
+export function redactSensitiveLocator(
+  locator: SensitiveUnstableLocator,
+): SensitiveUnstableLocator {
+  return { ...locator, value: REDACTED_LOCATOR_VALUE };
+}
+
+/** Redacts the raw locator embedded in a transport candidate. */
+export function redactTransportCandidate(candidate: TransportCandidate): TransportCandidate {
+  return { ...candidate, locator: redactSensitiveLocator(candidate.locator) };
+}
+
+/** Redacts the raw locator embedded in a full identity probe result. */
+export function redactIdentityProbeResult(result: IdentityProbeResult): IdentityProbeResult {
+  return { ...result, candidate: redactTransportCandidate(result.candidate) };
+}
