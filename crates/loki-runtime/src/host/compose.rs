@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use loki_ipc::auth::AuthToken;
 use loki_ipc::{Server, ServerConfig};
-use loki_storage::Storage;
+use loki_storage::{SecureMemoryError, SecureMemoryRuntime, Storage};
 
 use crate::host::clock::{now_utc_iso8601, unix_millis_now};
 use crate::host::discovery::{self, RecordedState};
@@ -55,6 +55,7 @@ impl HostConfig {
 #[derive(Debug)]
 pub enum HostStartError {
     Io(std::io::Error),
+    SecureMemory(SecureMemoryError),
     Storage(loki_storage::StorageError),
 }
 
@@ -62,6 +63,9 @@ impl std::fmt::Display for HostStartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HostStartError::Io(err) => write!(f, "i/o error starting background host: {err}"),
+            HostStartError::SecureMemory(err) => {
+                write!(f, "secure-memory error starting background host: {err}")
+            }
             HostStartError::Storage(err) => {
                 write!(f, "storage error starting background host: {err}")
             }
@@ -83,6 +87,12 @@ impl From<loki_storage::StorageError> for HostStartError {
     }
 }
 
+impl From<SecureMemoryError> for HostStartError {
+    fn from(err: SecureMemoryError) -> Self {
+        HostStartError::SecureMemory(err)
+    }
+}
+
 /// A fully started background host: storage migrated, IPC pipe bound, and
 /// the desktop-discovery file already reflecting `"serving"`.
 pub struct ComposedHost {
@@ -90,6 +100,7 @@ pub struct ComposedHost {
     server: Server,
     discovery_file: PathBuf,
     started_at_unix_millis: u64,
+    secure_memory: SecureMemoryRuntime,
 }
 
 impl ComposedHost {
@@ -100,6 +111,47 @@ impl ComposedHost {
     /// any step is returned immediately — this never leaves a
     /// half-initialized host silently running.
     pub fn open(config: &HostConfig) -> Result<Self, HostStartError> {
+        // This is deliberately the first fallible startup action.  A missing,
+        // invalid, unlocked, or unattested arena therefore touches no base
+        // directory, database, key sidecar, token, discovery file, or pipe.
+        let secure_memory = SecureMemoryRuntime::bootstrap()?;
+        Self::open_with_arena(config, secure_memory)
+    }
+
+    /// Test-only alternate entrypoint: identical to [`Self::open`] in every
+    /// respect except how `secure_memory` is obtained. Production `open()`
+    /// always calls the real [`SecureMemoryRuntime::bootstrap`], which goes
+    /// through `loki_storage::secure_profile::accepted_profile()` and fails
+    /// closed (`Profile(Unavailable)`) at this revision because no digest-
+    /// bound profile is embedded — by design, per ADR-0005/`DAT-002-MEM-CODE-001`.
+    /// That production gate is completely untouched here: this function
+    /// instead bootstraps `loki_storage::secure_memory::test_support`'s
+    /// disposable, non-production arena (the same bypass mechanism the
+    /// crate's own tests and 9 other consumer crates already use via
+    /// `require_ready()`), owned exactly the way `ComposedHost` needs so it
+    /// can shut the arena down itself later, matching `open()`'s own
+    /// lifecycle exactly.
+    ///
+    /// Compiled only for this crate's own tests (`cfg(test)`) or the opt-in
+    /// `test-support` Cargo feature — off by default, only turned on by this
+    /// crate's own self-referential `[dev-dependencies]` entry — so this
+    /// never reaches a release build and `open()` (the sole entrypoint
+    /// `crates/loki-runtime/src/main.rs`/real startup calls) has zero
+    /// reachability into this path.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_with_test_arena(config: &HostConfig) -> Result<Self, HostStartError> {
+        let secure_memory =
+            loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena();
+        Self::open_with_arena(config, secure_memory)
+    }
+
+    /// Shared startup body once a `secure_memory` arena (production-bootstrapped
+    /// or, in test builds only, disposable-test-bootstrapped) is already in
+    /// hand. See [`Self::open`]/[`Self::open_with_test_arena`].
+    fn open_with_arena(
+        config: &HostConfig,
+        secure_memory: SecureMemoryRuntime,
+    ) -> Result<Self, HostStartError> {
         config.paths.ensure_base_dir()?;
 
         let database_file = config.paths.database_file();
@@ -136,6 +188,7 @@ impl ComposedHost {
             server,
             discovery_file,
             started_at_unix_millis,
+            secure_memory,
         })
     }
 
@@ -163,10 +216,11 @@ impl ComposedHost {
         H: Future<Output = ()> + Send + 'static,
     {
         let ComposedHost {
-            storage: _storage,
+            storage,
             mut server,
             discovery_file,
             started_at_unix_millis,
+            secure_memory,
         } = self;
 
         let (ipc_stop_tx, ipc_stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -195,6 +249,14 @@ impl ComposedHost {
             started_at_unix_millis,
         ) {
             tracing::warn!(error = %err, "failed to mark the discovery file stopped on shutdown");
+        }
+
+        // No SQLite connection may survive arena teardown.  `Storage` owns
+        // the last core connection, so close it before `sqlite3_shutdown`,
+        // wipe/unlock/free, and current-process working-set restoration.
+        drop(storage);
+        if let Err(err) = secure_memory.shutdown() {
+            tracing::error!(error = %err, "secure-memory shutdown did not complete cleanly");
         }
 
         outcome

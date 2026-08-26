@@ -21,6 +21,7 @@ fn encrypted_connection(path: &std::path::Path) -> Connection {
 
 #[test]
 fn a_failed_incident_write_rolls_back_evidence_and_work_intent_together() {
+    ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("incidents.sqlite3");
     let store = IncidentStore::open(&path).unwrap();
@@ -81,6 +82,7 @@ fn a_failed_incident_write_rolls_back_evidence_and_work_intent_together() {
 
 #[test]
 fn an_unrepresentable_expiry_is_an_error_not_a_panic_or_partial_write() {
+    ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("expiry-overflow.sqlite3");
     let store = IncidentStore::open(&path).unwrap();

@@ -387,6 +387,14 @@ mod tests {
 
     #[test]
     fn open_in_memory_applies_migrations_and_starts_empty() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with this binary's other tests that open a real
+        // SqlCipher-backed store through the secure-memory arena
+        // (DAT-002-MEM-CODE-001). `sqlite3_config` can only run before
+        // SQLite's first implicit initialization, so every SQLite-touching
+        // test in this binary — in-memory or not — must bootstrap the
+        // arena first, regardless of which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = SqliteTelemetryStore::open_in_memory().unwrap();
         assert_eq!(store.sample_count().unwrap(), 0);
         assert_eq!(store.gap_count().unwrap(), 0);
@@ -394,6 +402,14 @@ mod tests {
 
     #[test]
     fn insert_and_read_back_a_sample_round_trips() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with this binary's other tests that open a real
+        // SqlCipher-backed store through the secure-memory arena
+        // (DAT-002-MEM-CODE-001). `sqlite3_config` can only run before
+        // SQLite's first implicit initialization, so every SQLite-touching
+        // test in this binary — in-memory or not — must bootstrap the
+        // arena first, regardless of which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = SqliteTelemetryStore::open_in_memory().unwrap();
         let s = sample(Some(7));
         store.insert_sample(&s).unwrap();
@@ -411,6 +427,14 @@ mod tests {
 
     #[test]
     fn insert_and_read_back_a_gap_round_trips() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with this binary's other tests that open a real
+        // SqlCipher-backed store through the secure-memory arena
+        // (DAT-002-MEM-CODE-001). `sqlite3_config` can only run before
+        // SQLite's first implicit initialization, so every SQLite-touching
+        // test in this binary — in-memory or not — must bootstrap the
+        // arena first, regardless of which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = SqliteTelemetryStore::open_in_memory().unwrap();
         let gap = GapNotice {
             signal_key: "dev-1::temperature_c".to_string(),
@@ -426,6 +450,15 @@ mod tests {
 
     #[test]
     fn migrations_are_idempotent_across_repeated_opens_on_the_same_file() {
+        // `SqliteTelemetryStore::open` goes through `loki_storage::
+        // open_or_migrate_sqlcipher`, which now requires the process-global
+        // secure-memory arena to be ready first (DAT-002-MEM-CODE-001,
+        // ADR-0005). Production never embeds an accepted bounds profile at
+        // this revision (fail-closed by design), so this test bootstraps a
+        // disposable, non-production test-only arena instead — see
+        // `loki_storage::secure_memory::test_support` for why this bypass
+        // cannot reach a release build.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("telemetry.sqlite3");
 

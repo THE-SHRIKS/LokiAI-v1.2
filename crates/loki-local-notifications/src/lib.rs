@@ -811,6 +811,15 @@ mod tests {
 
     #[test]
     fn work_intent_projection_is_redacted_and_grants_no_authority() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `encrypted_restart_preserves_state_without_
+        // plaintext_markers`, which opens a real SqlCipher-backed store
+        // through the secure-memory arena (DAT-002-MEM-CODE-001).
+        // `sqlite3_config` can only run before SQLite's first implicit
+        // initialization, so every SQLite-touching test in this binary —
+        // in-memory or not — must bootstrap the arena first, regardless of
+        // which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = LocalNotificationStore::open_in_memory().unwrap();
         let intent = intent();
         let notification = store.enqueue_work_intent(&intent, 2_000).unwrap();
@@ -828,6 +837,7 @@ mod tests {
 
     #[test]
     fn concurrent_retry_deduplicates_to_one_record() {
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = Arc::new(LocalNotificationStore::open_in_memory().unwrap());
         let intent = Arc::new(intent());
         let handles: Vec<_> = (0..8)
@@ -847,6 +857,15 @@ mod tests {
 
     #[test]
     fn dedup_collision_with_mutated_payload_is_rejected() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `encrypted_restart_preserves_state_without_
+        // plaintext_markers`, which opens a real SqlCipher-backed store
+        // through the secure-memory arena (DAT-002-MEM-CODE-001).
+        // `sqlite3_config` can only run before SQLite's first implicit
+        // initialization, so every SQLite-touching test in this binary —
+        // in-memory or not — must bootstrap the arena first, regardless of
+        // which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = LocalNotificationStore::open_in_memory().unwrap();
         let original = intent();
         store.enqueue_work_intent(&original, 2_000).unwrap();
@@ -860,6 +879,15 @@ mod tests {
 
     #[test]
     fn preference_suppresses_without_deleting_intent() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `encrypted_restart_preserves_state_without_
+        // plaintext_markers`, which opens a real SqlCipher-backed store
+        // through the secure-memory arena (DAT-002-MEM-CODE-001).
+        // `sqlite3_config` can only run before SQLite's first implicit
+        // initialization, so every SQLite-touching test in this binary —
+        // in-memory or not — must bootstrap the arena first, regardless of
+        // which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = LocalNotificationStore::open_in_memory().unwrap();
         store
             .set_preference(NotificationCategory::Incident, false, Severity::Info, None)
@@ -875,6 +903,15 @@ mod tests {
 
     #[test]
     fn presentation_read_revision_and_expiry_are_truthful() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `encrypted_restart_preserves_state_without_
+        // plaintext_markers`, which opens a real SqlCipher-backed store
+        // through the secure-memory arena (DAT-002-MEM-CODE-001).
+        // `sqlite3_config` can only run before SQLite's first implicit
+        // initialization, so every SQLite-touching test in this binary —
+        // in-memory or not — must bootstrap the arena first, regardless of
+        // which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = LocalNotificationStore::open_in_memory().unwrap();
         let notification = store.enqueue_work_intent(&intent(), 2_000).unwrap();
         assert!(matches!(
@@ -902,6 +939,15 @@ mod tests {
 
     #[test]
     fn offline_requires_real_ordered_observation_and_deduplicates_episode() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `encrypted_restart_preserves_state_without_
+        // plaintext_markers`, which opens a real SqlCipher-backed store
+        // through the secure-memory arena (DAT-002-MEM-CODE-001).
+        // `sqlite3_config` can only run before SQLite's first implicit
+        // initialization, so every SQLite-touching test in this binary —
+        // in-memory or not — must bootstrap the arena first, regardless of
+        // which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = LocalNotificationStore::open_in_memory().unwrap();
         let observation = offline();
         let first = store.enqueue_runtime_offline(&observation, 2_000).unwrap();
@@ -931,6 +977,15 @@ mod tests {
 
     #[test]
     fn encrypted_restart_preserves_state_without_plaintext_markers() {
+        // `LocalNotificationStore::open` goes through `loki_storage::
+        // open_or_migrate_sqlcipher`, which now requires the process-global
+        // secure-memory arena to be ready first (DAT-002-MEM-CODE-001,
+        // ADR-0005). Production never embeds an accepted bounds profile at
+        // this revision (fail-closed by design), so this test bootstraps a
+        // disposable, non-production test-only arena instead — see
+        // `loki_storage::secure_memory::test_support` for why this bypass
+        // cannot reach a release build.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("notifications.sqlite3");
         let key = directory.path().join("notifications.key.dpapi");

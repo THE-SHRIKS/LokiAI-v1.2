@@ -16,6 +16,7 @@ const MARKER: &str = "LOKIAI_INCIDENT_SECRET_MARKER_a91e";
 
 #[test]
 fn incident_evidence_file_migrates_and_remains_encrypted() {
+    ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("incidents.sqlite3");
     let plaintext = Connection::open(&database).unwrap();

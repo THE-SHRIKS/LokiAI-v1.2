@@ -80,7 +80,7 @@ async fn startup_accepts_a_real_ipc_connection_and_is_located_as_healthy() {
     let pipe_name = config.pipe_name.clone();
     let paths = config.paths.clone();
 
-    let host = ComposedHost::open(&config).expect("host must start");
+    let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
 
     let run_task = tokio::spawn(async move {
         host.run(
@@ -169,7 +169,7 @@ async fn simulated_crash_and_restart_preserves_persisted_device_state() {
 
     let device = sample_device("dev-crash-restart-1");
     {
-        let host = ComposedHost::open(&config).expect("host must start");
+        let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
         host.storage()
             .insert_device(&device)
             .expect("device insert must succeed before the simulated crash");
@@ -185,8 +185,8 @@ async fn simulated_crash_and_restart_preserves_persisted_device_state() {
         paths: config.paths.clone(),
         pipe_name: unique_pipe_name("crash-restart-restarted"),
     };
-    let restarted_host =
-        ComposedHost::open(&restarted_config).expect("host must restart against the same paths");
+    let restarted_host = ComposedHost::open_with_test_arena(&restarted_config)
+        .expect("host must restart against the same paths");
 
     let restarted_device = restarted_host
         .storage()

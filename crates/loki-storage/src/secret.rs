@@ -63,10 +63,12 @@ pub fn load_or_create_database_key(
 ) -> Result<DatabaseKey, SecretError> {
     if protected_path.exists() {
         let plaintext = load_secret(protected_path)?;
-        let bytes: [u8; DATABASE_KEY_BYTES] = plaintext
-            .try_into()
-            .map_err(|_| SecretError::InvalidProtectedSecret)?;
-        return Ok(DatabaseKey::from_bytes(bytes));
+        // `DatabaseKey::from_plaintext_vec` wipes `plaintext`'s backing
+        // allocation before it is dropped, unlike a raw `.try_into::<[u8;
+        // 32]>()`, which would leave the DPAPI-unprotected plaintext key in
+        // freed, unwiped heap memory.
+        return DatabaseKey::from_plaintext_vec(plaintext)
+            .ok_or(SecretError::InvalidProtectedSecret);
     }
     if database_already_exists {
         return Err(SecretError::MissingProtectedSecret(

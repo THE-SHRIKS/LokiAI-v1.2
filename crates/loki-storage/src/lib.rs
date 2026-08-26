@@ -50,6 +50,10 @@ mod migrations;
 pub mod outbox;
 #[cfg(windows)]
 pub mod secret;
+#[cfg(windows)]
+pub mod secure_memory;
+#[cfg(windows)]
+pub mod secure_profile;
 pub mod states;
 mod storage;
 pub mod timestamp;
@@ -60,4 +64,10 @@ pub use key::DatabaseKey;
 #[cfg(windows)]
 pub use managed::{backup_sqlcipher_database, open_or_migrate_sqlcipher, rotate_sqlcipher_key};
 pub use migrations::MigrationReport;
+#[cfg(windows)]
+pub use secure_memory::{SecureMemoryError, SecureMemoryRuntime, SecureMemoryStats};
+#[cfg(windows)]
+pub use secure_profile::{
+    ProfileError, ProfileInspection, digest_profile_manifest, inspect_profile,
+};
 pub use storage::{IntegrityStatus, Storage, configure_connection, configure_sqlcipher};

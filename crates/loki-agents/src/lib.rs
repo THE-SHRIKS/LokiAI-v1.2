@@ -535,6 +535,15 @@ mod tests {
         AgentRegistry,
         AgentCredential,
     ) {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with this binary's `restart_preserves_revocation`
+        // test, which opens a real SqlCipher-backed store through the
+        // secure-memory arena (DAT-002-MEM-CODE-001). `sqlite3_config` can
+        // only run before SQLite's first implicit initialization, so every
+        // SQLite-touching test in this binary — in-memory or not — must
+        // bootstrap the arena first, regardless of which test happens to
+        // run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let a = LocalAuthority::open_in_memory().unwrap();
         let c = LocalContext::current("ipc-agent").unwrap();
         a.initialize_current(&c, 1000).unwrap();
@@ -679,6 +688,9 @@ mod tests {
     }
     #[test]
     fn restart_preserves_revocation() {
+        // See `setup()`'s comment: every SQLite-touching test in this
+        // binary must bootstrap the arena first, regardless of order.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("agents.db");
         let key = d.path().join("agents.key.dpapi");

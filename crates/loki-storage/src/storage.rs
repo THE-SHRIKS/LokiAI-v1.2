@@ -73,6 +73,14 @@ impl Storage {
     /// guarantees a garbage file surfaces as [`StorageError::Corrupt`], not
     /// an unmapped raw driver error from an unrelated pragma.
     pub fn open(path: &Path, cipher: Cipher) -> Result<Self, StorageError> {
+        #[cfg(windows)]
+        if matches!(&cipher, Cipher::SqlCipher(_)) {
+            crate::secure_memory::require_ready()?;
+        }
+        #[cfg(not(windows))]
+        if matches!(&cipher, Cipher::SqlCipher(_)) {
+            return Err(StorageError::UnsupportedCipher);
+        }
         let existed_before_open = path.exists();
         let conn = Connection::open(path)?;
 
@@ -107,6 +115,14 @@ impl Storage {
     /// Opens a private in-memory database. Useful for tests and any
     /// ephemeral use — there is no file, so there is no restart durability.
     pub fn open_in_memory(cipher: Cipher) -> Result<Self, StorageError> {
+        #[cfg(windows)]
+        if matches!(&cipher, Cipher::SqlCipher(_)) {
+            crate::secure_memory::require_ready()?;
+        }
+        #[cfg(not(windows))]
+        if matches!(&cipher, Cipher::SqlCipher(_)) {
+            return Err(StorageError::UnsupportedCipher);
+        }
         let conn = Connection::open_in_memory()?;
         let key = match cipher {
             Cipher::SqlCipher(key) => {
@@ -242,15 +258,67 @@ pub fn configure_sqlcipher(
     conn: &Connection,
     key: &crate::key::DatabaseKey,
 ) -> Result<(), StorageError> {
+    #[cfg(windows)]
+    crate::secure_memory::require_ready()?;
+    #[cfg(not(windows))]
+    return Err(StorageError::UnsupportedCipher);
     // SQLCipher requires the key before *any* schema/page access. The key is
     // only materialized for this one native pragma call and is never logged.
+    // `cipher_memory_security = ON` (ADR-0005 decision #5) is set here, in
+    // the same batch as the key, so it is active before any page is
+    // touched, and is verified read-back below (`verify_cipher_memory_security`).
+    // What this actually proves covered: SQLite/SQLCipher's own
+    // codec/page buffers, which are allocated through `sqlite3_malloc` and
+    // therefore routed through this crate's locked, wiped arena — the
+    // read-back check confirms the pragma took effect for that path. What
+    // this does NOT prove covered: OpenSSL's own internal cipher-context
+    // and key-schedule state (`EVP_CIPHER_CTX`, allocated via
+    // `EVP_CIPHER_CTX_new`/`OPENSSL_malloc`) is allocated through OpenSSL's
+    // own memory management, not SQLite's allocator, and nothing in this
+    // codebase redirects OpenSSL's allocator into the arena
+    // (`CRYPTO_set_mem_functions` is not called anywhere in this codebase).
+    // This gap was raised, investigated by source inspection (not
+    // runtime-proven either way), and documented in detail in
+    // `Docs/graph/handoffs/DAT-002-MEM-CODE-001-4.md` §6. The human
+    // security/product owner has explicitly reviewed that finding and
+    // decided to accept it as a known, documented residual risk for now
+    // rather than require redirecting OpenSSL's allocator — this comment
+    // exists so that decision and its scope stay honest and visible, not
+    // silently implied as "fully covered".
+    let hex = key.sqlcipher_hex();
     let mut statement = format!(
-        "PRAGMA key = \"x'{}'\"; PRAGMA cipher_compatibility = 4;",
-        key.sqlcipher_hex()
+        "PRAGMA key = \"x'{}'\"; PRAGMA cipher_compatibility = 4; PRAGMA cipher_memory_security = ON;",
+        hex.as_str()
     );
     let result = conn.execute_batch(&statement).map_err(StorageError::from);
     wipe_string(&mut statement);
-    result
+    drop(hex);
+    result?;
+    verify_cipher_memory_security(conn)
+}
+
+/// Reads `PRAGMA cipher_memory_security` back and fails closed if SQLCipher
+/// does not report it enabled. `execute_batch` does not surface a PRAGMA's
+/// own reported value, so setting it above is not itself proof it took
+/// effect — this is the independent verification ADR-0005 decision #5 and
+/// this task's acceptance criteria require.
+///
+/// SQLCipher's own C implementation (`sqlcipher_vdbe_return_string` in
+/// `sqlcipher.c`) returns this PRAGMA's value as `TEXT` ("0"/"1"), not an
+/// `INTEGER`, unlike most boolean SQLite PRAGMAs — so this reads a `String`,
+/// not an `i64`. SQLCipher also reports it enabled only once its own
+/// allocator wrapper has actually run at least one allocation/free
+/// (`sqlcipher_mem_executed`) — preparing/executing this very query already
+/// causes at least one, so this is a real read of live codec state, not a
+/// static compiled-in flag.
+fn verify_cipher_memory_security(conn: &Connection) -> Result<(), StorageError> {
+    let reported: String =
+        conn.query_row("PRAGMA cipher_memory_security;", [], |row| row.get(0))?;
+    if reported == "1" {
+        Ok(())
+    } else {
+        Err(StorageError::CipherMemorySecurityUnverified { reported })
+    }
 }
 
 pub(crate) fn wipe_string(value: &mut String) {
@@ -322,11 +390,30 @@ mod tests {
         // becomes exercisable — and gets its own test — the moment DAT-002
         // adds a second variant. Asserting the one real variant works end
         // to end is what this crate can honestly test today.
+        //
+        // `Cipher::None` skips `secure_memory::require_ready()` entirely (it
+        // is not a SQLCipher connection), but `Connection::open_in_memory()`
+        // still triggers SQLite's *own* lazy default-allocator init the
+        // first time any connection opens in this process — and that init
+        // is process-global, not per-cipher. This binary's `managed.rs`
+        // tests bootstrap the disposable test arena via
+        // `sqlite3_config(SQLITE_CONFIG_MALLOC)`, which can only succeed
+        // *before* that first implicit init. Under Rust's default
+        // multi-threaded test harness, an unordered `Cipher::None` test in
+        // this module can otherwise run first and silently take that
+        // one-shot window away from `managed.rs`'s real-arena tests
+        // (`SqliteConfiguration { code: 21 }` / `SQLITE_MISUSE`) — the same
+        // order-dependency class already diagnosed and fixed across every
+        // consumer crate (see `secure_memory::test_support`'s doc comment).
+        // Bootstrapping the (idempotent, `Once`-guarded) test arena first
+        // here closes that same window for this binary too.
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         assert!(Storage::open_in_memory(Cipher::None).is_ok());
     }
 
     #[test]
     fn integrity_check_reports_ok_on_a_freshly_migrated_database() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let storage = Storage::open_in_memory(Cipher::None).unwrap();
         storage.run_migrations("2026-01-01T00:00:00Z").unwrap();
         assert_eq!(storage.integrity_check().unwrap(), IntegrityStatus::Ok);
@@ -334,6 +421,7 @@ mod tests {
 
     #[test]
     fn transaction_commits_on_success() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let storage = Storage::open_in_memory(Cipher::None).unwrap();
         storage.run_migrations("2026-01-01T00:00:00Z").unwrap();
 
@@ -358,6 +446,7 @@ mod tests {
 
     #[test]
     fn failed_multi_step_transaction_leaves_no_partial_write() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let storage = Storage::open_in_memory(Cipher::None).unwrap();
         storage.run_migrations("2026-01-01T00:00:00Z").unwrap();
 
@@ -390,5 +479,61 @@ mod tests {
             count, 0,
             "the first insert must not remain committed once the transaction as a whole failed"
         );
+    }
+
+    /// Reproduces the exact scenario the CODE-REV-001 CRITICAL-2 finding
+    /// describes: `cipher_memory_security` must actually be verified as ON
+    /// after a real key configuration and a forced allocation, not merely
+    /// requested. This is a real, real-connection read-back — not a check
+    /// on the PRAGMA text this module composes.
+    #[cfg(windows)]
+    #[test]
+    fn cipher_memory_security_reads_back_on_after_forced_allocation() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cipher-memory-security.sqlite3");
+        let conn = Connection::open(&path).unwrap();
+        let key = crate::key::DatabaseKey::from_bytes([7u8; 32]);
+        configure_sqlcipher(&conn, &key).unwrap();
+
+        // Force a real allocation out of the secure arena (schema + row
+        // write, then a read) before reading the PRAGMA back, so this is not
+        // merely re-checking the value immediately after it was set.
+        conn.execute_batch("CREATE TABLE forced(value INTEGER); INSERT INTO forced VALUES (1);")
+            .unwrap();
+        let _: i64 = conn
+            .query_row("SELECT value FROM forced", [], |row| row.get(0))
+            .unwrap();
+
+        let reported: String = conn
+            .query_row("PRAGMA cipher_memory_security;", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            reported, "1",
+            "cipher_memory_security must read back ON (1) after a forced allocation"
+        );
+    }
+
+    /// Directly exercises the wipe primitive [`configure_sqlcipher`] applies
+    /// to the composed `PRAGMA key = ...` statement text (CODE-REV-001
+    /// CRITICAL-1a). `key::SqlCipherHex`'s own `Drop` calls this same
+    /// function on the separate intermediate hex-string temporary, closing
+    /// the gap where only the outer composed statement was ever wiped.
+    #[test]
+    fn wipe_string_zeroes_every_byte_in_place() {
+        let mut value = String::from("0123456789abcdef0123456789abcdef");
+        wipe_string(&mut value);
+        assert!(value.bytes().all(|byte| byte == 0));
+    }
+
+    /// `DatabaseKey::sqlcipher_hex()` must return the correct lower-case hex
+    /// encoding (not just *some* wipeable wrapper) so
+    /// `SqlCipherHex`-wrapping it did not silently change the PRAGMA key
+    /// material submitted to SQLCipher.
+    #[test]
+    fn sqlcipher_hex_encodes_the_exact_key_bytes() {
+        let key = crate::key::DatabaseKey::from_bytes([0xABu8; 32]);
+        let hex = key.sqlcipher_hex();
+        assert_eq!(hex.as_str(), "ab".repeat(32));
     }
 }

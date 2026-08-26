@@ -17,6 +17,8 @@ pub enum StorageError {
     Sqlite(rusqlite::Error),
     #[cfg(windows)]
     Secret(crate::secret::SecretError),
+    #[cfg(windows)]
+    SecureMemory(crate::secure_memory::SecureMemoryError),
     /// The database file exists but failed an integrity check (or SQLite
     /// could not even recognize it as a database). Never silently treated
     /// as "create a fresh empty database instead" — see
@@ -44,6 +46,11 @@ pub enum StorageError {
     /// A write violated a uniqueness/consistency rule this crate enforces
     /// beyond a raw SQLite constraint (e.g. an already-terminal state).
     Conflict { detail: String },
+    /// `PRAGMA cipher_memory_security = ON` (ADR-0005 decision #5) was set
+    /// but did not read back as enabled. Storage refuses to become ready
+    /// rather than silently running without this codec-level wipe-on-free
+    /// guarantee.
+    CipherMemorySecurityUnverified { reported: String },
 }
 
 impl fmt::Display for StorageError {
@@ -53,6 +60,8 @@ impl fmt::Display for StorageError {
             StorageError::Sqlite(e) => write!(f, "sqlite error: {e}"),
             #[cfg(windows)]
             StorageError::Secret(e) => write!(f, "{e}"),
+            #[cfg(windows)]
+            StorageError::SecureMemory(e) => write!(f, "secure-memory startup failed: {e}"),
             StorageError::Corrupt { path, detail } => {
                 write!(
                     f,
@@ -74,6 +83,10 @@ impl fmt::Display for StorageError {
             ),
             StorageError::NotFound { kind, id } => write!(f, "{kind} '{id}' not found"),
             StorageError::Conflict { detail } => write!(f, "storage conflict: {detail}"),
+            StorageError::CipherMemorySecurityUnverified { reported } => write!(
+                f,
+                "PRAGMA cipher_memory_security did not read back as enabled (reported {reported}); refusing to use this connection"
+            ),
         }
     }
 }
@@ -85,6 +98,8 @@ impl std::error::Error for StorageError {
             StorageError::Sqlite(e) => Some(e),
             #[cfg(windows)]
             StorageError::Secret(e) => Some(e),
+            #[cfg(windows)]
+            StorageError::SecureMemory(e) => Some(e),
             _ => None,
         }
     }
@@ -109,6 +124,13 @@ impl From<crate::secret::SecretError> for StorageError {
     }
 }
 
+#[cfg(windows)]
+impl From<crate::secure_memory::SecureMemoryError> for StorageError {
+    fn from(e: crate::secure_memory::SecureMemoryError) -> Self {
+        StorageError::SecureMemory(e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +139,10 @@ mod tests {
     fn display_does_not_panic_for_every_variant() {
         let samples: Vec<StorageError> = vec![
             StorageError::Io(std::io::Error::other("x")),
+            #[cfg(windows)]
+            StorageError::SecureMemory(crate::secure_memory::SecureMemoryError::Profile(
+                crate::secure_profile::ProfileError::Unavailable,
+            )),
             StorageError::Corrupt {
                 path: "p".into(),
                 detail: "d".into(),
@@ -139,6 +165,9 @@ mod tests {
                 id: "1".into(),
             },
             StorageError::Conflict { detail: "d".into() },
+            StorageError::CipherMemorySecurityUnverified {
+                reported: "0".into(),
+            },
         ];
         for err in samples {
             let _ = format!("{err}");

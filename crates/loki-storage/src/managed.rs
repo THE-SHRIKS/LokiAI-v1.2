@@ -42,6 +42,10 @@ pub fn open_or_migrate_sqlcipher(
     database: &Path,
     protected_key: &Path,
 ) -> Result<(Connection, DatabaseKey), StorageError> {
+    // This guard deliberately precedes every filesystem probe, DPAPI key
+    // load/create, and SQLite symbol.  A missing/unaccepted/unattested arena
+    // therefore cannot create a healthy-looking empty database or sidecar.
+    crate::secure_memory::require_ready()?;
     let paths = OperationPaths::new(database, protected_key);
     recover_interrupted(database, protected_key, &paths)?;
 
@@ -179,12 +183,14 @@ fn export_to_encrypted(
     // The filename is bound, not interpolated. Only the in-memory raw key is
     // placed in the SQLCipher-specific KEY literal and the statement is never
     // logged. SQLite's Online Backup API rejects cross-codec copies.
+    let hex = key.sqlcipher_hex();
     let mut attach = format!(
         "ATTACH DATABASE ?1 AS lokiai_encrypted KEY \"x'{}'\"",
-        key.sqlcipher_hex()
+        hex.as_str()
     );
     let attach_result = source.execute(&attach, [destination_text]);
     crate::storage::wipe_string(&mut attach);
+    drop(hex);
     attach_result?;
     let export_result =
         source.query_row(
@@ -298,10 +304,12 @@ fn verify_integrity(connection: &Connection, path: &Path) -> Result<(), StorageE
 
 fn load_key(path: &Path) -> Result<DatabaseKey, StorageError> {
     let plaintext = secret::load_secret(path)?;
-    let bytes: [u8; 32] = plaintext
-        .try_into()
-        .map_err(|_| StorageError::Secret(SecretError::InvalidProtectedSecret))?;
-    Ok(DatabaseKey::from_bytes(bytes))
+    // `DatabaseKey::from_plaintext_vec` wipes `plaintext`'s backing
+    // allocation before it is dropped, unlike a raw `.try_into::<[u8;
+    // 32]>()`, which would leave the DPAPI-unprotected plaintext key in
+    // freed, unwiped heap memory.
+    DatabaseKey::from_plaintext_vec(plaintext)
+        .ok_or(StorageError::Secret(SecretError::InvalidProtectedSecret))
 }
 
 fn remove_if_exists(path: &Path) -> Result<(), StorageError> {
@@ -318,6 +326,12 @@ mod tests {
 
     #[test]
     fn interrupted_pre_swap_restores_source_then_retries_migration() {
+        // `open_or_migrate_sqlcipher` requires arena readiness (deliverable
+        // 6/acceptance criterion 1). Production never bootstraps this
+        // process-global arena more than once, so this crate's own tests
+        // share one disposable, non-production test-only arena instead of
+        // each asserting a fresh process — see `secure_memory::test_support`.
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("recover.sqlite3");
         let key = dir.path().join("recover.key.protected");
@@ -343,6 +357,7 @@ mod tests {
 
     #[test]
     fn interrupted_key_promotion_is_completed_only_after_key_verification() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("recover.sqlite3");
         let key = dir.path().join("recover.key.protected");

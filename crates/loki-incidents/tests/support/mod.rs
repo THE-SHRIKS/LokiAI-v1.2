@@ -89,3 +89,16 @@ pub fn default_engine() -> IncidentEngine {
         Duration::from_secs(3600),
     )
 }
+
+/// `IncidentStore::open` goes through `loki_storage::
+/// open_or_migrate_sqlcipher`, which now requires the process-global
+/// secure-memory arena to be ready first (DAT-002-MEM-CODE-001, ADR-0005).
+/// Production never embeds an accepted bounds profile at this revision
+/// (fail-closed by design), so this crate's own black-box tests bootstrap
+/// one disposable, non-production test-only arena instead — see
+/// `loki_storage::secure_memory::test_support` for why this bypass cannot
+/// reach a release build.
+#[allow(dead_code)] // Shared integration-test helper; not every test binary consumes it.
+pub fn ensure_ready() {
+    loki_storage::secure_memory::test_support::ensure_test_arena_ready();
+}

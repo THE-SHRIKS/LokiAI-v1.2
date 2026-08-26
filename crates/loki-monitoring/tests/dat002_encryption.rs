@@ -9,6 +9,8 @@ use loki_monitoring::sample::{LogRecord, RetentionClass};
 use loki_monitoring::store::SqliteTelemetryStore;
 use rusqlite::Connection;
 
+mod common;
+
 const MARKER: &str = "LOKIAI_MONITORING_SECRET_MARKER_43f1";
 
 fn contains(path: &std::path::Path, marker: &[u8]) -> bool {
@@ -21,6 +23,7 @@ fn contains(path: &std::path::Path, marker: &[u8]) -> bool {
 
 #[test]
 fn telemetry_and_rules_share_one_migrated_encrypted_file() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("monitoring.sqlite3");
     let plaintext = Connection::open(&database).unwrap();

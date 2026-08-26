@@ -16,6 +16,8 @@ use loki_monitoring::Pipeline;
 use loki_monitoring::sample::{RetentionClass, SampleQuality, TelemetrySample};
 use loki_monitoring::store::SqliteTelemetryStore;
 
+mod common;
+
 fn sample(seq: u64, t: SystemTime) -> TelemetrySample {
     TelemetrySample::new(
         DeviceId::new("dev-1").unwrap(),
@@ -33,6 +35,7 @@ fn sample(seq: u64, t: SystemTime) -> TelemetrySample {
 
 #[test]
 fn durably_persisted_samples_survive_a_simulated_process_restart() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("telemetry.sqlite3");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(5000);
@@ -63,6 +66,7 @@ fn durably_persisted_samples_survive_a_simulated_process_restart() {
 
 #[test]
 fn a_detected_gap_also_survives_a_simulated_process_restart() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("telemetry.sqlite3");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(5000);
@@ -90,6 +94,7 @@ fn in_memory_working_state_honestly_resets_after_restart_it_is_not_fabricated_as
     // `Pipeline`: it has no in-memory memory of pre-restart freshness at
     // all, and must say so (`Unknown`), never claim `Fresh` based on
     // durable history it has not actually re-observed.
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("telemetry.sqlite3");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(5000);
@@ -129,6 +134,7 @@ fn in_memory_working_state_honestly_resets_after_restart_it_is_not_fabricated_as
 
 #[test]
 fn reopening_the_same_file_twice_in_a_row_is_idempotent() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("telemetry.sqlite3");
 

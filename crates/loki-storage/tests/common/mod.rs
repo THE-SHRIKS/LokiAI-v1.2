@@ -24,6 +24,15 @@ pub const T0: &str = "2026-01-01T00:00:00Z";
 pub const T1: &str = "2026-01-02T00:00:00Z";
 
 pub fn cipher_for(path: &std::path::Path) -> Cipher {
+    // `Storage::open`/`open_in_memory` with `Cipher::SqlCipher` now requires
+    // the process-global secure-memory arena to be ready first
+    // (DAT-002-MEM-CODE-001, ADR-0005 deliverable 6). Production never
+    // embeds an accepted bounds profile at this revision (fail-closed by
+    // design), so this crate's own black-box tests bootstrap one disposable,
+    // non-production test-only arena per test binary instead — see
+    // `loki_storage::secure_memory::test_support` for why this bypass
+    // cannot reach a release build.
+    loki_storage::secure_memory::test_support::ensure_test_arena_ready();
     let key_path = path.with_extension("key.protected");
     let key = loki_storage::secret::load_or_create_database_key(&key_path, false)
         .expect("create/load DPAPI-protected test key");
