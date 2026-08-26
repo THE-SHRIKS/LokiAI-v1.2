@@ -1,0 +1,36 @@
+# LokiAI Main v1.2 — loki-mutation-contract (P1-MUTATION-CONTRACT-001).
+#
+# Pure Rust value types and pure functions encoding ADR-0006's transactional
+# runtime mutation acceptance decision as a closed, reviewable internal
+# contract. Zero I/O, zero database access, zero async, zero executable-
+# callback surface (no `dyn Fn`, no trait-object callback, no
+# `Arc<Mutex<...>>`-as-authorization). `P1-ACCEPTANCE-STORE-001` implements
+# the real transaction against these types; this crate never opens a
+# connection.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11.
+[package]
+name = "loki-mutation-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure runtime mutation acceptance contract types: grant generations, request digests, idempotency keys, closed mutation methods, and discriminated acceptance/revocation states (ADR-0006, P1-MUTATION-CONTRACT-001)."
+
+[dependencies]
+# Reused directly, not redefined: `JobId`/`CorrelationId` newtypes
+# (crates/loki-storage/src/ids.rs) and the `JobState` closed-state
+# vocabulary this crate's doc comments cite (crates/loki-storage/src/
+# states.rs) — see Docs/graph/tasks/P1-MUTATION-CONTRACT-001.md §6. This
+# crate uses only loki-storage's `ids`/`states`/`error` modules, never its
+# `storage`/`managed`/`key`/`secret` modules (no SQLite/DPAPI/filesystem
+# reachable through this dependency).
+loki-storage = { path = "../loki-storage" }
+# Pure Rust SHA-256 for the canonical request digest, generalizing
+# `loki_approvals::ApprovalRequest::digest()`'s length-prefixed
+# field-concatenation pattern (crates/loki-approvals/src/lib.rs). RustCrypto,
+# MIT/Apache-2.0, actively maintained; same exact pinned version already used
+# by loki-approvals/loki-agents so the workspace lockfile resolves one copy.
+# No I/O, no async: pure hashing over an in-memory byte buffer.
+sha2 = "=0.10.9"
