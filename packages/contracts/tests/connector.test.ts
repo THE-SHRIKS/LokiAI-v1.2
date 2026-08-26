@@ -18,7 +18,6 @@ import {
   redactIdentityProbeResult,
   redactSensitiveLocator,
   redactTransportCandidate,
-  type IdentityProbeResult,
 } from '../src/connector.js';
 import { expectInvalid, expectValid, omit } from './helpers.js';
 
@@ -226,7 +225,7 @@ describe('device-derived connector identity contract', () => {
     // device — confirmed by the shared fixture round-trip test above. Any
     // other use (logging, evidence persistence) must go through the
     // explicit redaction helpers instead of the raw parsed object.
-    const parsed = IdentityProbeResultSchema.parse(fixture) as IdentityProbeResult;
+    const parsed = IdentityProbeResultSchema.parse(fixture);
 
     it('parsed wire data still carries the real locator (the one legitimate transport use)', () => {
       expect(parsed.candidate.locator.value).toBe('fixture-locator-not-a-real-device');
