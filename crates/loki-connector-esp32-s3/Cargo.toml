@@ -1,0 +1,86 @@
+# LokiAI Main v1.2 — loki-connector-esp32-s3 (CON-003-R1).
+#
+# The first concrete `loki_connectors_sdk::Connector` implementation: the
+# ESP32-S3 profile confirmed by `Docs/CONTEXT.md` OQ-001 (QFN56 rev v0.2, 8MB
+# embedded PSRAM AP_3v3, 16MB external quad flash, 3.3V, USB-Serial/JTAG
+# native). This crate implements manifest/capability/health/lifecycle
+# STRUCTURE only, against an injectable `Esp32Transport` trait — no serial
+# port, USB device, or `std::process::Command` is opened anywhere in this
+# crate's production or test code. See Docs/graph/tasks/CON-003-R1.md for
+# exact scope/forbidden-scope, and `src/transport.rs` for why the trait
+# boundary is shaped the way it is.
+#
+# `SupportTier::Custom`, not `Certified` — no physical certification evidence
+# exists yet (see the crate's own manifest-construction module doc and the
+# worker handoff). A real transport implementation and any physical/HIL
+# evidence remain a separately-gated node (`CON-003-PHYS-001`).
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11
+# (why it's needed, license, maintenance state, removal cost) rather than
+# added for convenience. Docs/TECH_STACK.md §5.1 requires exact versions in
+# production manifests, so direct dependencies are pinned with `=`, matching
+# crates/loki-connectors-sdk's and crates/loki-connector-registry's own
+# convention. Cargo.lock is committed on top of that for full
+# reproducibility.
+[package]
+name = "loki-connector-esp32-s3"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 ESP32-S3 reference connector (code-level structure over an injectable transport trait; no physical device I/O)."
+
+[dependencies]
+# The device-neutral connector trait, manifest/capability/health/operation
+# shapes, the canonical preflight->execute->verify lifecycle runner, and the
+# identity-evidence types this connector's `identify` capability attaches
+# (CON-001, this node's direct dependency per the task packet). Path
+# dependency: both crates are members of this one workspace, not
+# independently published.
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
+
+# Makes `Connector` (and this crate's own `Esp32Transport`) usable through
+# `dyn Connector`/`dyn Esp32Transport`. Native `async fn` in traits does not
+# produce a dyn-compatible trait on stable Rust on its own; every lifecycle
+# method here is async because a real transport implementation
+# (`CON-003-PHYS-001`) will do real serial I/O that must not block the
+# runtime's async executor. Same crate/version/reasoning as
+# loki-connectors-sdk's own direct dependency (see that crate's Cargo.toml):
+# MIT OR Apache-2.0, maintainer dtolnay, proc-macro only, no runtime
+# footprint.
+async-trait = "=0.1.92"
+
+# Constructs this connector's `ConnectorManifest::version` /
+# `runtime_protocol_range` as real parsed/comparable `semver` types, matching
+# loki-connectors-sdk's own manifest shape exactly (`Version`/`VersionReq`
+# are the types `ConnectorManifest::new` requires). Pinned identically to
+# loki-connectors-sdk/Cargo.toml's own `semver = "=1.0.28"` rather than left
+# to resolve independently, since both crates must agree on the same
+# concrete type. License: MIT OR Apache-2.0. Maintainer: dtolnay. Default
+# features only (no "serde": this crate has no serialization surface).
+semver = "=1.0.28"
+
+[dev-dependencies]
+# Drives this crate's own `#[tokio::test]` async tests (every `Connector`/
+# `Esp32Transport` method is async) and this crate's fake-transport test
+# double (`tests/support/mod.rs`, mirroring
+# crates/loki-connectors-sdk/tests/support/mod.rs's `MockConnector` pattern).
+# Reuses the same pinned version already used by loki-connectors-sdk and
+# loki-connector-registry rather than adding a second async test executor
+# (AGENTS.md rule 11). Not a production dependency: no trait method here
+# requires a specific executor. License: MIT. Maintainer: the tokio-rs
+# project. Features:
+#   - rt: the minimal single-threaded executor `#[tokio::test]` needs.
+#   - macros: the `#[tokio::test]` attribute itself.
+tokio = { version = "=1.53.1", features = ["rt", "macros"] }
+
+# `impl Esp32Transport for FakeEsp32Transport` in `tests/support/mod.rs`
+# requires the same `#[async_trait]` macro on both the trait definition
+# (production, in `src/transport.rs`, hence a normal dependency above) and
+# every impl of it — see loki-connectors-sdk/src/connector.rs's module doc
+# for why this is a macro-desugaring requirement, not optional boilerplate.
+# Already listed as a normal dependency above; `async-trait` itself needs no
+# separate dev-only re-declaration for the test binary to use it, but Cargo
+# requires each `[[test]]` target's own crate graph to resolve it — since
+# this crate already depends on it non-dev, no extra entry is required here.

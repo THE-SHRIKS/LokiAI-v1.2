@@ -286,6 +286,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "loki-connector-esp32-s3"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "loki-connectors-sdk",
+ "semver",
+ "tokio",
+]
+
+[[package]]
 name = "loki-connector-registry"
 version = "1.2.0"
 dependencies = [
