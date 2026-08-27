@@ -9,7 +9,30 @@
 //! So this registry gets its own connector implementation to register and
 //! orchestrate against — the same "real trait dispatch, not fabricated
 //! discovery/health data" property `MockConnector` proves for `CON-001`,
-//! proven again here for `CON-002`'s own orchestration logic.
+//! proven again here for `CON-002-R1`'s own candidate/identity/reconciliation
+//! logic.
+//!
+//! `CON-002-R1` extends this double (over its `CON-002` shape) with:
+//! - `Behavior::FailWithCode` — a configurable connector-reported error
+//!   `code`, so tests can exercise this crate's own busy/permission/
+//!   disconnect/unsupported classification convention
+//!   (`crate::discovery::DiscoveryFailureClass`).
+//! - Runtime-mutable stage behavior via [`BehaviorSlot`] (a small
+//!   `Arc<Mutex<Behavior>>` wrapper), so a test can flip a connector from
+//!   "busy" to "recovered" between two discovery cycles against the *same*
+//!   registered connector instance — exactly the "later cycle recovers once
+//!   cleared" scenario the task packet's required verification table names.
+//! - Per-target identity evidence
+//!   (`with_default_identity_evidence`/`set_identity_evidence_for_target`),
+//!   so a connector's `verify` stage can attach real
+//!   `loki_connectors_sdk::identity::DeviceIdentityEvidence` to its
+//!   `StageEvidence` — looked up by the provisional `DeviceId` the
+//!   `identify` request was addressed to (i.e. the candidate's ephemeral
+//!   id), so two different candidates against the same connector instance
+//!   can report two different (or the same) fingerprint digest, exercising
+//!   both the duplicate-candidate-reconciles and
+//!   conflicting-digest-fails-closed scenarios without needing two separate
+//!   connector instances.
 //!
 //! Included from both this crate's integration tests (`tests/*.rs`, via
 //! `mod support;`) and its own `src/`-level unit tests (via
@@ -25,7 +48,9 @@
 //! this double intentionally over-provides.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -33,6 +58,10 @@ use loki_connectors_sdk::Connector;
 use loki_connectors_sdk::capability::CapabilityDescriptor;
 use loki_connectors_sdk::error::ConnectorError;
 use loki_connectors_sdk::health::{HealthCheckEntry, HealthReport};
+use loki_connectors_sdk::identity::{
+    DeviceIdentityEvidence, DeviceIdentityEvidenceInput, IdentityConfidence,
+    SensitiveUnstableLocator, TransportCandidate,
+};
 use loki_connectors_sdk::ids::{CapabilityId, ConnectorId};
 use loki_connectors_sdk::manifest::{ConnectorManifest, Provenance};
 use loki_connectors_sdk::operation::{OperationContext, OperationRequest, OperationStage};
@@ -42,6 +71,50 @@ use loki_connectors_sdk::vocabulary::{
 };
 use semver::{Version, VersionReq};
 
+/// 32-byte fixture installation key. Real installation keys are opaque,
+/// OS-protected secrets (`Docs/ARCHITECTURE.md`); this crate never
+/// generates one, so tests use a fixed, clearly-fake value, matching the
+/// precedent `crates/loki-connectors-sdk/src/identity.rs`'s own tests
+/// already established.
+pub const FIXTURE_INSTALLATION_KEY: &[u8; 32] = b"fixture-installation-key-32bytes";
+
+/// Builds a real, validated [`DeviceIdentityEvidence`] fixture — the shape a
+/// connector's own `identify` implementation would build internally (see
+/// `crates/loki-connectors-sdk/src/outcome.rs`'s `StageEvidence.identity_evidence`
+/// doc comment) before attaching it to its `verify` stage's `StageEvidence`.
+#[must_use]
+pub fn identity_evidence(connector_id: &str, fingerprint_material: &str) -> DeviceIdentityEvidence {
+    DeviceIdentityEvidence::new(DeviceIdentityEvidenceInput {
+        evidence_type: "hardware_uid".into(),
+        fingerprint_material: fingerprint_material.into(),
+        installation_key: FIXTURE_INSTALLATION_KEY,
+        confidence: IdentityConfidence::Strong,
+        connector_id: connector_id.into(),
+        connector_version: "1.0.0".into(),
+        observed_at: "2026-08-26T12:00:00.000Z".into(),
+    })
+    .expect("fixture evidence input is always valid")
+}
+
+/// Builds a real, validated [`TransportCandidate`] fixture for one
+/// connector/candidate/locator combination.
+#[must_use]
+pub fn candidate_for(
+    connector_id: &str,
+    candidate_id: &str,
+    locator_value: &str,
+) -> TransportCandidate {
+    TransportCandidate::new(
+        candidate_id,
+        connector_id,
+        "1.0.0",
+        "fixture_transport",
+        SensitiveUnstableLocator::new(locator_value).expect("fixture locator is always valid"),
+        "2026-08-26T12:00:00.000Z",
+    )
+    .expect("fixture candidate is always valid")
+}
+
 /// What a lifecycle stage should do when invoked — identical shape to
 /// `loki-connectors-sdk`'s own `MockConnector::Behavior`, reproduced here
 /// rather than imported because it is private to that crate's tests.
@@ -49,6 +122,11 @@ use semver::{Version, VersionReq};
 pub enum Behavior {
     Succeed,
     Fail(String),
+    /// Like `Fail`, but with a caller-chosen `code` instead of this double's
+    /// default `"test_double_configured_failure"` — used to exercise this
+    /// crate's own busy/permission/disconnect/unsupported classification
+    /// convention (`crate::discovery::DiscoveryFailureClass::classify`).
+    FailWithCode(&'static str, String),
     Timeout,
 }
 
@@ -66,12 +144,41 @@ impl Behavior {
                 ConnectorError::new("test_double_configured_failure", reason.clone())
                     .expect("Behavior::Fail is only constructed with a non-empty reason"),
             ),
+            Behavior::FailWithCode(code, reason) => StageOutcome::Failure(
+                ConnectorError::new(*code, reason.clone())
+                    .expect("Behavior::FailWithCode is only constructed with valid code/reason"),
+            ),
             Behavior::Timeout => StageOutcome::Timeout(StageTimeout {
                 stage,
                 observed_at: SystemTime::now(),
                 deadline: SystemTime::now(),
             }),
         }
+    }
+}
+
+/// A runtime-mutable [`Behavior`] slot, so a test can change how a
+/// *currently registered* connector responds between two discovery/health
+/// cycles (e.g. "busy, then cleared") without re-registering a new
+/// connector instance.
+#[derive(Clone)]
+pub struct BehaviorSlot(Arc<StdMutex<Behavior>>);
+
+impl BehaviorSlot {
+    fn new(initial: Behavior) -> Self {
+        Self(Arc::new(StdMutex::new(initial)))
+    }
+
+    fn resolve(&self, stage: OperationStage) -> StageOutcome {
+        self.0
+            .lock()
+            .expect("test double mutex is never poisoned")
+            .resolve(stage)
+    }
+
+    /// Changes what this slot resolves to on every subsequent call.
+    pub fn set(&self, behavior: Behavior) {
+        *self.0.lock().expect("test double mutex is never poisoned") = behavior;
     }
 }
 
@@ -88,17 +195,30 @@ pub enum HealthBehavior {
 pub struct TestConnector {
     manifest: ConnectorManifest,
     capabilities: Vec<CapabilityDescriptor>,
-    preflight: Behavior,
-    execute: Behavior,
-    verify: Behavior,
-    recover: Behavior,
+    preflight: BehaviorSlot,
+    execute: BehaviorSlot,
+    verify: BehaviorSlot,
+    recover: BehaviorSlot,
     health: HealthBehavior,
+    /// Identity evidence attached to a successful `verify`'s `StageEvidence`,
+    /// looked up by the provisional `DeviceId` the request was addressed to
+    /// (i.e. `crate::discovery::ObservedCandidate::candidate_id`, echoed
+    /// back via `OperationRequest::target::device_id`). Falls back to
+    /// `default_identity_evidence` when no per-target entry matches, so the
+    /// common single-candidate case only needs one call to configure.
+    identity_evidence_by_target: HashMap<String, DeviceIdentityEvidence>,
+    default_identity_evidence: Option<DeviceIdentityEvidence>,
 }
 
 impl TestConnector {
     /// A connector that registers cleanly, identifies successfully
     /// (preflight/execute/verify all succeed), and reports all-passed
-    /// health by default.
+    /// health by default. Does not attach identity evidence to its `verify`
+    /// stage unless `with_default_identity_evidence`/
+    /// `set_identity_evidence_for_target` configures it — a `verify` success
+    /// without identity evidence is itself a real, honest scenario this
+    /// crate's `interpret_identify_outcome` must handle (`Unknown`, not
+    /// fabricated `Verified`).
     #[must_use]
     pub fn identifiable(connector_id: &str) -> Self {
         let identify = CapabilityDescriptor::new(
@@ -129,11 +249,13 @@ impl TestConnector {
         Self {
             manifest,
             capabilities: vec![identify],
-            preflight: Behavior::Succeed,
-            execute: Behavior::Succeed,
-            verify: Behavior::Succeed,
-            recover: Behavior::Succeed,
+            preflight: BehaviorSlot::new(Behavior::Succeed),
+            execute: BehaviorSlot::new(Behavior::Succeed),
+            verify: BehaviorSlot::new(Behavior::Succeed),
+            recover: BehaviorSlot::new(Behavior::Succeed),
             health: HealthBehavior::AllPassed,
+            identity_evidence_by_target: HashMap::new(),
+            default_identity_evidence: None,
         }
     }
 
@@ -150,21 +272,72 @@ impl TestConnector {
     }
 
     #[must_use]
-    pub fn with_identify_verify(mut self, behavior: Behavior) -> Self {
-        self.verify = behavior;
+    pub fn with_identify_verify(self, behavior: Behavior) -> Self {
+        self.verify.set(behavior);
         self
     }
 
+    pub fn set_identify_verify(&mut self, behavior: Behavior) {
+        self.verify.set(behavior);
+    }
+
     #[must_use]
-    pub fn with_identify_execute(mut self, behavior: Behavior) -> Self {
-        self.execute = behavior;
+    pub fn with_identify_execute(self, behavior: Behavior) -> Self {
+        self.execute.set(behavior);
         self
+    }
+
+    pub fn set_preflight(&mut self, behavior: Behavior) {
+        self.preflight.set(behavior);
     }
 
     #[must_use]
     pub fn with_health(mut self, behavior: HealthBehavior) -> Self {
         self.health = behavior;
         self
+    }
+
+    /// A shareable handle to this connector's `preflight` behavior, so a
+    /// test can mutate it (e.g. "busy" -> "cleared") after the connector has
+    /// already been registered (registration moves the `TestConnector` into
+    /// the registry's own storage).
+    #[must_use]
+    pub fn preflight_slot(&self) -> BehaviorSlot {
+        self.preflight.clone()
+    }
+
+    /// A shareable handle to this connector's `verify` behavior.
+    #[must_use]
+    pub fn verify_slot(&self) -> BehaviorSlot {
+        self.verify.clone()
+    }
+
+    /// Sets the identity evidence attached to every successful `verify`
+    /// call whose target has no more specific per-target entry — the common
+    /// single-candidate case.
+    #[must_use]
+    pub fn with_default_identity_evidence(mut self, evidence: DeviceIdentityEvidence) -> Self {
+        self.default_identity_evidence = Some(evidence);
+        self
+    }
+
+    pub fn set_default_identity_evidence(&mut self, evidence: DeviceIdentityEvidence) {
+        self.default_identity_evidence = Some(evidence);
+    }
+
+    /// Sets the identity evidence attached to a successful `verify` call
+    /// whose request was addressed to the given ephemeral candidate id
+    /// (`crate::discovery::ObservedCandidate::candidate_id`) — lets one
+    /// connector instance report *different* evidence for different
+    /// candidates within one discovery cycle (duplicate-candidate and
+    /// conflicting-digest scenarios).
+    pub fn set_identity_evidence_for_target(
+        &mut self,
+        candidate_id: &str,
+        evidence: DeviceIdentityEvidence,
+    ) {
+        self.identity_evidence_by_target
+            .insert(candidate_id.to_string(), evidence);
     }
 }
 
@@ -229,8 +402,23 @@ impl Connector for TestConnector {
         self.execute.resolve(OperationStage::Execute)
     }
 
-    async fn verify(&mut self, _op: &OperationRequest, _ctx: &OperationContext) -> StageOutcome {
-        self.verify.resolve(OperationStage::Verify)
+    async fn verify(&mut self, op: &OperationRequest, _ctx: &OperationContext) -> StageOutcome {
+        match self.verify.resolve(OperationStage::Verify) {
+            StageOutcome::Success(evidence) => {
+                let target_key = op.target.device_id.as_str();
+                let identity = self
+                    .identity_evidence_by_target
+                    .get(target_key)
+                    .cloned()
+                    .or_else(|| self.default_identity_evidence.clone());
+                let evidence = match identity {
+                    Some(identity) => evidence.with_identity_evidence(identity),
+                    None => evidence,
+                };
+                StageOutcome::Success(evidence)
+            }
+            other => other,
+        }
     }
 
     async fn recover(
