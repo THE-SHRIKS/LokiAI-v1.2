@@ -1,0 +1,64 @@
+# LokiAI Main v1.2 — loki-acceptance-store (P1-ACCEPTANCE-STORE-001).
+#
+# The real ADR-0006 one-transaction mutation acceptance engine: composes
+# loki-storage's jobs/outbox/approvals/local_authority/mutation_acceptance
+# repositories inside one Storage::transaction() call, wired to
+# loki-mutation-contract's pure types and evaluation functions. This crate,
+# not loki-mutation-contract, is where I/O and transaction shape are
+# allowed to appear (see Docs/graph/decisions/
+# ADR-0006-transactional-runtime-mutation-acceptance.md).
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11.
+#
+# Deliberate deviation from Docs/graph/tasks/P1-ACCEPTANCE-STORE-001.md §5's
+# listed dependency set: that section names loki-approvals/loki-agents/
+# loki-agent-delivery/loki-local-authority as this crate's dependencies.
+# Direct inspection while implementing Deliverable 6 found this crate never
+# needs those four crates' own public APIs — every read/write this
+# transaction performs goes through `loki-storage`'s consolidated
+# repository modules directly (approvals/agents/agent_delivery/
+# local_authority), exactly as Deliverable 6 itself specifies ("via the
+# consolidated approvals.rs repository," "through the connection-
+# parameterized core functions"). The four business crates layer in
+# IPC-session-based authorization (`LocalAuthority::authorize_local`,
+# `AgentRegistry::authenticate`) that this transaction deliberately does
+# NOT revalidate through (ADR-0006 revalidates the durable `GrantGeneration`
+# instead — see `Docs/graph/tasks/P1-ACCEPTANCE-STORE-001.md` §9 item 2).
+# Declaring those four crates as dependencies without ever calling them
+# would be exactly the unjustified/unused dependency AGENTS.md rule 11
+# warns against. Recorded here and in this node's handoff as a considered,
+# non-silent deviation, not an oversight.
+[package]
+name = "loki-acceptance-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The real ADR-0006 one-transaction runtime mutation acceptance engine (P1-ACCEPTANCE-STORE-001)."
+
+[dependencies]
+loki-mutation-contract = { path = "../loki-mutation-contract" }
+loki-storage = { path = "../loki-storage" }
+# The transaction closure this crate builds operates on `&rusqlite::Transaction`
+# directly (`Storage::transaction`'s signature) — same pinned version as
+# every sibling crate that already depends on rusqlite, so the workspace
+# lockfile resolves one copy. This crate never opens its own `Connection`
+# (grep-verifiable, an acceptance criterion): every `Connection` in scope is
+# the one `loki_storage::Storage` already owns.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+# Encodes the small outbox notification payload safely (escaping) rather
+# than hand-building JSON text with injection risk. Already a pinned
+# workspace dependency (crates/loki-agent-delivery and others already use
+# it), so this does not add a new dependency *class* to the workspace.
+serde_json = "=1.0.151"
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+# Enables loki-storage's `test-support` feature (a disposable,
+# non-production secure-memory arena bootstrap — DAT-002-MEM-CODE-001) for
+# this crate's own `[dev-dependencies]`-gated build only. Mirrors every
+# sibling crate's identical self-referential dev-dependency.
+loki-storage = { path = "../loki-storage", features = ["test-support"] }

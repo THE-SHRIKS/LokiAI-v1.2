@@ -3,8 +3,18 @@
 //! delivery). Table structure and repository read/write API only — no
 //! delivery/transport logic (`Docs/graph/tasks/DAT-001.md` §5 forbidden
 //! scope).
+//!
+//! # Connection-parameterized cores (`P1-ACCEPTANCE-STORE-001`)
+//!
+//! Same deadlock-avoidance split as `src/jobs.rs`'s top doc comment
+//! describes: every trait method is a `self.lock()` wrapper around a
+//! private, connection-parameterized `..._core` function, so
+//! `crates/loki-acceptance-store` can append ADR-0006 step 6's "its
+//! transactional outbox record" from inside the same
+//! `Storage::transaction()` closure as every other step, without a second,
+//! deadlocking `self.lock()` call.
 
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::StorageError;
 use crate::ids::{CausationId, CorrelationId, MessageId};
@@ -85,28 +95,8 @@ pub trait OutboxRepository {
 
 impl OutboxRepository for Storage {
     fn enqueue_outbox_message(&self, msg: &NewOutboxMessage) -> Result<bool, StorageError> {
-        validate_utc_timestamp("created_at", &msg.created_at)?;
-        validate_utc_timestamp("updated_at", &msg.updated_at)?;
-
         let conn = self.lock();
-        let inserted = conn.execute(
-            "INSERT OR IGNORE INTO outbox_messages (
-                message_id, stream_key, message_type, correlation_id, causation_id,
-                payload_json, status, attempts, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)",
-            params![
-                msg.message_id.as_str(),
-                msg.stream_key,
-                msg.message_type,
-                msg.correlation_id.as_str(),
-                msg.causation_id.as_ref().map(CausationId::as_str),
-                msg.payload_json,
-                OutboxStatus::Pending.as_str(),
-                msg.created_at,
-                msg.updated_at,
-            ],
-        )?;
-        Ok(inserted == 1)
+        enqueue_outbox_message_core(&conn, msg)
     }
 
     fn get_outbox_message(
@@ -114,14 +104,7 @@ impl OutboxRepository for Storage {
         id: &MessageId,
     ) -> Result<Option<OutboxMessageRecord>, StorageError> {
         let conn = self.lock();
-        let raw: Option<RawOutboxRow> = conn
-            .query_row(
-                &format!("SELECT {SELECT_COLUMNS} FROM outbox_messages WHERE message_id = ?1"),
-                params![id.as_str()],
-                row_to_raw,
-            )
-            .optional()?;
-        raw.map(raw_to_record).transpose()
+        get_outbox_message_core(&conn, id)
     }
 
     fn list_outbox_messages_by_status(
@@ -130,15 +113,7 @@ impl OutboxRepository for Storage {
         limit: i64,
     ) -> Result<Vec<OutboxMessageRecord>, StorageError> {
         let conn = self.lock();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {SELECT_COLUMNS} FROM outbox_messages WHERE status = ?1 ORDER BY created_at LIMIT ?2"
-        ))?;
-        let rows = stmt.query_map(params![status.as_str(), limit], row_to_raw)?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(raw_to_record(row?)?);
-        }
-        Ok(out)
+        list_outbox_messages_by_status_core(&conn, status, limit)
     }
 
     fn mark_outbox_message_sent(
@@ -147,20 +122,8 @@ impl OutboxRepository for Storage {
         dispatched_at: &str,
         updated_at: &str,
     ) -> Result<(), StorageError> {
-        validate_utc_timestamp("dispatched_at", dispatched_at)?;
-        validate_utc_timestamp("updated_at", updated_at)?;
         let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE outbox_messages SET status = ?1, dispatched_at = ?2, updated_at = ?3 WHERE message_id = ?4",
-            params![OutboxStatus::Sent.as_str(), dispatched_at, updated_at, id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StorageError::NotFound {
-                kind: "outbox message",
-                id: id.as_str().to_string(),
-            });
-        }
-        Ok(())
+        mark_outbox_message_sent_core(&conn, id, dispatched_at, updated_at)
     }
 
     fn mark_outbox_message_failed(
@@ -169,21 +132,111 @@ impl OutboxRepository for Storage {
         error: &str,
         updated_at: &str,
     ) -> Result<(), StorageError> {
-        validate_utc_timestamp("updated_at", updated_at)?;
         let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE outbox_messages SET status = ?1, last_error = ?2, attempts = attempts + 1, updated_at = ?3
-             WHERE message_id = ?4",
-            params![OutboxStatus::Failed.as_str(), error, updated_at, id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StorageError::NotFound {
-                kind: "outbox message",
-                id: id.as_str().to_string(),
-            });
-        }
-        Ok(())
+        mark_outbox_message_failed_core(&conn, id, error, updated_at)
     }
+}
+
+/// Connection-parameterized core of [`OutboxRepository::enqueue_outbox_message`].
+/// Callable directly from inside a `Storage::transaction()` closure — see
+/// this module's top doc comment.
+pub fn enqueue_outbox_message_core(
+    conn: &Connection,
+    msg: &NewOutboxMessage,
+) -> Result<bool, StorageError> {
+    validate_utc_timestamp("created_at", &msg.created_at)?;
+    validate_utc_timestamp("updated_at", &msg.updated_at)?;
+
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO outbox_messages (
+            message_id, stream_key, message_type, correlation_id, causation_id,
+            payload_json, status, attempts, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)",
+        params![
+            msg.message_id.as_str(),
+            msg.stream_key,
+            msg.message_type,
+            msg.correlation_id.as_str(),
+            msg.causation_id.as_ref().map(CausationId::as_str),
+            msg.payload_json,
+            OutboxStatus::Pending.as_str(),
+            msg.created_at,
+            msg.updated_at,
+        ],
+    )?;
+    Ok(inserted == 1)
+}
+
+pub fn get_outbox_message_core(
+    conn: &Connection,
+    id: &MessageId,
+) -> Result<Option<OutboxMessageRecord>, StorageError> {
+    let raw: Option<RawOutboxRow> = conn
+        .query_row(
+            &format!("SELECT {SELECT_COLUMNS} FROM outbox_messages WHERE message_id = ?1"),
+            params![id.as_str()],
+            row_to_raw,
+        )
+        .optional()?;
+    raw.map(raw_to_record).transpose()
+}
+
+pub fn list_outbox_messages_by_status_core(
+    conn: &Connection,
+    status: OutboxStatus,
+    limit: i64,
+) -> Result<Vec<OutboxMessageRecord>, StorageError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLUMNS} FROM outbox_messages WHERE status = ?1 ORDER BY created_at LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map(params![status.as_str(), limit], row_to_raw)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(raw_to_record(row?)?);
+    }
+    Ok(out)
+}
+
+pub fn mark_outbox_message_sent_core(
+    conn: &Connection,
+    id: &MessageId,
+    dispatched_at: &str,
+    updated_at: &str,
+) -> Result<(), StorageError> {
+    validate_utc_timestamp("dispatched_at", dispatched_at)?;
+    validate_utc_timestamp("updated_at", updated_at)?;
+    let changed = conn.execute(
+        "UPDATE outbox_messages SET status = ?1, dispatched_at = ?2, updated_at = ?3 WHERE message_id = ?4",
+        params![OutboxStatus::Sent.as_str(), dispatched_at, updated_at, id.as_str()],
+    )?;
+    if changed == 0 {
+        return Err(StorageError::NotFound {
+            kind: "outbox message",
+            id: id.as_str().to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn mark_outbox_message_failed_core(
+    conn: &Connection,
+    id: &MessageId,
+    error: &str,
+    updated_at: &str,
+) -> Result<(), StorageError> {
+    validate_utc_timestamp("updated_at", updated_at)?;
+    let changed = conn.execute(
+        "UPDATE outbox_messages SET status = ?1, last_error = ?2, attempts = attempts + 1, updated_at = ?3
+         WHERE message_id = ?4",
+        params![OutboxStatus::Failed.as_str(), error, updated_at, id.as_str()],
+    )?;
+    if changed == 0 {
+        return Err(StorageError::NotFound {
+            kind: "outbox message",
+            id: id.as_str().to_string(),
+        });
+    }
+    Ok(())
 }
 
 struct RawOutboxRow {

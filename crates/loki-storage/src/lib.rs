@@ -2,12 +2,19 @@
 //! (`DAT-001`).
 //!
 //! Provides: a versioned, idempotent SQL migration runner; a repository
-//! pattern over three entities (device registry, durable job records, and
-//! an outbox/inbox pair for future cloud sync); an integrity check
-//! (`PRAGMA integrity_check`); and a consistency-guaranteed backup
-//! primitive. See `Docs/graph/tasks/DAT-001.md` for exact scope and
-//! `Docs/ARCHITECTURE.md` §8 "Persistence" for the broader persistence
-//! contract this crate implements the runtime-owned SQLite part of.
+//! pattern over device registry, durable job records, an outbox/inbox pair
+//! for future cloud sync, and (since `P1-ACCEPTANCE-STORE-001` consolidated
+//! four previously independent per-crate SQLite connections into this one
+//! database — see [`approvals`], [`agents`], [`agent_delivery`],
+//! [`local_authority`]) local approvals, local agent connections/runs, work
+//! -intent delivery, and the local installation authority, plus the
+//! [`mutation_acceptance`] durable acceptance-record table; an integrity
+//! check (`PRAGMA integrity_check`); and a consistency-guaranteed backup
+//! primitive. See `Docs/graph/tasks/DAT-001.md` for this crate's original
+//! scope, `Docs/graph/tasks/P1-ACCEPTANCE-STORE-001.md` for the
+//! consolidation, and `Docs/ARCHITECTURE.md` §8 "Persistence" for the
+//! broader persistence contract this crate implements the runtime-owned
+//! SQLite part of.
 //!
 //! ## What this crate deliberately is not
 //!
@@ -37,6 +44,9 @@
 //! the boundary (`src/timestamp.rs`). See that module's doc comment for the
 //! rationale.
 
+pub mod agent_delivery;
+pub mod agents;
+pub mod approvals;
 pub mod cipher;
 pub mod devices;
 pub mod error;
@@ -44,9 +54,11 @@ pub mod ids;
 pub mod inbox;
 pub mod jobs;
 pub mod key;
+pub mod local_authority;
 #[cfg(windows)]
 pub mod managed;
 mod migrations;
+pub mod mutation_acceptance;
 pub mod outbox;
 #[cfg(windows)]
 pub mod secret;

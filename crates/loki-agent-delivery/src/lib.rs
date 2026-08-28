@@ -2,15 +2,43 @@
 //!
 //! This coordinator is deliberately a local pull contract. It never wakes a
 //! remote provider, executes a command, or turns a work intent into approval.
+//!
+//! # `P1-ACCEPTANCE-STORE-001` consolidation
+//!
+//! Previously wrapped its own independent `Mutex<Connection>`, opened via
+//! `loki_storage::open_or_migrate_sqlcipher`/`Connection::open_in_memory()`,
+//! running its own ad hoc `CREATE TABLE IF NOT EXISTS work_intent_deliveries`
+//! schema, with each multi-statement operation wrapped in its own
+//! `transaction_with_behavior(Immediate)` call directly against that
+//! connection. Now wraps a shared `loki_storage::Storage`, with schema
+//! owned by `loki-storage`'s own versioned migrations
+//! (`migrations/0006_agent_delivery_and_local_authority.sql`), all SQL
+//! moved into `loki_storage::agent_delivery`, and every multi-statement
+//! operation using `loki_storage::Storage::transaction` (the same real
+//! cross-repository transaction primitive
+//! `Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md`
+//! and `crates/loki-acceptance-store` use) instead of a private
+//! `transaction_with_behavior` call — this crate's own atomicity
+//! requirements (check-then-conditionally-write) are exactly the
+//! `Storage::transaction` use case, not only the acceptance-store crate's.
 
-use std::{fmt, path::Path, sync::Mutex, time::SystemTime};
+use std::{fmt, path::Path, sync::Arc};
 
 use loki_agents::{AgentError, AgentRegistry, AgentScope};
 use loki_incidents::work_intent::WorkIntent;
 use loki_local_notifications::{LocalNotificationStore, NotificationError};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use loki_storage::agent_delivery::{
+    AgentDeliveryRepository, NewWorkIntentDelivery, WorkIntentDeliveryRow, WorkIntentDeliveryUpdate,
+};
+use loki_storage::error::StorageError as LokiStorageError;
+use loki_storage::{Cipher, Storage};
+use std::time::SystemTime;
 
 const MAX_FAILURE_REASON: usize = 512;
+
+/// See `crates/loki-local-authority/src/store.rs`'s identical constant doc
+/// comment — the same rationale applies here.
+const BACK_COMPAT_MIGRATION_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryState {
@@ -134,47 +162,36 @@ impl From<loki_storage::StorageError> for DeliveryError {
 }
 
 pub struct WorkIntentDeliveryStore {
-    connection: Mutex<Connection>,
+    storage: Arc<Storage>,
 }
 
 impl WorkIntentDeliveryStore {
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated `Storage` at `path` (Windows DPAPI-managed SQLCipher),
+    /// then delegates to [`WorkIntentDeliveryStore::new`].
     pub fn open(
         path: impl AsRef<Path>,
         protected_key_path: impl AsRef<Path>,
     ) -> Result<Self, DeliveryError> {
-        let (connection, _key) =
-            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
-        Self::from_connection(connection)
+        let storage = Storage::open_managed(path.as_ref(), protected_key_path.as_ref())?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
 
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated in-memory `Storage`, then delegates to
+    /// [`WorkIntentDeliveryStore::new`].
     pub fn open_in_memory() -> Result<Self, DeliveryError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        let storage = Storage::open_in_memory(Cipher::None)?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
 
-    fn from_connection(connection: Connection) -> Result<Self, DeliveryError> {
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             CREATE TABLE IF NOT EXISTS work_intent_deliveries(
-               work_intent_id TEXT PRIMARY KEY,
-               incident_id TEXT NOT NULL,
-               requested_capability TEXT NOT NULL,
-               evidence_refs_json TEXT NOT NULL,
-               delivery_requirements TEXT NOT NULL,
-               state TEXT NOT NULL,
-               delivery_attempts INTEGER NOT NULL CHECK(delivery_attempts>=0),
-               claimed_connection_id TEXT,
-               acknowledged_agent_run TEXT,
-               failure_reason TEXT,
-               created_at_ms INTEGER NOT NULL,
-               expires_at_ms INTEGER NOT NULL,
-               delivered_at_ms INTEGER,
-               terminal_at_ms INTEGER,
-               revision INTEGER NOT NULL CHECK(revision>0));",
-        )?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+    /// Constructs a `WorkIntentDeliveryStore` over an already-open,
+    /// already-migrated, shared `Storage` — the `P1-ACCEPTANCE-STORE-001`
+    /// composition path.
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
     }
 
     pub fn enqueue(
@@ -213,28 +230,50 @@ impl WorkIntentDeliveryStore {
             DeliveryState::Queued
         };
         let terminal = (state == DeliveryState::Expired).then_some(now_ms);
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(existing) = load(&tx, intent.work_intent_id.as_str())? {
-            if existing.incident_id != intent.incident_id.as_str()
-                || existing.requested_capability != intent.requested_capability.as_str()
-                || existing.evidence_refs != refs
-                || existing.delivery_requirements != intent.delivery_requirements.description
-                || existing.created_at_ms != created_at_ms
-                || existing.expires_at_ms != expires_at_ms
-            {
-                return Err(DeliveryError::Conflict);
-            }
-            tx.commit()?;
-            return Ok(existing);
+
+        enum EnqueueOutcome {
+            UseExisting(Box<WorkIntentDeliveryRow>),
+            ConflictingExisting,
+            Inserted,
         }
-        tx.execute(
-            "INSERT INTO work_intent_deliveries(work_intent_id,incident_id,requested_capability,evidence_refs_json,delivery_requirements,state,delivery_attempts,created_at_ms,expires_at_ms,terminal_at_ms,revision) VALUES(?1,?2,?3,?4,?5,?6,0,?7,?8,?9,1)",
-            params![intent.work_intent_id.as_str(), intent.incident_id.as_str(), intent.requested_capability.as_str(), refs_json, intent.delivery_requirements.description, state.wire(), created_at_ms, expires_at_ms, terminal]
-        )?;
-        tx.commit()?;
-        drop(connection);
-        self.get(intent.work_intent_id.as_str())
+
+        let work_intent_id = intent.work_intent_id.as_str();
+        let outcome = self.storage.transaction(|tx| {
+            if let Some(existing) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, work_intent_id)?
+            {
+                let matches = existing.incident_id == intent.incident_id.as_str()
+                    && existing.requested_capability == intent.requested_capability.as_str()
+                    && existing.evidence_refs_json == refs_json
+                    && existing.delivery_requirements == intent.delivery_requirements.description
+                    && existing.created_at_ms == created_at_ms
+                    && existing.expires_at_ms == expires_at_ms;
+                if matches {
+                    return Ok(EnqueueOutcome::UseExisting(Box::new(existing)));
+                }
+                return Ok(EnqueueOutcome::ConflictingExisting);
+            }
+            loki_storage::agent_delivery::insert_work_intent_delivery_core(
+                tx,
+                &NewWorkIntentDelivery {
+                    work_intent_id: work_intent_id.to_string(),
+                    incident_id: intent.incident_id.as_str().to_string(),
+                    requested_capability: intent.requested_capability.as_str().to_string(),
+                    evidence_refs_json: refs_json.clone(),
+                    delivery_requirements: intent.delivery_requirements.description.clone(),
+                    state_wire: state.wire().to_string(),
+                    created_at_ms,
+                    expires_at_ms,
+                    terminal_at_ms: terminal,
+                },
+            )?;
+            Ok(EnqueueOutcome::Inserted)
+        })?;
+        match outcome {
+            EnqueueOutcome::ConflictingExisting => Err(DeliveryError::Conflict),
+            EnqueueOutcome::UseExisting(row) => row_to_record(*row),
+            EnqueueOutcome::Inserted => self.get(work_intent_id),
+        }
     }
 
     pub fn claim(
@@ -249,41 +288,81 @@ impl WorkIntentDeliveryStore {
         validate_now(now_ms)?;
         let expected_revision_sql = revision_sql(expected_revision)?;
         agents.authorize_scope(connection_id, secret, AgentScope::ReceiveWorkIntents)?;
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = load(&tx, work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        if now_ms >= current.expires_at_ms
-            && matches!(
-                current.state,
-                DeliveryState::Queued | DeliveryState::Delivered
-            )
-        {
-            expire_one(&tx, work_intent_id, now_ms)?;
-            tx.commit()?;
-            return Err(DeliveryError::Expired);
+
+        enum ClaimOutcome {
+            NotFound,
+            Expired,
+            AlreadyClaimedByThisConnection(WorkIntentDeliveryRow),
+            InvalidTransition,
+            RevisionConflict,
+            Claimed(WorkIntentDeliveryRow),
         }
-        if current.state == DeliveryState::Delivered
-            && current.claimed_connection_id.as_deref() == Some(connection_id)
-        {
-            tx.commit()?;
-            return Ok(current);
+
+        let outcome = self.storage.transaction(|tx| {
+            let Some(current) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, work_intent_id)?
+            else {
+                return Ok(ClaimOutcome::NotFound);
+            };
+            let current_state = DeliveryState::parse(&current.state).map_err(|_| {
+                LokiStorageError::InvalidState {
+                    field: "state",
+                    value: current.state.clone(),
+                }
+            })?;
+            if now_ms >= current.expires_at_ms
+                && matches!(
+                    current_state,
+                    DeliveryState::Queued | DeliveryState::Delivered
+                )
+            {
+                loki_storage::agent_delivery::update_work_intent_delivery_core(
+                    tx,
+                    WorkIntentDeliveryUpdate::ExpireOne {
+                        work_intent_id,
+                        now_ms,
+                    },
+                )?;
+                return Ok(ClaimOutcome::Expired);
+            }
+            if current_state == DeliveryState::Delivered
+                && current.claimed_connection_id.as_deref() == Some(connection_id)
+            {
+                return Ok(ClaimOutcome::AlreadyClaimedByThisConnection(current));
+            }
+            if current_state != DeliveryState::Queued {
+                return Ok(ClaimOutcome::InvalidTransition);
+            }
+            if u64::try_from(current.revision).unwrap_or(u64::MAX) != expected_revision {
+                return Ok(ClaimOutcome::RevisionConflict);
+            }
+            let changed = loki_storage::agent_delivery::update_work_intent_delivery_core(
+                tx,
+                WorkIntentDeliveryUpdate::Claim {
+                    work_intent_id,
+                    connection_id,
+                    now_ms,
+                    expected_revision: expected_revision_sql,
+                },
+            )?;
+            if changed != 1 {
+                return Ok(ClaimOutcome::RevisionConflict);
+            }
+            let Some(updated) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, work_intent_id)?
+            else {
+                return Ok(ClaimOutcome::NotFound);
+            };
+            Ok(ClaimOutcome::Claimed(updated))
+        })?;
+        match outcome {
+            ClaimOutcome::NotFound => Err(DeliveryError::NotFound),
+            ClaimOutcome::Expired => Err(DeliveryError::Expired),
+            ClaimOutcome::AlreadyClaimedByThisConnection(row) => row_to_record(row),
+            ClaimOutcome::InvalidTransition => Err(DeliveryError::InvalidTransition),
+            ClaimOutcome::RevisionConflict => Err(DeliveryError::Conflict),
+            ClaimOutcome::Claimed(row) => row_to_record(row),
         }
-        if current.state != DeliveryState::Queued {
-            return Err(DeliveryError::InvalidTransition);
-        }
-        if current.revision != expected_revision {
-            return Err(DeliveryError::Conflict);
-        }
-        let changed = tx.execute(
-            "UPDATE work_intent_deliveries SET state='delivered',delivery_attempts=delivery_attempts+1,claimed_connection_id=?1,delivered_at_ms=?2,revision=revision+1 WHERE work_intent_id=?3 AND state='queued' AND revision=?4",
-            params![connection_id, now_ms, work_intent_id, expected_revision_sql]
-        )?;
-        if changed != 1 {
-            return Err(DeliveryError::Conflict);
-        }
-        let record = load(&tx, work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        tx.commit()?;
-        Ok(record)
     }
 
     pub fn acknowledge(
@@ -299,33 +378,81 @@ impl WorkIntentDeliveryStore {
             AgentScope::ReceiveWorkIntents,
         )?;
         agents.require_run_for_connection(request.connection_id, request.run_id)?;
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = load(&tx, request.work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        if current.state == DeliveryState::Acknowledged
-            && current.claimed_connection_id.as_deref() == Some(request.connection_id)
-            && current.acknowledged_agent_run.as_deref() == Some(request.run_id)
-        {
-            tx.commit()?;
-            return Ok(current);
+
+        enum AcknowledgeOutcome {
+            NotFound,
+            AlreadyAcknowledgedByThisRun(WorkIntentDeliveryRow),
+            Expired,
+            InvalidTransition,
+            RevisionConflict,
+            Acknowledged(WorkIntentDeliveryRow),
         }
-        if request.now_ms >= current.expires_at_ms && current.state == DeliveryState::Delivered {
-            expire_one(&tx, request.work_intent_id, request.now_ms)?;
-            tx.commit()?;
-            return Err(DeliveryError::Expired);
+
+        let outcome = self.storage.transaction(|tx| {
+            let Some(current) = loki_storage::agent_delivery::get_work_intent_delivery_core(
+                tx,
+                request.work_intent_id,
+            )?
+            else {
+                return Ok(AcknowledgeOutcome::NotFound);
+            };
+            let current_state = DeliveryState::parse(&current.state).map_err(|_| {
+                LokiStorageError::InvalidState {
+                    field: "state",
+                    value: current.state.clone(),
+                }
+            })?;
+            if current_state == DeliveryState::Acknowledged
+                && current.claimed_connection_id.as_deref() == Some(request.connection_id)
+                && current.acknowledged_agent_run.as_deref() == Some(request.run_id)
+            {
+                return Ok(AcknowledgeOutcome::AlreadyAcknowledgedByThisRun(current));
+            }
+            if request.now_ms >= current.expires_at_ms && current_state == DeliveryState::Delivered
+            {
+                loki_storage::agent_delivery::update_work_intent_delivery_core(
+                    tx,
+                    WorkIntentDeliveryUpdate::ExpireOne {
+                        work_intent_id: request.work_intent_id,
+                        now_ms: request.now_ms,
+                    },
+                )?;
+                return Ok(AcknowledgeOutcome::Expired);
+            }
+            if current_state != DeliveryState::Delivered
+                || current.claimed_connection_id.as_deref() != Some(request.connection_id)
+            {
+                return Ok(AcknowledgeOutcome::InvalidTransition);
+            }
+            if u64::try_from(current.revision).unwrap_or(u64::MAX) != request.expected_revision {
+                return Ok(AcknowledgeOutcome::RevisionConflict);
+            }
+            loki_storage::agent_delivery::update_work_intent_delivery_core(
+                tx,
+                WorkIntentDeliveryUpdate::Acknowledge {
+                    work_intent_id: request.work_intent_id,
+                    run_id: request.run_id,
+                    now_ms: request.now_ms,
+                    expected_revision: expected_revision_sql,
+                },
+            )?;
+            let Some(updated) = loki_storage::agent_delivery::get_work_intent_delivery_core(
+                tx,
+                request.work_intent_id,
+            )?
+            else {
+                return Ok(AcknowledgeOutcome::NotFound);
+            };
+            Ok(AcknowledgeOutcome::Acknowledged(updated))
+        })?;
+        match outcome {
+            AcknowledgeOutcome::NotFound => Err(DeliveryError::NotFound),
+            AcknowledgeOutcome::AlreadyAcknowledgedByThisRun(row) => row_to_record(row),
+            AcknowledgeOutcome::Expired => Err(DeliveryError::Expired),
+            AcknowledgeOutcome::InvalidTransition => Err(DeliveryError::InvalidTransition),
+            AcknowledgeOutcome::RevisionConflict => Err(DeliveryError::Conflict),
+            AcknowledgeOutcome::Acknowledged(row) => row_to_record(row),
         }
-        if current.state != DeliveryState::Delivered
-            || current.claimed_connection_id.as_deref() != Some(request.connection_id)
-        {
-            return Err(DeliveryError::InvalidTransition);
-        }
-        if current.revision != request.expected_revision {
-            return Err(DeliveryError::Conflict);
-        }
-        tx.execute("UPDATE work_intent_deliveries SET state='acknowledged',acknowledged_agent_run=?1,terminal_at_ms=?2,revision=revision+1 WHERE work_intent_id=?3 AND revision=?4", params![request.run_id, request.now_ms, request.work_intent_id, expected_revision_sql])?;
-        let record = load(&tx, request.work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        tx.commit()?;
-        Ok(record)
     }
 
     /// Records the absence of a safe local agent route. Notification enqueue
@@ -358,20 +485,47 @@ impl WorkIntentDeliveryStore {
             return Err(DeliveryError::Conflict);
         }
         notifications.enqueue_work_intent(intent, now_ms)?;
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute("UPDATE work_intent_deliveries SET state='user_action_required',terminal_at_ms=?1,revision=revision+1 WHERE work_intent_id=?2 AND state='queued' AND revision=?3", params![now_ms, id, expected_revision_sql])?;
-        if changed != 1 {
-            let current = load(&tx, id)?.ok_or(DeliveryError::NotFound)?;
-            if current.state == DeliveryState::UserActionRequired {
-                tx.commit()?;
-                return Ok(current);
-            }
-            return Err(DeliveryError::Conflict);
+
+        enum RequireUserActionOutcome {
+            NotFound,
+            AlreadyUserActionRequired(WorkIntentDeliveryRow),
+            Conflict,
+            Updated(WorkIntentDeliveryRow),
         }
-        let record = load(&tx, id)?.ok_or(DeliveryError::NotFound)?;
-        tx.commit()?;
-        Ok(record)
+
+        let outcome = self.storage.transaction(|tx| {
+            let changed = loki_storage::agent_delivery::update_work_intent_delivery_core(
+                tx,
+                WorkIntentDeliveryUpdate::RequireUserAction {
+                    work_intent_id: id,
+                    now_ms,
+                    expected_revision: expected_revision_sql,
+                },
+            )?;
+            if changed != 1 {
+                let Some(current) =
+                    loki_storage::agent_delivery::get_work_intent_delivery_core(tx, id)?
+                else {
+                    return Ok(RequireUserActionOutcome::NotFound);
+                };
+                if current.state == DeliveryState::UserActionRequired.wire() {
+                    return Ok(RequireUserActionOutcome::AlreadyUserActionRequired(current));
+                }
+                return Ok(RequireUserActionOutcome::Conflict);
+            }
+            let Some(updated) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, id)?
+            else {
+                return Ok(RequireUserActionOutcome::NotFound);
+            };
+            Ok(RequireUserActionOutcome::Updated(updated))
+        })?;
+        match outcome {
+            RequireUserActionOutcome::NotFound => Err(DeliveryError::NotFound),
+            RequireUserActionOutcome::AlreadyUserActionRequired(row) => row_to_record(row),
+            RequireUserActionOutcome::Conflict => Err(DeliveryError::Conflict),
+            RequireUserActionOutcome::Updated(row) => row_to_record(row),
+        }
     }
 
     pub fn record_permanent_failure(
@@ -384,69 +538,98 @@ impl WorkIntentDeliveryStore {
         validate_now(now_ms)?;
         let expected_revision_sql = revision_sql(expected_revision)?;
         validate_text("reason", reason, MAX_FAILURE_REASON)?;
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = load(&tx, work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        if current.state != DeliveryState::Queued {
-            return Err(DeliveryError::InvalidTransition);
+
+        enum FailureOutcome {
+            NotFound,
+            InvalidTransition,
+            Expired,
+            RevisionConflict,
+            Recorded(Box<WorkIntentDeliveryRow>),
         }
-        if now_ms >= current.expires_at_ms {
-            expire_one(&tx, work_intent_id, now_ms)?;
-            tx.commit()?;
-            return Err(DeliveryError::Expired);
+
+        let outcome = self.storage.transaction(|tx| {
+            let Some(current) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, work_intent_id)?
+            else {
+                return Ok(FailureOutcome::NotFound);
+            };
+            if current.state != DeliveryState::Queued.wire() {
+                return Ok(FailureOutcome::InvalidTransition);
+            }
+            if now_ms >= current.expires_at_ms {
+                loki_storage::agent_delivery::update_work_intent_delivery_core(
+                    tx,
+                    WorkIntentDeliveryUpdate::ExpireOne {
+                        work_intent_id,
+                        now_ms,
+                    },
+                )?;
+                return Ok(FailureOutcome::Expired);
+            }
+            if u64::try_from(current.revision).unwrap_or(u64::MAX) != expected_revision {
+                return Ok(FailureOutcome::RevisionConflict);
+            }
+            loki_storage::agent_delivery::update_work_intent_delivery_core(
+                tx,
+                WorkIntentDeliveryUpdate::RecordPermanentFailure {
+                    work_intent_id,
+                    reason,
+                    now_ms,
+                    expected_revision: expected_revision_sql,
+                },
+            )?;
+            let Some(updated) =
+                loki_storage::agent_delivery::get_work_intent_delivery_core(tx, work_intent_id)?
+            else {
+                return Ok(FailureOutcome::NotFound);
+            };
+            Ok(FailureOutcome::Recorded(Box::new(updated)))
+        })?;
+        match outcome {
+            FailureOutcome::NotFound => Err(DeliveryError::NotFound),
+            FailureOutcome::InvalidTransition => Err(DeliveryError::InvalidTransition),
+            FailureOutcome::Expired => Err(DeliveryError::Expired),
+            FailureOutcome::RevisionConflict => Err(DeliveryError::Conflict),
+            FailureOutcome::Recorded(row) => row_to_record(*row),
         }
-        if current.revision != expected_revision {
-            return Err(DeliveryError::Conflict);
-        }
-        tx.execute("UPDATE work_intent_deliveries SET state='failed',failure_reason=?1,terminal_at_ms=?2,revision=revision+1 WHERE work_intent_id=?3 AND revision=?4", params![reason, now_ms, work_intent_id, expected_revision_sql])?;
-        let record = load(&tx, work_intent_id)?.ok_or(DeliveryError::NotFound)?;
-        tx.commit()?;
-        Ok(record)
     }
 
     pub fn expire_due(&self, now_ms: i64) -> Result<usize, DeliveryError> {
         validate_now(now_ms)?;
-        Ok(self.lock()?.execute("UPDATE work_intent_deliveries SET state='expired',terminal_at_ms=?1,revision=revision+1 WHERE expires_at_ms<=?1 AND state IN ('queued','delivered')", [now_ms])?)
+        Ok(self.storage.expire_due_work_intent_deliveries(now_ms)?)
     }
 
     pub fn get(&self, work_intent_id: &str) -> Result<DeliveryRecord, DeliveryError> {
-        let connection = self.lock()?;
-        load(&connection, work_intent_id)?.ok_or(DeliveryError::NotFound)
-    }
-
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, DeliveryError> {
-        self.connection
-            .lock()
-            .map_err(|_| DeliveryError::Concurrency)
+        let row = self
+            .storage
+            .get_work_intent_delivery(work_intent_id)?
+            .ok_or(DeliveryError::NotFound)?;
+        row_to_record(row)
     }
 }
 
-fn expire_one(connection: &Connection, id: &str, now_ms: i64) -> Result<(), DeliveryError> {
-    connection.execute("UPDATE work_intent_deliveries SET state='expired',terminal_at_ms=?1,revision=revision+1 WHERE work_intent_id=?2 AND state IN ('queued','delivered')", params![now_ms, id])?;
-    Ok(())
-}
-
-fn load(connection: &Connection, id: &str) -> Result<Option<DeliveryRecord>, DeliveryError> {
-    connection.query_row(
-        "SELECT work_intent_id,incident_id,requested_capability,evidence_refs_json,delivery_requirements,state,delivery_attempts,claimed_connection_id,acknowledged_agent_run,failure_reason,created_at_ms,expires_at_ms,delivered_at_ms,terminal_at_ms,revision FROM work_intent_deliveries WHERE work_intent_id=?1",
-        [id],
-        |row| {
-            let refs_json: String = row.get(3)?;
-            let refs: Vec<String> = serde_json::from_str(&refs_json).map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
-            let state: String = row.get(5)?;
-            let attempts: i64 = row.get(6)?;
-            let revision: i64 = row.get(14)?;
-            Ok((state, attempts, revision, refs, row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(4)?, row.get::<_, Option<String>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?, row.get::<_, Option<i64>>(12)?, row.get::<_, Option<i64>>(13)?))
-        }
-    ).optional()?.map(|(state, attempts, revision, evidence_refs, work_intent_id, incident_id, requested_capability, delivery_requirements, claimed_connection_id, acknowledged_agent_run, failure_reason, created_at_ms, expires_at_ms, delivered_at_ms, terminal_at_ms)| {
-        Ok(DeliveryRecord {
-            work_intent_id, incident_id, requested_capability, evidence_refs, delivery_requirements,
-            state: DeliveryState::parse(&state)?,
-            delivery_attempts: u32::try_from(attempts).map_err(|_| DeliveryError::Corrupt("invalid delivery attempts"))?,
-            claimed_connection_id, acknowledged_agent_run, failure_reason, created_at_ms, expires_at_ms, delivered_at_ms, terminal_at_ms,
-            revision: u64::try_from(revision).map_err(|_| DeliveryError::Corrupt("invalid revision"))?,
-        })
-    }).transpose()
+fn row_to_record(row: WorkIntentDeliveryRow) -> Result<DeliveryRecord, DeliveryError> {
+    let evidence_refs: Vec<String> = serde_json::from_str(&row.evidence_refs_json)
+        .map_err(|_| DeliveryError::Corrupt("evidence decoding failed"))?;
+    Ok(DeliveryRecord {
+        work_intent_id: row.work_intent_id,
+        incident_id: row.incident_id,
+        requested_capability: row.requested_capability,
+        evidence_refs,
+        delivery_requirements: row.delivery_requirements,
+        state: DeliveryState::parse(&row.state)?,
+        delivery_attempts: u32::try_from(row.delivery_attempts)
+            .map_err(|_| DeliveryError::Corrupt("invalid delivery attempts"))?,
+        claimed_connection_id: row.claimed_connection_id,
+        acknowledged_agent_run: row.acknowledged_agent_run,
+        failure_reason: row.failure_reason,
+        created_at_ms: row.created_at_ms,
+        expires_at_ms: row.expires_at_ms,
+        delivered_at_ms: row.delivered_at_ms,
+        terminal_at_ms: row.terminal_at_ms,
+        revision: u64::try_from(row.revision)
+            .map_err(|_| DeliveryError::Corrupt("invalid revision"))?,
+    })
 }
 
 fn validate_now(value: i64) -> Result<(), DeliveryError> {

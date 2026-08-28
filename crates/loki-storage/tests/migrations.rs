@@ -86,8 +86,8 @@ fn fresh_storage_reports_which_versions_it_applied() {
     let report = storage.run_migrations(common::T0).unwrap();
     assert_eq!(
         report.applied_versions,
-        vec![1, 2, 3],
-        "all three embedded migrations must apply in order"
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "all nine embedded migrations must apply in order"
     );
     assert!(!report.is_up_to_date());
 }

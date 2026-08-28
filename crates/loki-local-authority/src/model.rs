@@ -59,6 +59,16 @@ pub struct LocalInstallation {
     pub created_at_ms: i64,
 }
 
+/// `P1-PRINCIPAL-GRANT-001` (ADR-0007 Option B): `generation` is a real,
+/// durable, per-`principal_sid` counter assigned atomically by the storage
+/// layer (`loki_storage::local_authority::insert_authority_session_core`'s
+/// `MAX(generation)+1`-then-`INSERT`, under one `Storage::lock()`-held
+/// critical section) — never computed or assumed by this crate. This is
+/// entirely independent of `crates/loki-agents`'s `AgentCredential`
+/// generation sequence: revoking one Windows-principal's session generation
+/// never cascades to revoke any agent connection, and vice versa (ADR-0007
+/// explicitly declines a shared "one kill switch" property — see that
+/// decision's "Consequences" section).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalSession {
     pub session_id: String,
@@ -69,6 +79,14 @@ pub struct LocalSession {
     pub issued_at_ms: i64,
     pub expires_at_ms: i64,
     pub revoked_at_ms: Option<i64>,
+    /// Always overwritten by the storage layer's atomic assignment before
+    /// this value reaches any caller — never trust this placeholder
+    /// directly. [`LocalSession::issue`] sets it to `0` only because a
+    /// value must exist before the storage layer's real assignment is
+    /// known; `crates/loki-local-authority/src/store.rs`'s `issue_session`
+    /// always substitutes the real, storage-assigned generation before
+    /// returning.
+    pub generation: u64,
 }
 
 impl LocalSession {
@@ -106,6 +124,8 @@ impl LocalSession {
             issued_at_ms: now_ms,
             expires_at_ms,
             revoked_at_ms: None,
+            // Placeholder — see this field's doc comment above.
+            generation: 0,
         })
     }
 }

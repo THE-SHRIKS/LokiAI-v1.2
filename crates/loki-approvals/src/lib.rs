@@ -2,16 +2,36 @@
 //!
 //! Approval is authority to consume one exact request once; it is never a
 //! general capability or operation result. This crate performs no operation.
+//!
+//! # `P1-ACCEPTANCE-STORE-001` consolidation
+//!
+//! Previously wrapped its own independent `Mutex<Connection>`, opened via
+//! `loki_storage::open_or_migrate_sqlcipher`/`Connection::open_in_memory()`,
+//! running its own ad hoc `CREATE TABLE IF NOT EXISTS local_approvals`
+//! schema. Now wraps a shared `loki_storage::Storage`, with schema owned by
+//! `loki-storage`'s own versioned migrations (`migrations/0004_approvals.sql`)
+//! and all SQL moved into `loki_storage::approvals`. This is what makes a
+//! real cross-repository `Storage::transaction()`
+//! (`Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md`,
+//! `crates/loki-acceptance-store`) possible: that transaction consumes an
+//! approval via `loki_storage::approvals::consume_approval_core` in the
+//! same transaction as its job/outbox/mutation-acceptance writes — no
+//! second commit.
 
-use std::{fmt, path::Path, sync::Mutex};
+use std::{fmt, path::Path, sync::Arc};
 
 use loki_local_authority::{AuthorityError, LocalAuthority, LocalCapability, LocalContext};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use loki_storage::approvals::{ApprovalsRepository, ConsumeOutcome, NewApproval};
+use loki_storage::{Cipher, Storage};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const MAX_FIELD: usize = 256;
 const MAX_REASON: usize = 2_000;
+
+/// See `crates/loki-local-authority/src/store.rs`'s identical constant doc
+/// comment — the same rationale applies here.
+const BACK_COMPAT_MIGRATION_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyDecision {
@@ -153,46 +173,35 @@ impl From<loki_storage::StorageError> for ApprovalError {
 }
 
 pub struct ApprovalStore {
-    connection: Mutex<Connection>,
+    storage: Arc<Storage>,
 }
 
 impl ApprovalStore {
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated `Storage` at `path` (Windows DPAPI-managed SQLCipher),
+    /// then delegates to [`ApprovalStore::new`].
     pub fn open(
         path: impl AsRef<Path>,
         protected_key_path: impl AsRef<Path>,
     ) -> Result<Self, ApprovalError> {
-        let (connection, _key) =
-            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
-        Self::from_connection(connection)
+        let storage = Storage::open_managed(path.as_ref(), protected_key_path.as_ref())?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
+
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated in-memory `Storage`, then delegates to
+    /// [`ApprovalStore::new`].
     pub fn open_in_memory() -> Result<Self, ApprovalError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        let storage = Storage::open_in_memory(Cipher::None)?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
-    fn from_connection(connection: Connection) -> Result<Self, ApprovalError> {
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS local_approvals (
-               approval_id TEXT PRIMARY KEY,
-               request_digest TEXT NOT NULL UNIQUE,
-               requester_sid TEXT NOT NULL,
-               actor_id TEXT NOT NULL,
-               operation TEXT NOT NULL,
-               target_id TEXT NOT NULL,
-               artifact_digest TEXT,
-               parameters_digest TEXT NOT NULL,
-               idempotency_key TEXT NOT NULL,
-               reason TEXT NOT NULL,
-               requested_at_ms INTEGER NOT NULL,
-               expires_at_ms INTEGER NOT NULL,
-               granted_at_ms INTEGER,
-               granted_by_sid TEXT,
-               consumed_at_ms INTEGER,
-               CHECK (expires_at_ms > requested_at_ms)
-             );",
-        )?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+
+    /// Constructs an `ApprovalStore` over an already-open, already-migrated,
+    /// shared `Storage` — the `P1-ACCEPTANCE-STORE-001` composition path.
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
     }
 
     pub fn create(
@@ -246,28 +255,20 @@ impl ApprovalStore {
             granted_by_sid: None,
             consumed_at_ms: None,
         };
-        let connection = self.lock()?;
-        connection.execute(
-            "INSERT INTO local_approvals
-             (approval_id, request_digest, requester_sid, actor_id, operation,
-              target_id, artifact_digest, parameters_digest, idempotency_key,
-              reason, requested_at_ms, expires_at_ms)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-            params![
-                record.approval_id,
-                record.request_digest,
-                record.requester_sid,
-                record.actor_id,
-                record.operation,
-                record.target_id,
-                record.artifact_digest,
-                record.parameters_digest,
-                record.idempotency_key,
-                record.reason,
-                record.requested_at_ms,
-                record.expires_at_ms
-            ],
-        )?;
+        self.storage.insert_approval(&NewApproval {
+            approval_id: record.approval_id.clone(),
+            request_digest: record.request_digest.clone(),
+            requester_sid: record.requester_sid.clone(),
+            actor_id: record.actor_id.clone(),
+            operation: record.operation.clone(),
+            target_id: record.target_id.clone(),
+            artifact_digest: record.artifact_digest.clone(),
+            parameters_digest: record.parameters_digest.clone(),
+            idempotency_key: record.idempotency_key.clone(),
+            reason: record.reason.clone(),
+            requested_at_ms: record.requested_at_ms,
+            expires_at_ms: record.expires_at_ms,
+        })?;
         Ok(record)
     }
 
@@ -285,8 +286,10 @@ impl ApprovalStore {
             LocalCapability::RequestConsequentialApproval,
             now_ms,
         )?;
-        let connection = self.lock()?;
-        let record = load(&connection, approval_id)?.ok_or(ApprovalError::NotFound)?;
+        let record = self
+            .storage
+            .get_approval(approval_id)?
+            .ok_or(ApprovalError::NotFound)?;
         if record.requester_sid != context.principal_sid() {
             return Err(ApprovalError::BindingMismatch);
         }
@@ -296,12 +299,10 @@ impl ApprovalStore {
         if record.granted_at_ms.is_some() {
             return Err(ApprovalError::AlreadyGranted);
         }
-        let changed = connection.execute(
-            "UPDATE local_approvals SET granted_at_ms=?1, granted_by_sid=?2
-             WHERE approval_id=?3 AND granted_at_ms IS NULL",
-            params![now_ms, context.principal_sid(), approval_id],
-        )?;
-        if changed != 1 {
+        let granted = self
+            .storage
+            .grant_approval(approval_id, context.principal_sid(), now_ms)?;
+        if !granted {
             return Err(ApprovalError::AlreadyGranted);
         }
         Ok(())
@@ -323,73 +324,20 @@ impl ApprovalStore {
             now_ms,
         )?;
         let expected = request.digest(context.principal_sid())?;
-        let mut connection = self.lock()?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let record = load(&transaction, approval_id)?.ok_or(ApprovalError::NotFound)?;
-        if record.request_digest != expected || record.requester_sid != context.principal_sid() {
-            return Err(ApprovalError::BindingMismatch);
+        match self.storage.consume_approval(
+            approval_id,
+            &expected,
+            context.principal_sid(),
+            now_ms,
+        )? {
+            ConsumeOutcome::NotFound => Err(ApprovalError::NotFound),
+            ConsumeOutcome::BindingMismatch => Err(ApprovalError::BindingMismatch),
+            ConsumeOutcome::NotGranted => Err(ApprovalError::NotGranted),
+            ConsumeOutcome::Expired => Err(ApprovalError::Expired),
+            ConsumeOutcome::AlreadyConsumed => Err(ApprovalError::AlreadyConsumed),
+            ConsumeOutcome::Consumed(_) => Ok(()),
         }
-        if record.granted_at_ms.is_none() {
-            return Err(ApprovalError::NotGranted);
-        }
-        if now_ms >= record.expires_at_ms {
-            return Err(ApprovalError::Expired);
-        }
-        if record.consumed_at_ms.is_some() {
-            return Err(ApprovalError::AlreadyConsumed);
-        }
-        let changed = transaction.execute(
-            "UPDATE local_approvals SET consumed_at_ms=?1
-             WHERE approval_id=?2 AND consumed_at_ms IS NULL",
-            params![now_ms, approval_id],
-        )?;
-        if changed != 1 {
-            return Err(ApprovalError::AlreadyConsumed);
-        }
-        transaction.commit()?;
-        Ok(())
     }
-
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, ApprovalError> {
-        self.connection
-            .lock()
-            .map_err(|_| ApprovalError::Conflict("approval database lock poisoned".to_string()))
-    }
-}
-
-fn load(
-    connection: &Connection,
-    approval_id: &str,
-) -> Result<Option<ApprovalRecord>, ApprovalError> {
-    connection
-        .query_row(
-            "SELECT approval_id,request_digest,requester_sid,actor_id,operation,
-                target_id,artifact_digest,parameters_digest,idempotency_key,reason,
-                requested_at_ms,expires_at_ms,granted_at_ms,granted_by_sid,consumed_at_ms
-         FROM local_approvals WHERE approval_id=?1",
-            [approval_id],
-            |row| {
-                Ok(ApprovalRecord {
-                    approval_id: row.get(0)?,
-                    request_digest: row.get(1)?,
-                    requester_sid: row.get(2)?,
-                    actor_id: row.get(3)?,
-                    operation: row.get(4)?,
-                    target_id: row.get(5)?,
-                    artifact_digest: row.get(6)?,
-                    parameters_digest: row.get(7)?,
-                    idempotency_key: row.get(8)?,
-                    reason: row.get(9)?,
-                    requested_at_ms: row.get(10)?,
-                    expires_at_ms: row.get(11)?,
-                    granted_at_ms: row.get(12)?,
-                    granted_by_sid: row.get(13)?,
-                    consumed_at_ms: row.get(14)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
 }
 
 fn validate(field: &'static str, value: &str, max: usize) -> Result<(), ApprovalError> {
@@ -405,7 +353,7 @@ fn validate(field: &'static str, value: &str, max: usize) -> Result<(), Approval
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Barrier};
+    use std::sync::Barrier;
 
     fn setup() -> (LocalAuthority, LocalContext, String, ApprovalStore) {
         // Even the in-memory path shares this process-wide SQLite

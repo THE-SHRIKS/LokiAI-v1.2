@@ -36,6 +36,47 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "outbox_inbox",
         sql: include_str!("../migrations/0003_outbox_inbox.sql"),
     },
+    // P1-ACCEPTANCE-STORE-001: consolidates `loki-approvals`/`loki-agents`/
+    // `loki-agent-delivery`/`loki-local-authority`'s previously independent
+    // per-crate SQLite connections into this one runtime-owned database, so
+    // a real cross-repository `Storage::transaction()` is possible (see
+    // `Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md`).
+    // Append-only, in this exact order, after `0003` — never edit `0001`-`0003`.
+    Migration {
+        version: 4,
+        name: "approvals",
+        sql: include_str!("../migrations/0004_approvals.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "agents",
+        sql: include_str!("../migrations/0005_agents.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "agent_delivery_and_local_authority",
+        sql: include_str!("../migrations/0006_agent_delivery_and_local_authority.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "mutation_acceptances",
+        sql: include_str!("../migrations/0007_mutation_acceptances.sql"),
+    },
+    // P1-PRINCIPAL-GRANT-001 (ADR-0007 Option B): additive, independent
+    // durable generation counters for each identity model — see
+    // `crates/loki-storage/src/{local_authority.rs,agents.rs}`'s module doc
+    // comments. Append-only, in this exact order, after `0007` — never edit
+    // `0001`-`0007`.
+    Migration {
+        version: 8,
+        name: "local_authority_grant_generation",
+        sql: include_str!("../migrations/0008_local_authority_grant_generation.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "agent_grant_generation",
+        sql: include_str!("../migrations/0009_agent_grant_generation.sql"),
+    },
 ];
 
 /// What [`crate::Storage::run_migrations`] actually did on a given call.
@@ -122,18 +163,21 @@ mod tests {
         crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let report = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
-        assert_eq!(report.applied_versions, vec![1, 2, 3]);
+        assert_eq!(report.applied_versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         let table_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('devices', 'jobs', 'outbox_messages', 'inbox_messages', 'schema_migrations')",
+                 ('devices', 'jobs', 'outbox_messages', 'inbox_messages', 'schema_migrations',
+                  'local_approvals', 'agent_connections', 'agent_runs', 'agent_run_events',
+                  'work_intent_deliveries', 'local_installation_authority',
+                  'local_authority_sessions', 'mutation_acceptances')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(
-            table_count, 5,
+            table_count, 13,
             "every migration's tables plus the bookkeeping table must exist"
         );
     }
@@ -143,7 +187,7 @@ mod tests {
         crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let first = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
-        assert_eq!(first.applied_versions.len(), 3);
+        assert_eq!(first.applied_versions.len(), 9);
 
         let second = apply_all(&mut conn, MIGRATIONS, "2026-01-02T00:00:00Z").unwrap();
         assert!(second.is_up_to_date(), "second run must apply nothing new");
@@ -151,7 +195,7 @@ mod tests {
         let recorded: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(recorded, 3, "must not duplicate schema_migrations rows");
+        assert_eq!(recorded, 9, "must not duplicate schema_migrations rows");
     }
 
     #[test]

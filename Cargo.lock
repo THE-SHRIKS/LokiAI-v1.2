@@ -237,6 +237,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loki-acceptance-store"
+version = "1.2.0"
+dependencies = [
+ "loki-mutation-contract",
+ "loki-storage",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "loki-agent-delivery"
 version = "1.2.0"
 dependencies = [
