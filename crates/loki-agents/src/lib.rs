@@ -484,6 +484,20 @@ impl AgentRegistry {
         Ok(run)
     }
 
+    /// Transitions `run_id` to a terminal `state`.
+    ///
+    /// # Idempotency (`P1-AGENT-MUTATION-IDEMP-001`, `ADR-0008` Option B)
+    ///
+    /// A retry of an already-completed transition to the **same** terminal
+    /// `state` is the "real domain effect" half of this method's role in the
+    /// `MutationMethod::AgentRunUpdate` two-call composition
+    /// (`loki_acceptance_store::accept_mutation` first, then this call): it
+    /// returns `Ok(())` by replaying the original success without writing
+    /// anything (so a caller that crashed after the storage write but before
+    /// observing the result can safely retry both calls); a retry that
+    /// requests a **different** terminal `state` than the one already
+    /// recorded is a genuinely conflicting second transition and is still
+    /// denied with `Err(AgentError::TerminalRun)`.
     pub fn finish_run(
         &self,
         connection_id: &str,
@@ -501,6 +515,12 @@ impl AgentRegistry {
             return Err(AgentError::AuthenticationFailed);
         }
         if run.state.terminal() {
+            if run.state == state {
+                // Identical retry of an already-completed transition: replay
+                // the original success without performing a write (do not
+                // advance `completed_at_ms` to this call's `now_ms`).
+                return Ok(());
+            }
             return Err(AgentError::TerminalRun);
         }
         self.storage
@@ -774,16 +794,61 @@ mod tests {
             4200,
         )
         .unwrap();
+        // `P1-AGENT-MUTATION-IDEMP-001` (`ADR-0008`): a retry of the same
+        // already-recorded terminal transition replays the original success
+        // rather than erroring.
+        r.finish_run(
+            &c.connection_id,
+            secret,
+            &run.run_id,
+            RunState::Failed,
+            4300,
+        )
+        .unwrap();
+        // A retry requesting a *different* terminal state than the one
+        // already recorded is a genuine conflict and is still denied.
         assert!(matches!(
             r.finish_run(
                 &c.connection_id,
                 secret,
                 &run.run_id,
-                RunState::Failed,
-                4300
+                RunState::Succeeded,
+                4400
             ),
             Err(AgentError::TerminalRun)
         ));
+    }
+    #[test]
+    fn finish_run_retry_of_identical_transition_is_idempotent() {
+        // `P1-AGENT-MUTATION-IDEMP-001` (`ADR-0008` Option B): proves the
+        // replay path performs no write — `completed_at_ms` stays pinned to
+        // the first call's `now_ms`, not the retry's.
+        let (_, _, _, r, c) = setup(&all());
+        let secret = c.secret.expose_for_client_configuration();
+        let run = r
+            .start_run(&c.connection_id, secret, "i", None, 4000)
+            .unwrap();
+        r.finish_run(
+            &c.connection_id,
+            secret,
+            &run.run_id,
+            RunState::Succeeded,
+            4200,
+        )
+        .unwrap();
+        r.finish_run(
+            &c.connection_id,
+            secret,
+            &run.run_id,
+            RunState::Succeeded,
+            9999,
+        )
+        .unwrap();
+        let reloaded = r
+            .require_run_for_connection(&c.connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(reloaded.state, RunState::Succeeded);
+        assert_eq!(reloaded.completed_at_ms, Some(4200));
     }
     #[test]
     fn restart_preserves_revocation() {

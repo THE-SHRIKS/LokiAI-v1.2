@@ -62,3 +62,31 @@ tempfile = "=3.27.0"
 # this crate's own `[dev-dependencies]`-gated build only. Mirrors every
 # sibling crate's identical self-referential dev-dependency.
 loki-storage = { path = "../loki-storage", features = ["test-support"] }
+
+# `P1-AGENT-MUTATION-IDEMP-001` (ADR-0008 Option B): test-only, proving the
+# cross-crate two-call composition (this crate's `accept_mutation` gate,
+# then the real per-method domain effect) is crash-safe
+# (`tests/agent_mutation_composition.rs`). Deliberately `[dev-dependencies]`
+# only, never `[dependencies]` — this crate's production dependency set and
+# the "deliberate deviation" comment above stand unchanged and unchallenged
+# by this node; a test proving an external composition property is a
+# test-only concern, not a production dependency.
+loki-agents = { path = "../loki-agents" }
+loki-agent-delivery = { path = "../loki-agent-delivery" }
+# `AgentRegistry::register` (called by this crate's new test file to seed a
+# real agent connection with a real, authenticatable secret) takes
+# `&loki_local_authority::LocalAuthority`/`&LocalContext` by reference —
+# `loki-agents` does not re-export these types, so a caller naming them
+# concretely (as this crate's tests must, to construct and pass them) needs
+# its own direct dependency on the same crate, exactly as
+# `loki-agent-delivery`'s own `[dev-dependencies]` already do for its
+# equivalent tests.
+loki-local-authority = { path = "../loki-local-authority" }
+# The `WorkIntentAcknowledge` composition test needs a real `WorkIntent` to
+# enqueue/claim/acknowledge (mirroring `loki-agent-delivery`'s own full-flow
+# test setup) — `loki-incidents` owns `WorkIntent`/`DeliveryRequirements`/
+# `IncidentId`, and `loki-connectors-sdk` owns the `CapabilityId` a work
+# intent's `requested_capability` field requires. Both test-only, mirroring
+# `loki-agent-delivery/Cargo.toml`'s identical dev-dependency pair.
+loki-incidents = { path = "../loki-incidents" }
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
