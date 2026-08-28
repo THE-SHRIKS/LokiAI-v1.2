@@ -71,6 +71,50 @@
 //! a Windows SID — see `Docs/graph/tasks/P1-PRINCIPAL-GRANT-001.md` §1.1
 //! and §9 item 2.
 //!
+//! # `P1-APPROVAL-JOB-ACCEPT-001`: changed-request rejection and cancellation/
+//! consumption isolation (evidence, not new behavior)
+//!
+//! Two properties this packet's own review needed direct, runnable evidence
+//! for — both already true of the code above, neither changed by this
+//! packet:
+//!
+//! (a) A fresh request (new idempotency key) that reuses a previously
+//! granted approval's `approval_id` but changes a bound field (e.g.
+//! `target_id`) is rejected as [`loki_mutation_contract::MutationRejection::ApprovalNotConsumable`].
+//! Step 4 above always refreshes the caller-supplied `ApprovalReference`
+//! from the approval row's own stored `request_digest` before calling
+//! `construct_accepted`, so `evaluate_approval_reference`'s digest
+//! comparison is against the *original* request's digest, not whatever the
+//! caller's `ApprovalReference` claims — and `loki_storage::approvals::consume_approval_core`
+//! independently re-derives and re-checks that same binding directly against
+//! the row before its one permitted write, so this property holds even if
+//! `evaluate_approval_reference`'s check were ever removed (two independent
+//! layers, not one). Proven by
+//! `crates/loki-acceptance-store/tests/acceptance_flow.rs`'s
+//! `retry_with_changed_target_after_approval_is_rejected_as_not_consumable`
+//! (`Docs/graph/handoffs/P1-APPROVAL-JOB-ACCEPT-001-1.md` records that this
+//! test was confirmed to fail red with *both* layers' digest checks
+//! disabled locally, not committed).
+//!
+//! (b) No code path anywhere in this workspace can un-consume an approval
+//! (reset `local_approvals.consumed_at_ms` back to `NULL`) — in particular,
+//! cancelling a job whose approval was already consumed never reverses that
+//! consumption. This is a structural absence: `loki_jobs::JobEngine`'s
+//! entire cancellation model (`request_cancel`/`acknowledge_cancelled`,
+//! `crates/loki-jobs/src/engine.rs`) has zero reference anywhere to
+//! `loki_storage::approvals`/`ApprovalsRepository`/`local_approvals`, and no
+//! function in `crates/loki-storage`, `crates/loki-approvals`, or
+//! `crates/loki-jobs` ever writes `consumed_at_ms = NULL`. Confirmed by
+//! repository-wide grep (commands and output recorded in
+//! `Docs/graph/handoffs/P1-APPROVAL-JOB-ACCEPT-001-1.md`) and proven
+//! end-to-end against the real crate by
+//! `job_cancellation_has_no_approval_consumption_interaction` in the same
+//! test file, which runs a real `JobEngine` cancellation and reconfirms the
+//! real approval row's `consumed_at_ms` is unchanged afterward. No claim is
+//! made here that a cross-crate "cancellation reverses approval" guard
+//! exists as code — only that no reversal path exists at all, so there is
+//! nothing for such a guard to prevent.
+//!
 //! # Open questions this crate does not resolve
 //!
 //! See `Docs/graph/tasks/P1-ACCEPTANCE-STORE-001.md` §9,

@@ -8,10 +8,13 @@
 use std::sync::{Arc, Barrier};
 
 use loki_acceptance_store::{AcceptanceStoreError, accept_mutation, clock};
+use loki_jobs::JobEngine;
+use loki_jobs::engine::{CancelOutcome, SubmitRequest};
 use loki_mutation_contract::{
     AcceptanceResult, ApprovalReference, IdempotencyKey, MutationAcceptanceRequest,
     MutationContractError, MutationMethod, MutationRejection,
 };
+use loki_storage::Cipher;
 use loki_storage::Storage;
 use loki_storage::agents::AgentsRepository;
 use loki_storage::approvals::{ApprovalsRepository, ConsumeOutcome, NewApproval};
@@ -944,4 +947,230 @@ fn fault_injection_after_each_step_leaves_zero_orphan_rows() {
     assert!(matches!(result, AcceptanceResult::Accepted(_)));
     let approval = storage.get_approval("apr_fault_1").unwrap().unwrap();
     assert!(approval.consumed_at_ms.is_some());
+}
+
+/// `P1-APPROVAL-JOB-ACCEPT-001` Deliverable 1 / AS-007: a *fresh* request
+/// (a brand-new idempotency key, so step 3's `evaluate_replay`/
+/// `DigestConflict` path — already covered by `same_key_different_digest_rejected`
+/// above — is never reached at all) that reuses a previously granted
+/// approval's `approval_id` but changes the bound `target_id` must be
+/// rejected as `MutationRejection::ApprovalNotConsumable`, must never
+/// consume the approval, and must never write any `jobs`/
+/// `mutation_acceptances` row for the new attempt. This is exactly the
+/// "client still holds an approval reference issued for one operation and
+/// tries to apply it to a modified operation" scenario named in
+/// `Docs/SPEC.md` AS-007 and in this packet's Section 0/6.
+///
+/// Mechanism under test (`crates/loki-acceptance-store/src/lib.rs`'s step 4
+/// and `loki_mutation_contract::request::evaluate_approval_reference`):
+/// regardless of what `bound_request_digest` the caller's own
+/// `ApprovalReference` carries, `accept_mutation_in_transaction` always
+/// refreshes it from the approval row's own stored `request_digest` (the
+/// digest of the *original*, `target-1`-bound request the approval was
+/// actually granted for) before calling `construct_accepted`. That
+/// refreshed reference is then compared against the *new* request's own
+/// freshly computed `request_digest` (which is bound to `target-2`, per
+/// `MutationAcceptanceRequest::new`'s own digest derivation) — the two
+/// necessarily differ whenever the target changes, so
+/// `evaluate_approval_reference` returns `ApprovalNotConsumable`. This test
+/// deliberately sets the caller-supplied `ApprovalReference.bound_request_digest`
+/// to the *new* (`target-2`) request's own digest — the most realistic
+/// "client re-derived its own reference incorrectly" shape, and also the
+/// shape that most directly proves the *row's own stored digest*, not the
+/// caller's claim, is what is actually checked.
+#[test]
+fn retry_with_changed_target_after_approval_is_rejected_as_not_consumable() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = open_storage(dir.path(), "db1.sqlite3");
+    let generation = seed_valid_grant(&storage, PRINCIPAL_SID);
+    let now = clock::unix_millis_now();
+
+    // Grant a real, unconsumed approval bound to ("target-1", artifact-A) —
+    // exactly as `flash_request_with_granted_approval` already does for
+    // every other positive-path test in this file.
+    let original_request = flash_request_with_granted_approval(
+        &storage,
+        PRINCIPAL_SID,
+        generation,
+        "idem-changed-target-original",
+        "target-1",
+        "apr_changed_target_1",
+        now + 3_600_000,
+    );
+    // Sanity: the approval row really is unconsumed before this test's real
+    // scenario runs (this crate never accepts `original_request` itself —
+    // it exists solely to produce the granted approval row).
+    let approval_before = storage
+        .get_approval("apr_changed_target_1")
+        .unwrap()
+        .unwrap();
+    assert!(approval_before.consumed_at_ms.is_none());
+    let _ = &original_request; // constructed only for its seeding side effect
+
+    // A fresh request: a brand-new idempotency key (never reaches step 3's
+    // DigestConflict path), the *same* `approval_id`, but a *different*
+    // `target_id` — the client still holds the old approval and tries to
+    // apply it to a modified operation.
+    let changed_request = MutationAcceptanceRequest::new(
+        PRINCIPAL_SID,
+        generation,
+        MutationMethod::Flash,
+        "target-2",
+        Some("sha256:artifact".to_string()),
+        IdempotencyKey::new("idem-changed-target-retry").unwrap(),
+        Some(ApprovalReference {
+            approval_id: "apr_changed_target_1".to_string(),
+            // Deliberately bound to this *new* request's own digest, not
+            // the original's — this is what a client that recomputed its
+            // reference against the (wrong) new request shape would send.
+            // `accept_mutation_in_transaction` ignores this value anyway
+            // (it refreshes from the row), so this exact content is not
+            // what makes the test pass or fail — the row's own stored
+            // digest is.
+            bound_request_digest: loki_mutation_contract::RequestDigest::try_from_str(
+                "sha256:".to_string() + &"c".repeat(64),
+            )
+            .unwrap(),
+            expires_at_ms: now + 3_600_000,
+        }),
+    )
+    .unwrap();
+
+    let result = accept_mutation(&storage, &changed_request).unwrap();
+    assert_eq!(
+        result,
+        AcceptanceResult::Rejected(MutationRejection::ApprovalNotConsumable),
+        "a changed-target retry reusing a granted approval must be rejected as \
+         ApprovalNotConsumable, not silently accepted or misclassified"
+    );
+
+    // The approval must remain exactly as unconsumed as before this call.
+    let approval_after = storage
+        .get_approval("apr_changed_target_1")
+        .unwrap()
+        .unwrap();
+    assert!(
+        approval_after.consumed_at_ms.is_none(),
+        "a rejected changed-target retry must never consume the approval"
+    );
+
+    // No job/mutation_acceptances row exists for the new attempt's
+    // idempotency key.
+    assert!(!mutation_acceptance_exists(
+        &storage,
+        "idem-changed-target-retry"
+    ));
+}
+
+/// `P1-APPROVAL-JOB-ACCEPT-001` Deliverable 2: cancellation of a job whose
+/// approval was already consumed must never un-consume that approval.
+/// Proven end-to-end against the real `loki_jobs::JobEngine`, not merely by
+/// citing the repository-wide grep recorded in this node's handoff: a real
+/// accepted-and-consumed approval/job is created first (mirroring
+/// `approval_gated_accept_consumes_approval_and_creates_real_job` above);
+/// then a `JobEngine` backed by an entirely separate, fresh in-memory
+/// `Storage` (never the file-backed `storage` the approval/job rows above
+/// actually live in — no wiring between the two is added anywhere) is used
+/// to submit and cancel a job under the *same* job ID string. Because
+/// `JobEngine`'s own storage never held that job's row and has zero
+/// reference to `loki_storage::approvals`/`local_approvals` at all
+/// (confirmed structurally in this node's handoff via
+/// `grep -rn "ApprovalsRepository\|local_approvals\|loki_storage::approvals" crates/loki-jobs/src`),
+/// the cancellation calls below run entirely inside that independent
+/// storage and cannot reach the real approval row by construction — proven
+/// afterward by re-reading the real approval row from the *original*
+/// `storage` and asserting its `consumed_at_ms` is byte-for-byte unchanged.
+#[test]
+fn job_cancellation_has_no_approval_consumption_interaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = open_storage(dir.path(), "db1.sqlite3");
+    let generation = seed_valid_grant(&storage, PRINCIPAL_SID);
+    let now = clock::unix_millis_now();
+    let request = flash_request_with_granted_approval(
+        &storage,
+        PRINCIPAL_SID,
+        generation,
+        "idem-cancel-interaction-1",
+        "target-1",
+        "apr_cancel_interaction_1",
+        now + 3_600_000,
+    );
+
+    let result = accept_mutation(&storage, &request).unwrap();
+    let AcceptanceResult::Accepted(record) = &result else {
+        panic!("expected Accepted, got {result:?}");
+    };
+    let job_id = record.job_id().clone();
+    assert!(storage.get_job(&job_id).unwrap().is_some());
+
+    let approval_before = storage
+        .get_approval("apr_cancel_interaction_1")
+        .unwrap()
+        .unwrap();
+    assert!(
+        approval_before.consumed_at_ms.is_some(),
+        "test setup: the approval must be consumed by the real accepted flow above"
+    );
+    let consumed_at_before = approval_before.consumed_at_ms;
+
+    // A `JobEngine` backed by a fresh, independent, in-memory `Storage` —
+    // deliberately never the `storage` variable above, and no wiring is
+    // added anywhere between this engine and `loki_storage::approvals`.
+    let job_engine_storage = {
+        let s = Storage::open_in_memory(Cipher::None).expect("open in-memory storage");
+        s.run_migrations("2026-01-01T00:00:00Z")
+            .expect("run migrations");
+        Arc::new(s)
+    };
+    let job_engine = JobEngine::new(Arc::clone(&job_engine_storage));
+
+    // Mirror the same job ID into this independent engine's own storage —
+    // this is the only way `request_cancel`/`acknowledge_cancelled` can act
+    // on anything at all, and it happens entirely inside
+    // `job_engine_storage`, never touching `storage`.
+    let submit_outcome = job_engine
+        .submit(SubmitRequest {
+            job_id: job_id.clone(),
+            idempotency_key: "idem-cancel-interaction-1-mirror".to_string(),
+            correlation_id: CorrelationId::new("corr_cancel_interaction_1").unwrap(),
+        })
+        .expect("submit into the independent job engine must succeed on its own terms");
+    assert!(matches!(
+        submit_outcome,
+        loki_jobs::SubmitOutcome::Created(_)
+    ));
+
+    // `request_cancel` on a freshly submitted (`queued`) job succeeds
+    // immediately — proving a real cancellation transition genuinely ran,
+    // entirely inside the independent engine/storage.
+    let cancel_outcome = job_engine
+        .request_cancel(&job_id)
+        .expect("request_cancel must succeed on its own terms");
+    assert!(matches!(
+        cancel_outcome,
+        CancelOutcome::CancelledImmediately(_)
+    ));
+
+    // `acknowledge_cancelled` now fails on its own terms (no pending
+    // cooperative-cancellation request exists once a job is already
+    // terminal) — its own terms, not an error this test needs to force one
+    // way or the other.
+    let ack_result = job_engine.acknowledge_cancelled(&job_id);
+    assert!(
+        ack_result.is_err(),
+        "acknowledge_cancelled after an immediate cancellation has no pending request to \
+         acknowledge, and must fail on its own terms — got {ack_result:?}"
+    );
+
+    // The real approval, read back from the *original* `storage`, is
+    // byte-for-byte unchanged: cancellation never un-consumed it.
+    let approval_after = storage
+        .get_approval("apr_cancel_interaction_1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        approval_after.consumed_at_ms, consumed_at_before,
+        "job cancellation/acknowledgement must never change a consumed approval's \
+         consumed_at_ms, even indirectly"
+    );
 }

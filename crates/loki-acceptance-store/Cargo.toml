@@ -62,3 +62,15 @@ tempfile = "=3.27.0"
 # this crate's own `[dev-dependencies]`-gated build only. Mirrors every
 # sibling crate's identical self-referential dev-dependency.
 loki-storage = { path = "../loki-storage", features = ["test-support"] }
+
+# `P1-APPROVAL-JOB-ACCEPT-001` Deliverable 2 (test-only, [dev-dependencies]
+# only — never a production [dependencies] entry): constructs a real,
+# independent `loki_jobs::JobEngine` backed by its own fresh in-memory
+# `Storage` (never the one `accept_mutation`'s approval/job rows live in) to
+# prove structurally, against the real crate, that job
+# cancellation/acknowledgement has no code path back into
+# `loki_storage::approvals`. This crate's own production code
+# (`src/lib.rs`) still never depends on `loki-jobs` — this entry is confined
+# to `[dev-dependencies]`, exercised only by
+# `tests/acceptance_flow.rs`.
+loki-jobs = { path = "../loki-jobs" }
