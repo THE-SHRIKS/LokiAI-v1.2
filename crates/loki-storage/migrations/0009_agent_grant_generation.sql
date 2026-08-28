@@ -1,0 +1,23 @@
+-- P1-PRINCIPAL-GRANT-001 (ADR-0007 Option B): adds a durable, per-connection,
+-- mutable generation counter to `agent_connections`. Additive only — no
+-- existing column/row/behavior changes.
+--
+-- Generation semantics (see `crates/loki-storage/src/agents.rs`'s module doc
+-- comment and ADR-0007 Option B): a connection is a single row with exactly
+-- one live `secret_hash` at a time. `generation` starts at `1` on
+-- `register` (a known constant, no computation needed) and is bumped by
+-- exactly `1`, in place, under a guarded
+-- `UPDATE ... WHERE connection_id = ? AND revoked_at_ms IS NULL` on
+-- `rotate`, `change_scopes`, and (defensively) `revoke`.
+-- `generation_issued_at_ms` tracks "when did this connection's *current*
+-- generation become current" — distinct from `created_at_ms`, which stays
+-- "when was this connection first registered": a rotated/scope-changed
+-- connection's generation timestamp stays accurate, not silently stuck at
+-- original registration time.
+--
+-- This identity model has NO expiry concept (ADR-0007: "no expiry") — no
+-- `expires_at_ms`-shaped column is added here, and the `never expires`
+-- sentinel this fact requires lives solely in `crates/loki-acceptance-store`,
+-- never in this crate's row types or SQL.
+ALTER TABLE agent_connections ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE agent_connections ADD COLUMN generation_issued_at_ms INTEGER NOT NULL DEFAULT 0;

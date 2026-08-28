@@ -2,16 +2,34 @@
 //!
 //! An MCP transport session is not authority. A caller must present the
 //! one-time-returned connection secret and hold the specific registered scope.
+//!
+//! # `P1-ACCEPTANCE-STORE-001` consolidation
+//!
+//! Previously wrapped its own independent `Mutex<Connection>`, opened via
+//! `loki_storage::open_or_migrate_sqlcipher`/`Connection::open_in_memory()`,
+//! running its own ad hoc `CREATE TABLE IF NOT EXISTS` schema (three
+//! tables). Now wraps a shared `loki_storage::Storage`, with schema owned
+//! by `loki-storage`'s own versioned migrations (`migrations/0005_agents.sql`)
+//! and all SQL moved into `loki_storage::agents`. This is what makes a real
+//! cross-repository `Storage::transaction()`
+//! (`Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md`,
+//! `crates/loki-acceptance-store`) possible for `AgentRunRegister`/
+//! `AgentRunUpdate`.
 
-use std::{fmt, path::Path, sync::Mutex};
+use std::{fmt, path::Path, sync::Arc};
 
 use loki_local_authority::{AuthorityError, LocalAuthority, LocalCapability, LocalContext};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use loki_storage::agents::{AgentRunRow, AgentsRepository, NewRunEvent};
+use loki_storage::{Cipher, Storage};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const MAX_FIELD: usize = 256;
 const MAX_SUMMARY: usize = 2_000;
+
+/// See `crates/loki-local-authority/src/store.rs`'s identical constant doc
+/// comment — the same rationale applies here.
+const BACK_COMPAT_MIGRATION_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AgentScope {
@@ -55,10 +73,20 @@ impl fmt::Debug for AgentSecret {
     }
 }
 
+/// `P1-PRINCIPAL-GRANT-001` (ADR-0007 Option B): `generation` is a real,
+/// durable, per-`connection_id` counter — starts at `1` on `register`
+/// (a known constant, no storage round-trip needed for this value) and is
+/// bumped by exactly `1`, atomically, by the storage layer on `rotate`,
+/// `change_scopes`, and (defensively) `revoke`. This is entirely
+/// independent of `crates/loki-local-authority`'s `LocalSession` generation
+/// sequence: revoking an agent connection never cascades to revoke any
+/// Windows-principal session, and vice versa (ADR-0007 explicitly declines
+/// a shared "one kill switch" property).
 #[derive(Debug)]
 pub struct AgentCredential {
     pub connection_id: String,
     pub secret: AgentSecret,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,42 +213,34 @@ impl From<loki_storage::StorageError> for AgentError {
 }
 
 pub struct AgentRegistry {
-    connection: Mutex<Connection>,
+    storage: Arc<Storage>,
 }
 impl AgentRegistry {
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated `Storage` at `path` (Windows DPAPI-managed SQLCipher),
+    /// then delegates to [`AgentRegistry::new`].
     pub fn open(
         path: impl AsRef<Path>,
         protected_key_path: impl AsRef<Path>,
     ) -> Result<Self, AgentError> {
-        let (connection, _key) =
-            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
-        Self::from_connection(connection)
+        let storage = Storage::open_managed(path.as_ref(), protected_key_path.as_ref())?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
+
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated in-memory `Storage`, then delegates to
+    /// [`AgentRegistry::new`].
     pub fn open_in_memory() -> Result<Self, AgentError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        let storage = Storage::open_in_memory(Cipher::None)?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
-    fn from_connection(connection: Connection) -> Result<Self, AgentError> {
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             CREATE TABLE IF NOT EXISTS agent_connections(
-               connection_id TEXT PRIMARY KEY, label TEXT NOT NULL, secret_hash TEXT NOT NULL,
-               scopes TEXT NOT NULL, created_at_ms INTEGER NOT NULL, revoked_at_ms INTEGER);
-             CREATE TABLE IF NOT EXISTS agent_runs(
-               run_id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, parent_run_id TEXT,
-               correlation_id TEXT NOT NULL UNIQUE, idempotency_key TEXT NOT NULL,
-               state TEXT NOT NULL, started_at_ms INTEGER NOT NULL, completed_at_ms INTEGER,
-               UNIQUE(connection_id,idempotency_key),
-               FOREIGN KEY(connection_id) REFERENCES agent_connections(connection_id),
-               FOREIGN KEY(parent_run_id) REFERENCES agent_runs(run_id));
-             CREATE TABLE IF NOT EXISTS agent_run_events(
-               run_id TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>0), kind TEXT NOT NULL,
-               name TEXT NOT NULL, payload_digest TEXT NOT NULL, summary TEXT NOT NULL,
-               occurred_at_ms INTEGER NOT NULL, PRIMARY KEY(run_id,sequence),
-               FOREIGN KEY(run_id) REFERENCES agent_runs(run_id));")?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+
+    /// Constructs an `AgentRegistry` over an already-open, already-migrated,
+    /// shared `Storage` — the `P1-ACCEPTANCE-STORE-001` composition path.
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
     }
 
     pub fn register(
@@ -257,8 +277,19 @@ impl AgentRegistry {
         let credential = AgentCredential {
             connection_id: format!("ac_{}", Uuid::new_v4().simple()),
             secret,
+            // A known constant: `insert_agent_connection_core` always sets
+            // `generation = 1` for a brand-new row — no storage round-trip
+            // needed to know this value (this module's/that module's doc
+            // comments).
+            generation: 1,
         };
-        self.lock()?.execute("INSERT INTO agent_connections(connection_id,label,secret_hash,scopes,created_at_ms) VALUES(?1,?2,?3,?4,?5)",params![credential.connection_id,label,secret_hash,scopes_wire,now_ms])?;
+        self.storage.insert_agent_connection(
+            &credential.connection_id,
+            label,
+            &secret_hash,
+            &scopes_wire,
+            now_ms,
+        )?;
         Ok(credential)
     }
 
@@ -271,9 +302,11 @@ impl AgentRegistry {
         now_ms: i64,
     ) -> Result<(), AgentError> {
         authority.authorize_local(context, session_id, LocalCapability::RegisterAgent, now_ms)?;
-        let changed=self.lock()?.execute("UPDATE agent_connections SET revoked_at_ms=?1 WHERE connection_id=?2 AND revoked_at_ms IS NULL",params![now_ms,connection_id])?;
-        if changed == 0 {
-            let exists = self.connection_exists(connection_id)?;
+        let revoked = self
+            .storage
+            .revoke_agent_connection(connection_id, now_ms)?;
+        if !revoked {
+            let exists = self.storage.get_agent_connection(connection_id)?.is_some();
             return Err(if exists {
                 AgentError::Revoked
             } else {
@@ -283,19 +316,102 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Mints a new one-time secret for an already-registered connection and
+    /// atomically bumps its durable generation by exactly `1`
+    /// (`P1-PRINCIPAL-GRANT-001`, ADR-0007 Option B). Uses the exact same
+    /// `LocalCapability::RegisterAgent` authorization gate `register`/
+    /// `revoke` already require — no new `LocalCapability` variant (out of
+    /// this node's forbidden scope). The connection's prior secret stops
+    /// authenticating the moment this call commits.
+    pub fn rotate(
+        &self,
+        authority: &LocalAuthority,
+        context: &LocalContext,
+        session_id: &str,
+        connection_id: &str,
+        now_ms: i64,
+    ) -> Result<AgentCredential, AgentError> {
+        authority.authorize_local(context, session_id, LocalCapability::RegisterAgent, now_ms)?;
+        let secret = AgentSecret(format!(
+            "las_{}{}",
+            Uuid::new_v4().simple(),
+            Uuid::new_v4().simple()
+        ));
+        let secret_hash = hash_secret(&secret.0);
+        let new_generation =
+            self.storage
+                .rotate_agent_connection(connection_id, &secret_hash, now_ms)?;
+        let generation = match new_generation {
+            Some(generation) => generation,
+            None => {
+                let exists = self.storage.get_agent_connection(connection_id)?.is_some();
+                return Err(if exists {
+                    AgentError::Revoked
+                } else {
+                    AgentError::NotFound
+                });
+            }
+        };
+        Ok(AgentCredential {
+            connection_id: connection_id.to_string(),
+            secret,
+            generation,
+        })
+    }
+
+    /// Replaces an already-registered connection's authorized scope set and
+    /// atomically bumps its durable generation by exactly `1`
+    /// (`P1-PRINCIPAL-GRANT-001`, ADR-0007 Option B). Same authorization
+    /// gate and same non-empty/sort/dedup scope validation `register`
+    /// already applies. Returns the bare new generation number — no secret
+    /// is involved in a scope change, so returning a fabricated/reused
+    /// secret here would be dishonest (`AGENTS.md` rule 1).
+    pub fn change_scopes(
+        &self,
+        authority: &LocalAuthority,
+        context: &LocalContext,
+        session_id: &str,
+        connection_id: &str,
+        new_scopes: &[AgentScope],
+        now_ms: i64,
+    ) -> Result<u64, AgentError> {
+        authority.authorize_local(context, session_id, LocalCapability::RegisterAgent, now_ms)?;
+        if new_scopes.is_empty() {
+            return Err(AgentError::InvalidInput {
+                field: "scopes",
+                reason: "at least one scope required".into(),
+            });
+        }
+        let mut normalized = new_scopes.to_vec();
+        normalized.sort();
+        normalized.dedup();
+        let scopes_wire = normalized
+            .iter()
+            .map(|s| s.wire())
+            .collect::<Vec<_>>()
+            .join(",");
+        let new_generation =
+            self.storage
+                .change_agent_scopes(connection_id, &scopes_wire, now_ms)?;
+        match new_generation {
+            Some(generation) => Ok(generation),
+            None => {
+                let exists = self.storage.get_agent_connection(connection_id)?.is_some();
+                Err(if exists {
+                    AgentError::Revoked
+                } else {
+                    AgentError::NotFound
+                })
+            }
+        }
+    }
+
     pub fn require_active_connection(&self, connection_id: &str) -> Result<(), AgentError> {
-        let connection = self.lock()?;
-        let revoked: Option<Option<i64>> = connection
-            .query_row(
-                "SELECT revoked_at_ms FROM agent_connections WHERE connection_id=?1",
-                [connection_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match revoked {
+        let row = self.storage.get_agent_connection(connection_id)?;
+        match row {
             None => Err(AgentError::NotFound),
-            Some(Some(_)) => Err(AgentError::Revoked),
-            Some(None) => Ok(()),
+            Some(row) if row.revoked_at_ms.is_some() => Err(AgentError::Revoked),
+            Some(_) => Ok(()),
         }
     }
 
@@ -316,8 +432,7 @@ impl AgentRegistry {
         connection_id: &str,
         run_id: &str,
     ) -> Result<AgentRun, AgentError> {
-        let connection = self.lock()?;
-        let run = load_run(&connection, run_id)?.ok_or(AgentError::NotFound)?;
+        let run = load_run(&self.storage, run_id)?.ok_or(AgentError::NotFound)?;
         if run.connection_id != connection_id {
             return Err(AgentError::AuthenticationFailed);
         }
@@ -334,13 +449,14 @@ impl AgentRegistry {
     ) -> Result<AgentRun, AgentError> {
         self.authenticate(connection_id, secret, AgentScope::RegisterRuns)?;
         validate("idempotency_key", idempotency_key, MAX_FIELD)?;
-        let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(existing) = load_run_by_key(&tx, connection_id, idempotency_key)? {
-            return Ok(existing);
+        if let Some(existing) = self
+            .storage
+            .get_agent_run_by_idempotency_key(connection_id, idempotency_key)?
+        {
+            return row_to_agent_run(existing);
         }
         if let Some(parent) = parent_run_id {
-            let p = load_run(&tx, parent)?.ok_or(AgentError::NotFound)?;
+            let p = load_run(&self.storage, parent)?.ok_or(AgentError::NotFound)?;
             if p.connection_id != connection_id {
                 return Err(AgentError::ParentMismatch);
             }
@@ -355,8 +471,16 @@ impl AgentRegistry {
             started_at_ms: now_ms,
             completed_at_ms: None,
         };
-        tx.execute("INSERT INTO agent_runs(run_id,connection_id,parent_run_id,correlation_id,idempotency_key,state,started_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.run_id,run.connection_id,run.parent_run_id,run.correlation_id,run.idempotency_key,run.state.wire(),run.started_at_ms])?;
-        tx.commit()?;
+        self.storage.insert_agent_run(&AgentRunRow {
+            run_id: run.run_id.clone(),
+            connection_id: run.connection_id.clone(),
+            parent_run_id: run.parent_run_id.clone(),
+            correlation_id: run.correlation_id.clone(),
+            idempotency_key: run.idempotency_key.clone(),
+            state: run.state.wire().to_string(),
+            started_at_ms: run.started_at_ms,
+            completed_at_ms: run.completed_at_ms,
+        })?;
         Ok(run)
     }
 
@@ -372,18 +496,15 @@ impl AgentRegistry {
         if !state.terminal() {
             return Err(AgentError::InvalidTransition);
         }
-        let connection = self.lock()?;
-        let run = load_run(&connection, run_id)?.ok_or(AgentError::NotFound)?;
+        let run = load_run(&self.storage, run_id)?.ok_or(AgentError::NotFound)?;
         if run.connection_id != connection_id {
             return Err(AgentError::AuthenticationFailed);
         }
         if run.state.terminal() {
             return Err(AgentError::TerminalRun);
         }
-        connection.execute(
-            "UPDATE agent_runs SET state=?1,completed_at_ms=?2 WHERE run_id=?3 AND state='running'",
-            params![state.wire(), now_ms, run_id],
-        )?;
+        self.storage
+            .finish_agent_run(run_id, state.wire(), now_ms)?;
         Ok(())
     }
 
@@ -407,23 +528,26 @@ impl AgentRegistry {
                 reason: "must be positive".into(),
             });
         }
-        let connection = self.lock()?;
-        let run = load_run(&connection, &event.run_id)?.ok_or(AgentError::NotFound)?;
+        let run = load_run(&self.storage, &event.run_id)?.ok_or(AgentError::NotFound)?;
         if run.connection_id != connection_id {
             return Err(AgentError::AuthenticationFailed);
         }
         if run.state.terminal() {
             return Err(AgentError::TerminalRun);
         }
-        let result=connection.execute("INSERT INTO agent_run_events(run_id,sequence,kind,name,payload_digest,summary,occurred_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![event.run_id,event.sequence,event.kind.wire(),event.name,event.payload_digest,event.summary,event.occurred_at_ms]);
-        match result {
-            Ok(_) => Ok(()),
-            Err(rusqlite::Error::SqliteFailure(e, _))
-                if e.code == rusqlite::ErrorCode::ConstraintViolation =>
-            {
-                Err(AgentError::SequenceConflict)
-            }
-            Err(e) => Err(e.into()),
+        let inserted = self.storage.insert_agent_run_event(&NewRunEvent {
+            run_id: event.run_id.clone(),
+            sequence: event.sequence,
+            kind: event.kind.wire().to_string(),
+            name: event.name.clone(),
+            payload_digest: event.payload_digest.clone(),
+            summary: event.summary.clone(),
+            occurred_at_ms: event.occurred_at_ms,
+        })?;
+        if inserted {
+            Ok(())
+        } else {
+            Err(AgentError::SequenceConflict)
         }
     }
 
@@ -433,16 +557,18 @@ impl AgentRegistry {
         secret: &str,
         scope: AgentScope,
     ) -> Result<(), AgentError> {
-        let connection = self.lock()?;
-        let row:Option<(String,String,Option<i64>)>=connection.query_row("SELECT secret_hash,scopes,revoked_at_ms FROM agent_connections WHERE connection_id=?1",[connection_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        let (stored, scopes, revoked) = row.ok_or(AgentError::AuthenticationFailed)?;
-        if revoked.is_some() {
+        let row = self
+            .storage
+            .get_agent_connection(connection_id)?
+            .ok_or(AgentError::AuthenticationFailed)?;
+        if row.revoked_at_ms.is_some() {
             return Err(AgentError::Revoked);
         }
-        if !constant_time_eq(stored.as_bytes(), hash_secret(secret).as_bytes()) {
+        if !constant_time_eq(row.secret_hash.as_bytes(), hash_secret(secret).as_bytes()) {
             return Err(AgentError::AuthenticationFailed);
         }
-        if !scopes
+        if !row
+            .scopes
             .split(',')
             .filter_map(AgentScope::parse)
             .any(|s| s == scope)
@@ -450,18 +576,6 @@ impl AgentRegistry {
             return Err(AgentError::ScopeDenied);
         }
         Ok(())
-    }
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AgentError> {
-        self.connection
-            .lock()
-            .map_err(|_| AgentError::Conflict("agent database lock poisoned".into()))
-    }
-    fn connection_exists(&self, id: &str) -> Result<bool, AgentError> {
-        Ok(self.lock()?.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_connections WHERE connection_id=?1)",
-            [id],
-            |r| r.get(0),
-        )?)
     }
 }
 
@@ -488,39 +602,24 @@ fn validate(field: &'static str, value: &str, max: usize) -> Result<(), AgentErr
         Ok(())
     }
 }
-fn load_run(c: &Connection, id: &str) -> Result<Option<AgentRun>, AgentError> {
-    load_run_query(
-        c,
-        "SELECT run_id,connection_id,parent_run_id,correlation_id,idempotency_key,state,started_at_ms,completed_at_ms FROM agent_runs WHERE run_id=?1",
-        id,
-    )
+
+fn load_run(storage: &Storage, id: &str) -> Result<Option<AgentRun>, AgentError> {
+    storage.get_agent_run(id)?.map(row_to_agent_run).transpose()
 }
-fn load_run_by_key(
-    c: &Connection,
-    connection_id: &str,
-    key: &str,
-) -> Result<Option<AgentRun>, AgentError> {
-    c.query_row("SELECT run_id,connection_id,parent_run_id,correlation_id,idempotency_key,state,started_at_ms,completed_at_ms FROM agent_runs WHERE connection_id=?1 AND idempotency_key=?2",params![connection_id,key],row_run).optional()?.map_or(Ok(None),|r|Ok(Some(r?)))
-}
-fn load_run_query(c: &Connection, q: &str, v: &str) -> Result<Option<AgentRun>, AgentError> {
-    c.query_row(q, [v], row_run)
-        .optional()?
-        .map_or(Ok(None), |r| Ok(Some(r?)))
-}
-fn row_run(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<AgentRun, AgentError>> {
-    let state: String = r.get(5)?;
-    Ok(RunState::parse(&state)
-        .ok_or(AgentError::Conflict("stored run state invalid".into()))
-        .map(|state| AgentRun {
-            run_id: r.get(0).unwrap(),
-            connection_id: r.get(1).unwrap(),
-            parent_run_id: r.get(2).unwrap(),
-            correlation_id: r.get(3).unwrap(),
-            idempotency_key: r.get(4).unwrap(),
-            state,
-            started_at_ms: r.get(6).unwrap(),
-            completed_at_ms: r.get(7).unwrap(),
-        }))
+
+fn row_to_agent_run(row: AgentRunRow) -> Result<AgentRun, AgentError> {
+    let state = RunState::parse(&row.state)
+        .ok_or_else(|| AgentError::Conflict("stored run state invalid".into()))?;
+    Ok(AgentRun {
+        run_id: row.run_id,
+        connection_id: row.connection_id,
+        parent_run_id: row.parent_run_id,
+        correlation_id: row.correlation_id,
+        idempotency_key: row.idempotency_key,
+        state,
+        started_at_ms: row.started_at_ms,
+        completed_at_ms: row.completed_at_ms,
+    })
 }
 
 #[cfg(test)]
@@ -717,9 +816,147 @@ mod tests {
         assert!(
             !std::fs::read(&p)
                 .unwrap()
-                .windows(b"local_agents".len())
-                .any(|window| window == b"local_agents"),
+                .windows(b"agent_connections".len())
+                .any(|window| window == b"agent_connections"),
             "agent schema marker must not be plaintext on disk"
         );
+    }
+
+    #[test]
+    fn rotate_replaces_secret_and_bumps_generation() {
+        let (a, ctx, s, r, c) = setup(&all());
+        assert_eq!(c.generation, 1);
+        let old_secret = c.secret.expose_for_client_configuration().to_string();
+
+        let rotated = r.rotate(&a, &ctx, &s, &c.connection_id, 5000).unwrap();
+        assert_eq!(rotated.connection_id, c.connection_id);
+        assert_eq!(rotated.generation, 2);
+
+        // Old secret authentication fails after rotate.
+        assert!(matches!(
+            r.start_run(&c.connection_id, &old_secret, "i", None, 5100),
+            Err(AgentError::AuthenticationFailed)
+        ));
+        // New secret authenticates.
+        r.start_run(
+            &c.connection_id,
+            rotated.secret.expose_for_client_configuration(),
+            "i",
+            None,
+            5200,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rotate_denied_for_revoked_connection() {
+        let (a, ctx, s, r, c) = setup(&all());
+        r.revoke(&a, &ctx, &s, &c.connection_id, 5000).unwrap();
+        assert!(matches!(
+            r.rotate(&a, &ctx, &s, &c.connection_id, 5100),
+            Err(AgentError::Revoked)
+        ));
+    }
+
+    #[test]
+    fn rotate_denied_for_unknown_connection() {
+        let (a, ctx, s, r, _c) = setup(&all());
+        assert!(matches!(
+            r.rotate(&a, &ctx, &s, "ac_does_not_exist", 5000),
+            Err(AgentError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn scope_change_updates_authorization_and_bumps_generation() {
+        let (a, ctx, s, r, c) = setup(&[AgentScope::ReadDiagnostics]);
+        let secret = c.secret.expose_for_client_configuration();
+        assert!(matches!(
+            r.start_run(&c.connection_id, secret, "i", None, 4000),
+            Err(AgentError::ScopeDenied)
+        ));
+
+        let new_generation = r
+            .change_scopes(
+                &a,
+                &ctx,
+                &s,
+                &c.connection_id,
+                &[AgentScope::RegisterRuns],
+                5000,
+            )
+            .unwrap();
+        assert_eq!(new_generation, 2);
+
+        // Old scope set (ReadDiagnostics) is no longer sufficient, but the
+        // newly granted scope (RegisterRuns) now authorizes the same call
+        // that was denied above.
+        r.start_run(&c.connection_id, secret, "i", None, 5100)
+            .unwrap();
+    }
+
+    #[test]
+    fn scope_change_denied_for_revoked_connection() {
+        let (a, ctx, s, r, c) = setup(&all());
+        r.revoke(&a, &ctx, &s, &c.connection_id, 5000).unwrap();
+        assert!(matches!(
+            r.change_scopes(
+                &a,
+                &ctx,
+                &s,
+                &c.connection_id,
+                &[AgentScope::RegisterRuns],
+                5100
+            ),
+            Err(AgentError::Revoked)
+        ));
+    }
+
+    #[test]
+    fn scope_change_rejects_empty_scope_set() {
+        let (a, ctx, s, r, c) = setup(&all());
+        assert!(matches!(
+            r.change_scopes(&a, &ctx, &s, &c.connection_id, &[], 5000),
+            Err(AgentError::InvalidInput {
+                field: "scopes",
+                ..
+            })
+        ));
+    }
+
+    /// Mirrors `restart_preserves_revocation`'s real on-disk-DB style:
+    /// a rotated connection's generation must survive a full close/reopen
+    /// of the encrypted database, not merely an in-process value.
+    #[test]
+    fn restart_preserves_generation_across_reopen() {
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("agents.db");
+        let key = d.path().join("agents.key.dpapi");
+        let a = LocalAuthority::open_in_memory().unwrap();
+        let ctx = LocalContext::current("ipc").unwrap();
+        a.initialize_current(&ctx, 1000).unwrap();
+        let s = a.issue_session(&ctx, 2000, 100000).unwrap();
+        let id;
+        let new_secret;
+        {
+            let r = AgentRegistry::open(&p, &key).unwrap();
+            let c = r
+                .register(&a, &ctx, &s.session_id, "agent", &all(), 3000)
+                .unwrap();
+            id = c.connection_id;
+            let rotated = r.rotate(&a, &ctx, &s.session_id, &id, 3100).unwrap();
+            assert_eq!(rotated.generation, 2);
+            new_secret = rotated.secret.0;
+        }
+        let r = AgentRegistry::open(&p, &key).unwrap();
+        // The rotated (not the original) secret must still authenticate
+        // after reopening.
+        r.start_run(&id, &new_secret, "i", None, 4000).unwrap();
+        // The generation must have durably survived at its post-rotate
+        // value (2), not reset to 1 across the close/reopen: rotating
+        // again after reopen must yield 3, not 2.
+        let rotated_again = r.rotate(&a, &ctx, &s.session_id, &id, 4100).unwrap();
+        assert_eq!(rotated_again.generation, 3);
     }
 }

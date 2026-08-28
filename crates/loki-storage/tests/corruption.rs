@@ -75,7 +75,7 @@ fn missing_path_creates_a_fresh_database_not_an_error() {
         .expect("opening a non-existent path must create a fresh database");
     let report = storage.run_migrations(common::T0).unwrap();
     assert!(path.exists());
-    assert_eq!(report.applied_versions, vec![1, 2, 3]);
+    assert_eq!(report.applied_versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
 }
 
 #[test]

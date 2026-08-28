@@ -1,8 +1,22 @@
 //! Durable job repository (`Docs/SPEC.md` Section 4.7 Durable job / 3.12
 //! "job ID" / Section 1 `OperationResult<T>`). One of this node's three
 //! required repositories — see `Docs/graph/tasks/DAT-001.md` Deliverable 3.
+//!
+//! # Connection-parameterized cores (`P1-ACCEPTANCE-STORE-001`)
+//!
+//! Every trait method below is a thin `self.lock()` wrapper around a
+//! private, connection-parameterized `..._core` function. This split exists
+//! solely so `crates/loki-acceptance-store` can call the same SQL logic
+//! from inside a `Storage::transaction()` closure (`&rusqlite::Transaction`
+//! derefs to `&rusqlite::Connection`) without calling `self.lock()` a
+//! second time on the same non-reentrant `std::sync::Mutex` that
+//! `Storage::transaction()` already holds for the closure's entire
+//! duration — doing so would deadlock (see `src/storage.rs`'s
+//! `Storage::transaction` doc comment). No SQL statement, validation rule,
+//! or public trait method signature changed by this refactor — only where
+//! the connection comes from.
 
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::StorageError;
 use crate::ids::{CorrelationId, JobId};
@@ -86,47 +100,18 @@ pub trait JobRepository {
 
 impl JobRepository for Storage {
     fn insert_job(&self, job: &NewJob) -> Result<(), StorageError> {
-        validate_utc_timestamp("created_at", &job.created_at)?;
-        validate_utc_timestamp("updated_at", &job.updated_at)?;
-
         let conn = self.lock();
-        conn.execute(
-            "INSERT INTO jobs (job_id, state, idempotency_key, correlation_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                job.job_id.as_str(),
-                job.state.as_str(),
-                job.idempotency_key,
-                job.correlation_id.as_str(),
-                job.created_at,
-                job.updated_at,
-            ],
-        )?;
-        Ok(())
+        insert_job_core(&conn, job)
     }
 
     fn get_job(&self, id: &JobId) -> Result<Option<JobRecord>, StorageError> {
         let conn = self.lock();
-        let raw: Option<RawJobRow> = conn
-            .query_row(
-                &format!("SELECT {SELECT_COLUMNS} FROM jobs WHERE job_id = ?1"),
-                params![id.as_str()],
-                row_to_raw,
-            )
-            .optional()?;
-        raw.map(raw_to_record).transpose()
+        get_job_core(&conn, id)
     }
 
     fn get_job_by_idempotency_key(&self, key: &str) -> Result<Option<JobRecord>, StorageError> {
         let conn = self.lock();
-        let raw: Option<RawJobRow> = conn
-            .query_row(
-                &format!("SELECT {SELECT_COLUMNS} FROM jobs WHERE idempotency_key = ?1"),
-                params![key],
-                row_to_raw,
-            )
-            .optional()?;
-        raw.map(raw_to_record).transpose()
+        get_job_by_idempotency_key_core(&conn, key)
     }
 
     fn transition_job_state(
@@ -135,19 +120,8 @@ impl JobRepository for Storage {
         state: JobState,
         updated_at: &str,
     ) -> Result<(), StorageError> {
-        validate_utc_timestamp("updated_at", updated_at)?;
         let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE jobs SET state = ?1, updated_at = ?2 WHERE job_id = ?3",
-            params![state.as_str(), updated_at, id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StorageError::NotFound {
-                kind: "job",
-                id: id.as_str().to_string(),
-            });
-        }
-        Ok(())
+        transition_job_state_core(&conn, id, state, updated_at)
     }
 
     fn complete_job(
@@ -157,61 +131,156 @@ impl JobRepository for Storage {
         result_json: Option<&str>,
         updated_at: &str,
     ) -> Result<(), StorageError> {
-        validate_utc_timestamp("updated_at", updated_at)?;
         let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE jobs SET state = ?1, evidence_refs_json = ?2, result_json = ?3, updated_at = ?4
-             WHERE job_id = ?5",
-            params![
-                JobState::Succeeded.as_str(),
-                evidence_refs_json,
-                result_json,
-                updated_at,
-                id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StorageError::NotFound {
-                kind: "job",
-                id: id.as_str().to_string(),
-            });
-        }
-        Ok(())
+        complete_job_core(&conn, id, evidence_refs_json, result_json, updated_at)
     }
 
     fn fail_job(&self, id: &JobId, error_json: &str, updated_at: &str) -> Result<(), StorageError> {
-        validate_utc_timestamp("updated_at", updated_at)?;
         let conn = self.lock();
-        let changed = conn.execute(
-            "UPDATE jobs SET state = ?1, error_json = ?2, updated_at = ?3 WHERE job_id = ?4",
-            params![
-                JobState::Failed.as_str(),
-                error_json,
-                updated_at,
-                id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StorageError::NotFound {
-                kind: "job",
-                id: id.as_str().to_string(),
-            });
-        }
-        Ok(())
+        fail_job_core(&conn, id, error_json, updated_at)
     }
 
     fn list_jobs_by_state(&self, state: JobState) -> Result<Vec<JobRecord>, StorageError> {
         let conn = self.lock();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {SELECT_COLUMNS} FROM jobs WHERE state = ?1 ORDER BY created_at"
-        ))?;
-        let rows = stmt.query_map(params![state.as_str()], row_to_raw)?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(raw_to_record(row?)?);
-        }
-        Ok(out)
+        list_jobs_by_state_core(&conn, state)
     }
+}
+
+/// Connection-parameterized core of [`JobRepository::insert_job`]. Callable
+/// directly from inside a `Storage::transaction()` closure (see this
+/// module's top doc comment) — this is exactly what
+/// `crates/loki-acceptance-store` does for ADR-0006 step 5's "create ...
+/// the durable job/command" for approval-gated methods.
+pub fn insert_job_core(conn: &Connection, job: &NewJob) -> Result<(), StorageError> {
+    validate_utc_timestamp("created_at", &job.created_at)?;
+    validate_utc_timestamp("updated_at", &job.updated_at)?;
+
+    conn.execute(
+        "INSERT INTO jobs (job_id, state, idempotency_key, correlation_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            job.job_id.as_str(),
+            job.state.as_str(),
+            job.idempotency_key,
+            job.correlation_id.as_str(),
+            job.created_at,
+            job.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_job_core(conn: &Connection, id: &JobId) -> Result<Option<JobRecord>, StorageError> {
+    let raw: Option<RawJobRow> = conn
+        .query_row(
+            &format!("SELECT {SELECT_COLUMNS} FROM jobs WHERE job_id = ?1"),
+            params![id.as_str()],
+            row_to_raw,
+        )
+        .optional()?;
+    raw.map(raw_to_record).transpose()
+}
+
+pub fn get_job_by_idempotency_key_core(
+    conn: &Connection,
+    key: &str,
+) -> Result<Option<JobRecord>, StorageError> {
+    let raw: Option<RawJobRow> = conn
+        .query_row(
+            &format!("SELECT {SELECT_COLUMNS} FROM jobs WHERE idempotency_key = ?1"),
+            params![key],
+            row_to_raw,
+        )
+        .optional()?;
+    raw.map(raw_to_record).transpose()
+}
+
+pub fn transition_job_state_core(
+    conn: &Connection,
+    id: &JobId,
+    state: JobState,
+    updated_at: &str,
+) -> Result<(), StorageError> {
+    validate_utc_timestamp("updated_at", updated_at)?;
+    let changed = conn.execute(
+        "UPDATE jobs SET state = ?1, updated_at = ?2 WHERE job_id = ?3",
+        params![state.as_str(), updated_at, id.as_str()],
+    )?;
+    if changed == 0 {
+        return Err(StorageError::NotFound {
+            kind: "job",
+            id: id.as_str().to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn complete_job_core(
+    conn: &Connection,
+    id: &JobId,
+    evidence_refs_json: Option<&str>,
+    result_json: Option<&str>,
+    updated_at: &str,
+) -> Result<(), StorageError> {
+    validate_utc_timestamp("updated_at", updated_at)?;
+    let changed = conn.execute(
+        "UPDATE jobs SET state = ?1, evidence_refs_json = ?2, result_json = ?3, updated_at = ?4
+         WHERE job_id = ?5",
+        params![
+            JobState::Succeeded.as_str(),
+            evidence_refs_json,
+            result_json,
+            updated_at,
+            id.as_str()
+        ],
+    )?;
+    if changed == 0 {
+        return Err(StorageError::NotFound {
+            kind: "job",
+            id: id.as_str().to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn fail_job_core(
+    conn: &Connection,
+    id: &JobId,
+    error_json: &str,
+    updated_at: &str,
+) -> Result<(), StorageError> {
+    validate_utc_timestamp("updated_at", updated_at)?;
+    let changed = conn.execute(
+        "UPDATE jobs SET state = ?1, error_json = ?2, updated_at = ?3 WHERE job_id = ?4",
+        params![
+            JobState::Failed.as_str(),
+            error_json,
+            updated_at,
+            id.as_str()
+        ],
+    )?;
+    if changed == 0 {
+        return Err(StorageError::NotFound {
+            kind: "job",
+            id: id.as_str().to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn list_jobs_by_state_core(
+    conn: &Connection,
+    state: JobState,
+) -> Result<Vec<JobRecord>, StorageError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLUMNS} FROM jobs WHERE state = ?1 ORDER BY created_at"
+    ))?;
+    let rows = stmt.query_map(params![state.as_str()], row_to_raw)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(raw_to_record(row?)?);
+    }
+    Ok(out)
 }
 
 struct RawJobRow {

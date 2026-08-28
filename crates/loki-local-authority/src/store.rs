@@ -1,58 +1,75 @@
-use std::{path::Path, sync::Mutex};
+use std::{path::Path, sync::Arc};
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use loki_storage::local_authority::{
+    AuthoritySessionRow, InstallationRow, LocalAuthorityRepository, NewAuthoritySessionRow,
+};
+use loki_storage::{Cipher, Storage};
 use uuid::Uuid;
 
 use crate::{
     AuthorityError, CloudCapability, LocalCapability, LocalContext, LocalInstallation, LocalSession,
 };
 
+/// Back-compat constructors ([`LocalAuthority::open`]/[`LocalAuthority::open_in_memory`])
+/// build a private `Storage` and must supply *some* `applied_at` value to
+/// [`Storage::run_migrations`]; this crate has no clock (that stance is
+/// `loki-storage`'s own — see `loki_storage::timestamp`), and the value is
+/// pure `schema_migrations` bookkeeping, never read back by this crate. A
+/// fixed epoch sentinel keeps that honest rather than fabricating a
+/// plausible-looking "now."
+const BACK_COMPAT_MIGRATION_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+
+/// Windows-bound local installation authority (`LOC-001`).
+///
+/// # `P1-ACCEPTANCE-STORE-001` consolidation
+///
+/// Previously wrapped its own independent `Mutex<Connection>`, opened via
+/// `loki_storage::open_or_migrate_sqlcipher`/`Connection::open_in_memory()`,
+/// running its own ad hoc `CREATE TABLE IF NOT EXISTS` schema. Now wraps a
+/// shared `loki_storage::Storage` (the same one `crates/loki-approvals`,
+/// `crates/loki-agents`, `crates/loki-agent-delivery`, and
+/// `crates/loki-acceptance-store` can share), with schema owned by
+/// `loki-storage`'s own versioned migrations
+/// (`migrations/0006_agent_delivery_and_local_authority.sql`) and all SQL
+/// moved into `loki_storage::local_authority`. [`LocalAuthority::open`]/
+/// [`LocalAuthority::open_in_memory`] remain unmodified in signature and
+/// behavior (each now builds its own private `Storage` internally) so
+/// existing callers outside this consolidation (`crates/loki-local-devices`,
+/// `crates/loki-local-setup`) keep working unmodified — [`LocalAuthority::new`]
+/// is the new shared-`Storage` construction path this packet requires.
 pub struct LocalAuthority {
-    connection: Mutex<Connection>,
+    storage: Arc<Storage>,
 }
 
 impl LocalAuthority {
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated `Storage` at `path` (Windows DPAPI-managed SQLCipher),
+    /// then delegates to [`LocalAuthority::new`].
     pub fn open(
         path: impl AsRef<Path>,
         protected_key_path: impl AsRef<Path>,
     ) -> Result<Self, AuthorityError> {
-        let (connection, _key) =
-            loki_storage::open_or_migrate_sqlcipher(path.as_ref(), protected_key_path.as_ref())?;
-        Self::from_connection(connection)
+        let storage = Storage::open_managed(path.as_ref(), protected_key_path.as_ref())?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
 
+    /// Back-compat convenience constructor: builds a private, dedicated,
+    /// fully migrated in-memory `Storage`, then delegates to
+    /// [`LocalAuthority::new`].
     pub fn open_in_memory() -> Result<Self, AuthorityError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        let storage = Storage::open_in_memory(Cipher::None)?;
+        storage.run_migrations(BACK_COMPAT_MIGRATION_TIMESTAMP)?;
+        Ok(Self::new(Arc::new(storage)))
     }
 
-    fn from_connection(connection: Connection) -> Result<Self, AuthorityError> {
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys = ON;
-             CREATE TABLE IF NOT EXISTS local_installation_authority (
-               singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-               installation_id TEXT NOT NULL UNIQUE,
-               owner_sid TEXT NOT NULL,
-               created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0)
-             );
-             CREATE TABLE IF NOT EXISTS local_authority_sessions (
-               session_id TEXT PRIMARY KEY,
-               installation_id TEXT NOT NULL,
-               principal_sid TEXT NOT NULL,
-               ipc_session_id TEXT NOT NULL,
-               correlation_id TEXT NOT NULL UNIQUE,
-               issued_at_ms INTEGER NOT NULL CHECK (issued_at_ms >= 0),
-               expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > issued_at_ms),
-               revoked_at_ms INTEGER,
-               FOREIGN KEY (installation_id)
-                 REFERENCES local_installation_authority(installation_id)
-             );
-             CREATE INDEX IF NOT EXISTS idx_local_sessions_expiry
-               ON local_authority_sessions(expires_at_ms);",
-        )?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+    /// Constructs a `LocalAuthority` over an already-open, already-migrated,
+    /// shared `Storage` — the `P1-ACCEPTANCE-STORE-001` composition path.
+    /// Infallible: unlike the old per-crate connection, schema readiness is
+    /// the caller's responsibility (via `Storage::run_migrations`), not
+    /// this constructor's.
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
     }
 
     /// Creates the installation record once, or verifies that the existing
@@ -69,17 +86,17 @@ impl LocalAuthority {
                 reason: "must be non-negative UTC epoch milliseconds".to_string(),
             });
         }
-        let mut connection = self.connection.lock().map_err(|_| {
-            AuthorityError::Conflict("authority database lock was poisoned".to_string())
-        })?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = load_installation(&transaction)?;
+        let existing = self.storage.get_installation()?;
         let installation = match existing {
             Some(existing) => {
                 if existing.owner_sid != context.principal_sid() {
                     return Err(AuthorityError::WrongPrincipal);
                 }
-                existing
+                LocalInstallation {
+                    installation_id: existing.installation_id,
+                    owner_sid: existing.owner_sid,
+                    created_at_ms: existing.created_at_ms,
+                }
             }
             None => {
                 let installation = LocalInstallation {
@@ -87,20 +104,14 @@ impl LocalAuthority {
                     owner_sid: context.principal_sid().to_string(),
                     created_at_ms: now_ms,
                 };
-                transaction.execute(
-                    "INSERT INTO local_installation_authority
-                     (singleton, installation_id, owner_sid, created_at_ms)
-                     VALUES (1, ?1, ?2, ?3)",
-                    params![
-                        installation.installation_id,
-                        installation.owner_sid,
-                        installation.created_at_ms
-                    ],
-                )?;
+                self.storage.insert_installation(&InstallationRow {
+                    installation_id: installation.installation_id.clone(),
+                    owner_sid: installation.owner_sid.clone(),
+                    created_at_ms: installation.created_at_ms,
+                })?;
                 installation
             }
         };
-        transaction.commit()?;
         Ok(installation)
     }
 
@@ -110,34 +121,38 @@ impl LocalAuthority {
         now_ms: i64,
         lifetime_ms: i64,
     ) -> Result<LocalSession, AuthorityError> {
-        let mut connection = self.connection.lock().map_err(|_| {
-            AuthorityError::Conflict("authority database lock was poisoned".to_string())
-        })?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let installation = load_installation(&transaction)?.ok_or_else(|| {
+        let installation = self.storage.get_installation()?.ok_or_else(|| {
             AuthorityError::Conflict("installation authority is not initialized".to_string())
         })?;
         if installation.owner_sid != context.principal_sid() {
             return Err(AuthorityError::WrongPrincipal);
         }
+        let installation = LocalInstallation {
+            installation_id: installation.installation_id,
+            owner_sid: installation.owner_sid,
+            created_at_ms: installation.created_at_ms,
+        };
         let session = LocalSession::issue(&installation, context, now_ms, lifetime_ms)?;
-        transaction.execute(
-            "INSERT INTO local_authority_sessions
-             (session_id, installation_id, principal_sid, ipc_session_id,
-              correlation_id, issued_at_ms, expires_at_ms, revoked_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
-            params![
-                session.session_id,
-                session.installation_id,
-                session.principal_sid,
-                session.ipc_session_id,
-                session.correlation_id,
-                session.issued_at_ms,
-                session.expires_at_ms
-            ],
-        )?;
-        transaction.commit()?;
-        Ok(session)
+        // `P1-PRINCIPAL-GRANT-001`: the storage layer atomically assigns
+        // this principal's next durable session generation and returns it
+        // — this is the real value; `LocalSession::issue`'s own `0` is only
+        // ever a placeholder overwritten right here, before this session is
+        // returned to any caller.
+        let generation = self
+            .storage
+            .insert_authority_session(&NewAuthoritySessionRow {
+                session_id: session.session_id.clone(),
+                installation_id: session.installation_id.clone(),
+                principal_sid: session.principal_sid.clone(),
+                ipc_session_id: session.ipc_session_id.clone(),
+                correlation_id: session.correlation_id.clone(),
+                issued_at_ms: session.issued_at_ms,
+                expires_at_ms: session.expires_at_ms,
+            })?;
+        Ok(LocalSession {
+            generation,
+            ..session
+        })
     }
 
     pub fn authorize_local(
@@ -177,12 +192,11 @@ impl LocalAuthority {
         session_id: &str,
         now_ms: i64,
     ) -> Result<(), AuthorityError> {
-        let mut connection = self.connection.lock().map_err(|_| {
-            AuthorityError::Conflict("authority database lock was poisoned".to_string())
-        })?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session =
-            load_session(&transaction, session_id)?.ok_or(AuthorityError::SessionNotFound)?;
+        let session = self
+            .storage
+            .get_authority_session(session_id)?
+            .ok_or(AuthorityError::SessionNotFound)?;
+        let session = row_to_session(session);
         validate_context(&session, context)?;
         if session.revoked_at_ms.is_some() {
             return Err(AuthorityError::SessionRevoked);
@@ -193,15 +207,10 @@ impl LocalAuthority {
                 reason: "cannot predate session issuance".to_string(),
             });
         }
-        let changed = transaction.execute(
-            "UPDATE local_authority_sessions SET revoked_at_ms = ?1
-             WHERE session_id = ?2 AND revoked_at_ms IS NULL",
-            params![now_ms, session_id],
-        )?;
-        if changed != 1 {
+        let revoked = self.storage.revoke_authority_session(session_id, now_ms)?;
+        if !revoked {
             return Err(AuthorityError::SessionRevoked);
         }
-        transaction.commit()?;
         Ok(())
     }
 
@@ -211,11 +220,11 @@ impl LocalAuthority {
         session_id: &str,
         now_ms: i64,
     ) -> Result<LocalSession, AuthorityError> {
-        let connection = self.connection.lock().map_err(|_| {
-            AuthorityError::Conflict("authority database lock was poisoned".to_string())
-        })?;
-        let session =
-            load_session(&connection, session_id)?.ok_or(AuthorityError::SessionNotFound)?;
+        let session = self
+            .storage
+            .get_authority_session(session_id)?
+            .ok_or(AuthorityError::SessionNotFound)?;
+        let session = row_to_session(session);
         validate_context(&session, context)?;
         if session.revoked_at_ms.is_some() {
             return Err(AuthorityError::SessionRevoked);
@@ -233,6 +242,20 @@ impl LocalAuthority {
     }
 }
 
+fn row_to_session(row: AuthoritySessionRow) -> LocalSession {
+    LocalSession {
+        session_id: row.session_id,
+        installation_id: row.installation_id,
+        principal_sid: row.principal_sid,
+        ipc_session_id: row.ipc_session_id,
+        correlation_id: row.correlation_id,
+        issued_at_ms: row.issued_at_ms,
+        expires_at_ms: row.expires_at_ms,
+        revoked_at_ms: row.revoked_at_ms,
+        generation: row.generation,
+    }
+}
+
 fn validate_context(session: &LocalSession, context: &LocalContext) -> Result<(), AuthorityError> {
     if session.principal_sid != context.principal_sid()
         || session.ipc_session_id != context.ipc_session_id()
@@ -240,51 +263,6 @@ fn validate_context(session: &LocalSession, context: &LocalContext) -> Result<()
         return Err(AuthorityError::SessionContextMismatch);
     }
     Ok(())
-}
-
-fn load_installation(connection: &Connection) -> Result<Option<LocalInstallation>, AuthorityError> {
-    connection
-        .query_row(
-            "SELECT installation_id, owner_sid, created_at_ms
-             FROM local_installation_authority WHERE singleton = 1",
-            [],
-            |row| {
-                Ok(LocalInstallation {
-                    installation_id: row.get(0)?,
-                    owner_sid: row.get(1)?,
-                    created_at_ms: row.get(2)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
-}
-
-fn load_session(
-    connection: &Connection,
-    session_id: &str,
-) -> Result<Option<LocalSession>, AuthorityError> {
-    connection
-        .query_row(
-            "SELECT session_id, installation_id, principal_sid, ipc_session_id,
-                    correlation_id, issued_at_ms, expires_at_ms, revoked_at_ms
-             FROM local_authority_sessions WHERE session_id = ?1",
-            [session_id],
-            |row| {
-                Ok(LocalSession {
-                    session_id: row.get(0)?,
-                    installation_id: row.get(1)?,
-                    principal_sid: row.get(2)?,
-                    ipc_session_id: row.get(3)?,
-                    correlation_id: row.get(4)?,
-                    issued_at_ms: row.get(5)?,
-                    expires_at_ms: row.get(6)?,
-                    revoked_at_ms: row.get(7)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -463,8 +441,8 @@ mod tests {
         assert!(
             !std::fs::read(&path)
                 .unwrap()
-                .windows(b"local_authority_state".len())
-                .any(|window| window == b"local_authority_state"),
+                .windows(b"local_authority_sessions".len())
+                .any(|window| window == b"local_authority_sessions"),
             "authority schema marker must not be plaintext on disk"
         );
     }
@@ -504,5 +482,51 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    /// `P1-PRINCIPAL-GRANT-001` acceptance criterion (Section 7/8): two real
+    /// OS threads issuing sessions for the *same* principal simultaneously
+    /// must never produce a duplicate `generation` — the atomic
+    /// `MAX(generation)+1`-then-`INSERT` critical section inside
+    /// `insert_authority_session_core`, serialized by `Storage`'s
+    /// single-writer mutex, is what this test actually proves, not merely
+    /// sequential-test-passing. Mirrors `concurrent_revocation_has_exactly_one_winner`'s
+    /// real-thread style.
+    #[test]
+    fn concurrent_session_issuance_yields_distinct_generations() {
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
+        let authority = Arc::new(LocalAuthority::open_in_memory().unwrap());
+        let owner = context(OWNER, "ipc-1");
+        authority.initialize_current(&owner, 1_000).unwrap();
+        let barrier = Arc::new(Barrier::new(8));
+
+        let attempts: Vec<_> = (0..8)
+            .map(|offset| {
+                let authority = Arc::clone(&authority);
+                let barrier = Arc::clone(&barrier);
+                let owner = owner.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    authority
+                        .issue_session(&owner, 2_000 + offset, 60_000)
+                        .unwrap()
+                })
+            })
+            .collect();
+
+        let sessions: Vec<_> = attempts
+            .into_iter()
+            .map(|attempt| attempt.join().unwrap())
+            .collect();
+        let mut generations: Vec<u64> = sessions.iter().map(|s| s.generation).collect();
+        generations.sort_unstable();
+        let mut deduped = generations.clone();
+        deduped.dedup();
+        assert_eq!(
+            generations.len(),
+            deduped.len(),
+            "no two concurrently issued sessions for the same principal may share a generation: {generations:?}"
+        );
+        assert_eq!(generations, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

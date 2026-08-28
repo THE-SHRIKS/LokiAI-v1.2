@@ -193,20 +193,49 @@ impl Storage {
         Ok(())
     }
 
-    /// Runs `f` inside a single SQLite transaction: if `f` returns `Err`,
-    /// every statement `f` executed is rolled back — nothing partial is
-    /// observable afterward (`Docs/graph/tasks/DAT-001.md` Deliverable 5).
-    /// Crate-internal: used by the migration runner
-    /// (`src/migrations.rs` calls `Connection::transaction` directly, not
-    /// through here, since it also owns `&mut Connection` before `Storage`
-    /// exists) and by this module's own rollback test. Not part of the
-    /// public API yet — see `Docs/graph/handoffs/DAT-001-1.md` §7 for why a
-    /// public cross-repository transactional primitive is left to the node
-    /// that has a concrete multi-repository atomic write to build (the
-    /// classic transactional-outbox use case), rather than speculatively
-    /// shaped here.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn transaction<T>(
+    /// Runs `f` inside a single, real SQLite transaction: if `f` returns
+    /// `Err`, every statement `f` executed is rolled back — nothing partial
+    /// is observable afterward (`Docs/graph/tasks/DAT-001.md` Deliverable
+    /// 5). A panic inside `f` also rolls back: `rusqlite::Transaction`'s
+    /// `Drop` implementation runs `ROLLBACK` if `commit()` was never
+    /// reached, and dropping the `MutexGuard` this function holds (via
+    /// unwinding through `self.lock()`'s caller) leaves the connection
+    /// poisoned-but-recoverable for the next caller (see
+    /// [`Storage::lock`]'s doc comment) rather than unusable.
+    ///
+    /// This is `P1-ACCEPTANCE-STORE-001`'s real cross-repository atomic
+    /// write primitive (`Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md`):
+    /// the single encrypted-SQLite-transaction mutation acceptance boundary
+    /// composes `crates/loki-storage`'s `jobs`/`outbox`/`approvals`/
+    /// `agents`/`agent_delivery`/`local_authority`/`mutation_acceptance`
+    /// repositories inside one call to this function, from
+    /// `crates/loki-acceptance-store`. Previously left `pub(crate)` and
+    /// unused outside this crate's own tests/migration runner — see
+    /// `Docs/graph/handoffs/DAT-001-1.md` §7 for why a public
+    /// cross-repository transactional primitive was deferred until a node
+    /// had a concrete multi-repository atomic write to build; this is that
+    /// node.
+    ///
+    /// # Concurrency contract — read before calling
+    ///
+    /// This crate's every repository trait method (`JobRepository`,
+    /// `OutboxRepository`, `ApprovalsRepository`, `AgentsRepository`,
+    /// `AgentDeliveryRepository`, `LocalAuthorityRepository`,
+    /// `MutationAcceptanceRepository`) calls `self.lock()` internally to
+    /// reach the single `Mutex<Connection>` this struct wraps. `f` above
+    /// already runs while that same mutex is held (this function calls
+    /// `self.lock()` once, before invoking `f`) — `std::sync::Mutex` is
+    /// **not reentrant**, so calling any of those `self.lock()`-based trait
+    /// methods on this same `Storage` from inside `f` deadlocks the calling
+    /// thread. Every repository module above instead exposes a private,
+    /// connection-parameterized core function (e.g. `jobs::insert_job_core`,
+    /// `outbox::enqueue_outbox_message_core`) that takes `&rusqlite::Connection`
+    /// directly — `&rusqlite::Transaction<'_>` derefs to
+    /// `&rusqlite::Connection`, so `f` calls those core functions directly
+    /// with the `&rusqlite::Transaction<'_>` it is given, never
+    /// `self.lock()`-based methods, never a second `Storage::transaction`
+    /// call on the same `Storage`.
+    pub fn transaction<T>(
         &self,
         f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, StorageError>,
     ) -> Result<T, StorageError> {
