@@ -54,7 +54,7 @@ pub mod request;
 pub mod result;
 pub mod revocation;
 
-pub use digest::{IdempotencyKey, RequestDigest, compute_request_digest};
+pub use digest::{IdempotencyKey, OperationBinding, RequestDigest};
 pub use error::MutationContractError;
 pub use grant::{GrantGeneration, evaluate_grant};
 pub use method::{MutationMethod, PolicyTier};

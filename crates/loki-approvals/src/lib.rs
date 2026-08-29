@@ -21,9 +21,9 @@
 use std::{fmt, path::Path, sync::Arc};
 
 use loki_local_authority::{AuthorityError, LocalAuthority, LocalCapability, LocalContext};
+use loki_mutation_contract::{IdempotencyKey, MutationMethod, OperationBinding};
 use loki_storage::approvals::{ApprovalsRepository, ConsumeOutcome, NewApproval};
 use loki_storage::{Cipher, Storage};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const MAX_FIELD: usize = 256;
@@ -55,6 +55,7 @@ pub fn evaluate_operation(operation: &str) -> PolicyDecision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub actor_id: String,
+    pub grant_generation: u64,
     pub operation: String,
     pub target_id: String,
     pub artifact_digest: Option<String>,
@@ -67,21 +68,33 @@ impl ApprovalRequest {
     pub fn digest(&self, principal_sid: &str) -> Result<String, ApprovalError> {
         self.validate()?;
         validate("principal_sid", principal_sid, MAX_FIELD)?;
-        let mut canonical = Vec::new();
-        canonical.extend_from_slice(b"lokiai-approval-v1");
-        for value in [
+        let method = MutationMethod::parse(&self.operation).map_err(|error| {
+            ApprovalError::InvalidInput {
+                field: "operation",
+                reason: error.to_string(),
+            }
+        })?;
+        let key = IdempotencyKey::new(self.idempotency_key.clone()).map_err(|error| {
+            ApprovalError::InvalidInput {
+                field: "idempotency_key",
+                reason: error.to_string(),
+            }
+        })?;
+        let binding = OperationBinding::new(
             principal_sid,
-            &self.actor_id,
-            &self.operation,
-            &self.target_id,
-            self.artifact_digest.as_deref().unwrap_or("<absent>"),
-            &self.parameters_digest,
-            &self.idempotency_key,
-        ] {
-            canonical.extend_from_slice(&(value.len() as u64).to_be_bytes());
-            canonical.extend_from_slice(value.as_bytes());
-        }
-        Ok(format!("sha256:{:x}", Sha256::digest(canonical)))
+            self.actor_id.clone(),
+            self.grant_generation,
+            method,
+            self.target_id.clone(),
+            self.artifact_digest.clone(),
+            self.parameters_digest.clone(),
+            key,
+        )
+        .map_err(|error| ApprovalError::InvalidInput {
+            field: "operation_binding",
+            reason: error.to_string(),
+        })?;
+        Ok(binding.digest().to_string())
     }
 
     fn validate(&self) -> Result<(), ApprovalError> {
@@ -258,8 +271,10 @@ impl ApprovalStore {
         self.storage.insert_approval(&NewApproval {
             approval_id: record.approval_id.clone(),
             request_digest: record.request_digest.clone(),
+            binding_version: loki_storage::approvals::CURRENT_BINDING_VERSION,
             requester_sid: record.requester_sid.clone(),
             actor_id: record.actor_id.clone(),
+            grant_generation: request.grant_generation,
             operation: record.operation.clone(),
             target_id: record.target_id.clone(),
             artifact_digest: record.artifact_digest.clone(),
@@ -380,6 +395,7 @@ mod tests {
     fn request() -> ApprovalRequest {
         ApprovalRequest {
             actor_id: "agent-1".into(),
+            grant_generation: 1,
             operation: "flash".into(),
             target_id: "binding-1".into(),
             artifact_digest: Some("sha256:artifact".into()),

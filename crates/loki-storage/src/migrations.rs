@@ -77,6 +77,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "agent_grant_generation",
         sql: include_str!("../migrations/0009_agent_grant_generation.sql"),
     },
+    Migration {
+        version: 10,
+        name: "approval_operation_binding",
+        sql: include_str!("../migrations/0010_approval_operation_binding.sql"),
+    },
 ];
 
 /// What [`crate::Storage::run_migrations`] actually did on a given call.
@@ -163,7 +168,7 @@ mod tests {
         crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let report = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
-        assert_eq!(report.applied_versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(report.applied_versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         let table_count: i64 = conn
             .query_row(
@@ -187,7 +192,7 @@ mod tests {
         crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let first = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
-        assert_eq!(first.applied_versions.len(), 9);
+        assert_eq!(first.applied_versions.len(), 10);
 
         let second = apply_all(&mut conn, MIGRATIONS, "2026-01-02T00:00:00Z").unwrap();
         assert!(second.is_up_to_date(), "second run must apply nothing new");
@@ -195,7 +200,7 @@ mod tests {
         let recorded: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(recorded, 9, "must not duplicate schema_migrations rows");
+        assert_eq!(recorded, 10, "must not duplicate schema_migrations rows");
     }
 
     #[test]

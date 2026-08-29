@@ -9,11 +9,9 @@ description = "Local policy and digest-bound single-use approvals (APR-001)."
 
 [dependencies]
 loki-local-authority = { path = "../loki-local-authority" }
+loki-mutation-contract = { path = "../loki-mutation-contract" }
 loki-storage = { path = "../loki-storage" }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
-# Pure Rust SHA-256 for canonical request binding. RustCrypto, MIT/Apache-2.0,
-# actively maintained; small and removable behind `request_digest`.
-sha2 = "=0.10.9"
 uuid = { version = "=1.24.1", features = ["v4"] }
 
 [dev-dependencies]

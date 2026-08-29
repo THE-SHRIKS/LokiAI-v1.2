@@ -240,6 +240,8 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "loki-acceptance-store"
 version = "1.2.0"
 dependencies = [
+ "loki-approvals",
+ "loki-local-authority",
  "loki-mutation-contract",
  "loki-storage",
  "rusqlite",
@@ -280,9 +282,9 @@ name = "loki-approvals"
 version = "1.2.0"
 dependencies = [
  "loki-local-authority",
+ "loki-mutation-contract",
  "loki-storage",
  "rusqlite",
- "sha2",
  "tempfile",
  "uuid",
 ]

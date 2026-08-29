@@ -164,7 +164,7 @@ pub fn evaluate_replay(
     existing: &AcceptanceRecordView,
     incoming: &MutationAcceptanceRequest,
 ) -> ReplayDecision {
-    if existing.request_digest == incoming.request_digest {
+    if existing.request_digest == incoming.request_digest() {
         ReplayDecision::Identical
     } else {
         ReplayDecision::DigestConflict
@@ -210,8 +210,8 @@ pub fn construct_accepted(
     correlation_id: CorrelationId,
     accepted_at_ms: i64,
 ) -> Result<AcceptanceResult, MutationContractError> {
-    if request.method.requires_approval() {
-        match &request.approval_reference {
+    if request.binding().method().requires_approval() {
+        match request.approval_reference() {
             None => {
                 return Err(MutationContractError::InvalidInput {
                     field: "approval_reference",
@@ -219,9 +219,11 @@ pub fn construct_accepted(
                 });
             }
             Some(reference) => {
-                if let Err(rejection) =
-                    evaluate_approval_reference(reference, &request.request_digest, accepted_at_ms)
-                {
+                if let Err(rejection) = evaluate_approval_reference(
+                    reference,
+                    &request.request_digest(),
+                    accepted_at_ms,
+                ) {
                     return Ok(AcceptanceResult::Rejected(rejection));
                 }
             }
@@ -251,10 +253,12 @@ mod tests {
     fn agent_request() -> MutationAcceptanceRequest {
         MutationAcceptanceRequest::new(
             "S-1-5-21-principal",
+            "agent-1",
             1,
             MutationMethod::AgentRunRegister,
             "target-1",
             None,
+            "sha256:parameters",
             IdempotencyKey::new("idem-1").unwrap(),
             None,
         )
@@ -264,10 +268,12 @@ mod tests {
     fn flash_request(approval_reference: Option<ApprovalReference>) -> MutationAcceptanceRequest {
         MutationAcceptanceRequest::new(
             "S-1-5-21-principal",
+            "agent-1",
             1,
             MutationMethod::Flash,
             "target-1",
             Some("sha256:artifact".to_string()),
+            "sha256:parameters",
             IdempotencyKey::new("idem-1").unwrap(),
             approval_reference,
         )
@@ -281,7 +287,7 @@ mod tests {
             job_id: job_id(),
             correlation_id: correlation_id(),
             accepted_at_ms: 5_000,
-            request_digest: incoming.request_digest.clone(),
+            request_digest: incoming.request_digest(),
         };
         assert_eq!(
             evaluate_replay(&existing, &incoming),
@@ -301,23 +307,25 @@ mod tests {
     #[test]
     fn same_key_different_digest_is_rejected_as_digest_conflict() {
         let incoming = agent_request();
-        let mut different = agent_request();
-        different.target_id = "target-2".to_string();
+        let different = MutationAcceptanceRequest::new(
+            "S-1-5-21-principal",
+            "agent-1",
+            1,
+            MutationMethod::AgentRunRegister,
+            "target-2",
+            None,
+            "sha256:parameters",
+            IdempotencyKey::new("idem-1").unwrap(),
+            None,
+        )
+        .unwrap();
         let existing = AcceptanceRecordView {
             job_id: job_id(),
             correlation_id: correlation_id(),
             accepted_at_ms: 5_000,
             // simulate a prior record computed for a different target under
             // the same idempotency key
-            request_digest: crate::digest::compute_request_digest(
-                &different.principal_sid,
-                different.grant_generation,
-                different.method,
-                &different.target_id,
-                different.artifact_digest.as_deref(),
-                &different.idempotency_key,
-            )
-            .unwrap(),
+            request_digest: different.request_digest(),
         };
         assert_eq!(
             evaluate_replay(&existing, &incoming),
@@ -340,7 +348,7 @@ mod tests {
         let request = flash_request(None);
         let valid = flash_request(Some(ApprovalReference {
             approval_id: "apr_1".to_string(),
-            bound_request_digest: request.request_digest.clone(),
+            bound_request_digest: request.request_digest(),
             expires_at_ms: 10_000,
         }));
         let accepted = construct_accepted(&valid, job_id(), correlation_id(), 5_000).unwrap();
@@ -380,7 +388,7 @@ mod tests {
         let request = flash_request(None);
         let expired = flash_request(Some(ApprovalReference {
             approval_id: "apr_1".to_string(),
-            bound_request_digest: request.request_digest.clone(),
+            bound_request_digest: request.request_digest(),
             expires_at_ms: 5_000,
         }));
         // accepted_at_ms (10_000) has reached/passed expires_at_ms (5_000)

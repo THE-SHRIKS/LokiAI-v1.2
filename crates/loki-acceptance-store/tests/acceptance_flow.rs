@@ -8,6 +8,8 @@
 use std::sync::{Arc, Barrier};
 
 use loki_acceptance_store::{AcceptanceStoreError, accept_mutation, clock};
+use loki_approvals::{ApprovalRequest, ApprovalStore};
+use loki_local_authority::{LocalAuthority, LocalContext};
 use loki_mutation_contract::{
     AcceptanceResult, ApprovalReference, IdempotencyKey, MutationAcceptanceRequest,
     MutationContractError, MutationMethod, MutationRejection,
@@ -127,10 +129,12 @@ fn agent_request(
 ) -> MutationAcceptanceRequest {
     MutationAcceptanceRequest::new(
         principal_sid,
+        "agent-1",
         generation,
         MutationMethod::AgentRunRegister,
         target,
         None,
+        "sha256:params",
         IdempotencyKey::new(idem).unwrap(),
         None,
     )
@@ -139,13 +143,10 @@ fn agent_request(
 
 /// Builds a `Flash` request together with a real, granted, unconsumed
 /// `local_approvals` row whose `request_digest` exactly matches this
-/// request's own computed digest — the two digest algorithms
-/// (`loki_approvals::ApprovalRequest::digest()` vs.
-/// `loki_mutation_contract::compute_request_digest`) are independent by
-/// design (see `P1-MUTATION-CONTRACT-001` §9 item 5); reconciling them is a
-/// future RPC-layer concern, not this node's. This test seeds the row
-/// directly through `loki_storage::approvals` so the digest is exactly
-/// right for a positive test, without depending on `loki-approvals` at all.
+/// request's own computed digest. This low-level helper deliberately seeds
+/// the repository only for adversarial expiry/race/fault scenarios that
+/// require otherwise-impossible persisted states. The positive integration
+/// path below uses `ApprovalStore::create` and never calls this helper.
 fn flash_request_with_granted_approval(
     storage: &Storage,
     principal_sid: &str,
@@ -157,10 +158,12 @@ fn flash_request_with_granted_approval(
 ) -> MutationAcceptanceRequest {
     let probe = MutationAcceptanceRequest::new(
         principal_sid,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         target,
         Some("sha256:artifact".to_string()),
+        "sha256:params",
         IdempotencyKey::new(idem).unwrap(),
         None,
     )
@@ -168,9 +171,11 @@ fn flash_request_with_granted_approval(
     storage
         .insert_approval(&NewApproval {
             approval_id: approval_id.to_string(),
-            request_digest: probe.request_digest.as_str().to_string(),
+            request_digest: probe.request_digest().as_str().to_string(),
+            binding_version: loki_storage::approvals::CURRENT_BINDING_VERSION,
             requester_sid: principal_sid.to_string(),
             actor_id: "agent-1".to_string(),
+            grant_generation: generation,
             operation: "flash".to_string(),
             target_id: target.to_string(),
             artifact_digest: Some("sha256:artifact".to_string()),
@@ -189,18 +194,88 @@ fn flash_request_with_granted_approval(
     );
     MutationAcceptanceRequest::new(
         principal_sid,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         target,
         Some("sha256:artifact".to_string()),
+        "sha256:params",
         IdempotencyKey::new(idem).unwrap(),
         Some(ApprovalReference {
             approval_id: approval_id.to_string(),
-            bound_request_digest: probe.request_digest.clone(),
+            bound_request_digest: probe.request_digest(),
             expires_at_ms: approval_expires_at_ms,
         }),
     )
     .unwrap()
+}
+
+/// Builds a granted approval through the production `ApprovalStore::create`
+/// path and then submits the exact same immutable binding to mutation
+/// acceptance. This prevents a storage-seeded digest from masking drift
+/// between approval creation and runtime acceptance.
+fn real_flash_request_with_granted_approval(
+    storage: &Arc<Storage>,
+    idem: &str,
+    target: &str,
+) -> (MutationAcceptanceRequest, String) {
+    let now = clock::unix_millis_now();
+    let context = LocalContext::current(format!("ipc-{idem}")).unwrap();
+    let authority = LocalAuthority::new(Arc::clone(storage));
+    authority.initialize_current(&context, now - 1_000).unwrap();
+    let session = authority
+        .issue_session(&context, now - 500, 86_400_000)
+        .unwrap();
+    let approvals = ApprovalStore::new(Arc::clone(storage));
+    let approval_request = ApprovalRequest {
+        actor_id: "agent-1".to_string(),
+        grant_generation: session.generation,
+        operation: "flash".to_string(),
+        target_id: target.to_string(),
+        artifact_digest: Some("sha256:artifact".to_string()),
+        parameters_digest: "sha256:params".to_string(),
+        idempotency_key: idem.to_string(),
+        reason: "integration verification".to_string(),
+    };
+    let record = approvals
+        .create(
+            &authority,
+            &context,
+            &session.session_id,
+            &approval_request,
+            now,
+            3_600_000,
+        )
+        .unwrap();
+    approvals
+        .grant(
+            &authority,
+            &context,
+            &session.session_id,
+            &record.approval_id,
+            now + 1,
+        )
+        .unwrap();
+    let request = MutationAcceptanceRequest::new(
+        context.principal_sid(),
+        approval_request.actor_id,
+        session.generation,
+        MutationMethod::Flash,
+        approval_request.target_id,
+        approval_request.artifact_digest,
+        approval_request.parameters_digest,
+        IdempotencyKey::new(approval_request.idempotency_key).unwrap(),
+        Some(ApprovalReference {
+            approval_id: record.approval_id.clone(),
+            bound_request_digest: loki_mutation_contract::RequestDigest::try_from_str(
+                record.request_digest,
+            )
+            .unwrap(),
+            expires_at_ms: record.expires_at_ms,
+        }),
+    )
+    .unwrap();
+    (request, record.approval_id)
 }
 
 /// Every test in this file uses fresh, isolated, per-test temp-directory
@@ -298,10 +373,12 @@ fn local_grant_expiry_denies_acceptance_for_approval_required_method() {
     let (generation, _expires) = seed_grant(&storage, PRINCIPAL_SID, 1_000, 60_000, None);
     let request = MutationAcceptanceRequest::new(
         PRINCIPAL_SID,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         "target-1",
         Some("sha256:artifact".to_string()),
+        "sha256:params",
         IdempotencyKey::new("idem-expired-1").unwrap(),
         None,
     )
@@ -375,10 +452,12 @@ fn local_grant_revocation_denies_acceptance() {
         seed_grant(&storage, PRINCIPAL_SID, now, 86_400_000, Some(now + 1));
     let request = MutationAcceptanceRequest::new(
         PRINCIPAL_SID,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         "target-1",
         Some("sha256:artifact".to_string()),
+        "sha256:params",
         IdempotencyKey::new("idem-revoked-1").unwrap(),
         None,
     )
@@ -432,10 +511,12 @@ fn approval_required_without_reference_never_reaches_construct_accepted_bypassed
     let generation = seed_valid_grant(&storage, PRINCIPAL_SID);
     let request = MutationAcceptanceRequest::new(
         PRINCIPAL_SID,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         "target-1",
         Some("sha256:artifact".to_string()),
+        "sha256:params",
         IdempotencyKey::new("idem-no-ref-1").unwrap(),
         None,
     )
@@ -485,17 +566,8 @@ fn agent_method_accepts_without_jobs_row() {
 fn approval_gated_accept_consumes_approval_and_creates_real_job() {
     let dir = tempfile::tempdir().unwrap();
     let storage = open_storage(dir.path(), "db1.sqlite3");
-    let generation = seed_valid_grant(&storage, PRINCIPAL_SID);
-    let now = clock::unix_millis_now();
-    let request = flash_request_with_granted_approval(
-        &storage,
-        PRINCIPAL_SID,
-        generation,
-        "idem-flash-1",
-        "target-1",
-        "apr_test_1",
-        now + 3_600_000,
-    );
+    let (request, approval_id) =
+        real_flash_request_with_granted_approval(&storage, "idem-flash-1", "target-1");
 
     let result = accept_mutation(&storage, &request).unwrap();
     let AcceptanceResult::Accepted(record) = &result else {
@@ -503,7 +575,7 @@ fn approval_gated_accept_consumes_approval_and_creates_real_job() {
     };
     assert!(record.job_id().as_str().starts_with("job_"));
     assert!(storage.get_job(record.job_id()).unwrap().is_some());
-    let approval = storage.get_approval("apr_test_1").unwrap().unwrap();
+    let approval = storage.get_approval(&approval_id).unwrap().unwrap();
     assert!(
         approval.consumed_at_ms.is_some(),
         "approval must be consumed"
@@ -736,7 +808,7 @@ fn fault_injection_after_each_step_leaves_zero_orphan_rows() {
     let generation = seed_valid_grant(&storage, PRINCIPAL_SID);
 
     // The approval's stored `request_digest` must equal the real digest
-    // `loki_mutation_contract::compute_request_digest` derives for the
+    // the shared immutable `OperationBinding` derives for the
     // exact request this test eventually submits (`Flash`/"target-1"/no
     // artifact/"idem-fault-1") — not an arbitrary string — so the final
     // successful `accept_mutation` call at the end of this test genuinely
@@ -744,23 +816,27 @@ fn fault_injection_after_each_step_leaves_zero_orphan_rows() {
     // not a coincidental pass.
     let probe_digest = MutationAcceptanceRequest::new(
         PRINCIPAL_SID,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         "target-1",
         None,
+        "sha256:params",
         IdempotencyKey::new("idem-fault-1").unwrap(),
         None,
     )
     .unwrap()
-    .request_digest
+    .request_digest()
     .as_str()
     .to_string();
     storage
         .insert_approval(&NewApproval {
             approval_id: "apr_fault_1".to_string(),
             request_digest: probe_digest.clone(),
+            binding_version: loki_storage::approvals::CURRENT_BINDING_VERSION,
             requester_sid: PRINCIPAL_SID.to_string(),
             actor_id: "agent-1".to_string(),
+            grant_generation: generation,
             operation: "flash".to_string(),
             target_id: "target-1".to_string(),
             artifact_digest: None,
@@ -925,10 +1001,12 @@ fn fault_injection_after_each_step_leaves_zero_orphan_rows() {
     // above left untouched.
     let final_request = MutationAcceptanceRequest::new(
         PRINCIPAL_SID,
+        "agent-1",
         generation,
         MutationMethod::Flash,
         "target-1",
         None,
+        "sha256:params",
         IdempotencyKey::new("idem-fault-1").unwrap(),
         Some(ApprovalReference {
             approval_id: "apr_fault_1".to_string(),

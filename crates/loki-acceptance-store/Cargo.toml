@@ -56,6 +56,8 @@ uuid = { version = "=1.24.1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"
+loki-approvals = { path = "../loki-approvals" }
+loki-local-authority = { path = "../loki-local-authority" }
 
 # Enables loki-storage's `test-support` feature (a disposable,
 # non-production secure-memory arena bootstrap — DAT-002-MEM-CODE-001) for
