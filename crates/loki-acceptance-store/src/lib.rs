@@ -205,12 +205,12 @@ fn accept_mutation_in_transaction(
     // `request.principal_sid` belongs to (see this crate's top doc
     // comment) — no shared read/conversion path between the two branches
     // (ADR-0007's "no shared merge" requirement).
-    let generation = if request.method.requires_approval() {
+    let generation = if request.method().requires_approval() {
         let Some(grant_row): Option<LocalGrantGenerationRow> =
             local_authority::find_local_generation_core(
                 tx,
-                &request.principal_sid,
-                request.grant_generation,
+                request.principal_sid(),
+                request.grant_generation(),
             )?
         else {
             return Ok(Ok(AcceptanceResult::Rejected(
@@ -239,8 +239,8 @@ fn accept_mutation_in_transaction(
     } else {
         let Some(grant_row): Option<AgentGrantGenerationRow> = agents::find_agent_generation_core(
             tx,
-            &request.principal_sid,
-            request.grant_generation,
+            request.principal_sid(),
+            request.grant_generation(),
         )?
         else {
             return Ok(Ok(AcceptanceResult::Rejected(
@@ -275,7 +275,7 @@ fn accept_mutation_in_transaction(
 
     // --- Step 3: claim or replay the idempotency record. ---
     if let Some(existing) =
-        mutation_acceptance::get_mutation_acceptance_core(tx, request.idempotency_key.as_str())?
+        mutation_acceptance::get_mutation_acceptance_core(tx, request.idempotency_key().as_str())?
     {
         let view = match existing_row_to_view(existing) {
             Ok(view) => view,
@@ -291,8 +291,8 @@ fn accept_mutation_in_transaction(
 
     // --- Step 4: validate and consume the exact approval when required. ---
     let mut approval_id_to_consume: Option<String> = None;
-    let request_for_construct = if request.method.requires_approval() {
-        match &request.approval_reference {
+    let request_for_construct = if request.method().requires_approval() {
+        match request.approval_reference() {
             None => {
                 // No DB read/write has happened above that this transaction
                 // needs to undo — `construct_accepted` below will raise the
@@ -306,7 +306,9 @@ fn accept_mutation_in_transaction(
                         MutationRejection::ApprovalNotConsumable,
                     )));
                 };
-                let consumable = row.requester_sid == request.principal_sid
+                let consumable = row.binding_version == approvals::CURRENT_BINDING_VERSION
+                    && row.grant_generation == request.grant_generation()
+                    && row.requester_sid == request.principal_sid()
                     && row.granted_at_ms.is_some()
                     && row.consumed_at_ms.is_none();
                 if !consumable {
@@ -320,13 +322,11 @@ fn accept_mutation_in_transaction(
                     Err(e) => return Ok(Err(e)),
                 };
                 approval_id_to_consume = Some(row.approval_id.clone());
-                let mut refreshed_request = request.clone();
-                refreshed_request.approval_reference = Some(ApprovalReference {
+                request.clone().with_approval_reference(ApprovalReference {
                     approval_id: row.approval_id,
                     bound_request_digest: refreshed_digest,
                     expires_at_ms: row.expires_at_ms,
-                });
-                refreshed_request
+                })
             }
         }
     } else {
@@ -335,7 +335,7 @@ fn accept_mutation_in_transaction(
 
     // --- Steps 5-6: create or retrieve the durable job/mutation record,
     // append the transactional outbox record, on `Accepted` only. ---
-    let job_id = if request.method.requires_approval() {
+    let job_id = if request.method().requires_approval() {
         JobId::new(format!("job_{}", Uuid::new_v4().simple()))?
     } else {
         synthesize_agent_job_id()?
@@ -363,8 +363,8 @@ fn accept_mutation_in_transaction(
         let outcome = approvals::consume_approval_core(
             tx,
             approval_id,
-            request.request_digest.as_str(),
-            &request.principal_sid,
+            request.request_digest().as_str(),
+            request.principal_sid(),
             now_ms,
         )?;
         if !matches!(outcome, ConsumeOutcome::Consumed(_)) {
@@ -374,13 +374,13 @@ fn accept_mutation_in_transaction(
         }
     }
 
-    if request.method.requires_approval() {
+    if request.method().requires_approval() {
         jobs::insert_job_core(
             tx,
             &NewJob {
                 job_id: job_id.clone(),
                 state: JobState::Queued,
-                idempotency_key: request.idempotency_key.as_str().to_string(),
+                idempotency_key: request.idempotency_key().as_str().to_string(),
                 correlation_id: correlation_id.clone(),
                 created_at: clock::format_unix_millis_as_iso8601(now_ms),
                 updated_at: clock::format_unix_millis_as_iso8601(now_ms),
@@ -395,7 +395,7 @@ fn accept_mutation_in_transaction(
         &NewOutboxMessage {
             message_id,
             stream_key: format!("job:{}", job_id.as_str()),
-            message_type: format!("mutation_accepted:{}", request.method.as_str()),
+            message_type: format!("mutation_accepted:{}", request.method().as_str()),
             correlation_id: correlation_id.clone(),
             causation_id: None,
             payload_json,
@@ -407,13 +407,13 @@ fn accept_mutation_in_transaction(
     mutation_acceptance::insert_mutation_acceptance_core(
         tx,
         &NewMutationAcceptance {
-            idempotency_key: request.idempotency_key.as_str().to_string(),
-            principal_sid: request.principal_sid.clone(),
-            grant_generation: request.grant_generation,
-            method: request.method.as_str().to_string(),
-            target_id: request.target_id.clone(),
-            artifact_digest: request.artifact_digest.clone(),
-            request_digest: request.request_digest.as_str().to_string(),
+            idempotency_key: request.idempotency_key().as_str().to_string(),
+            principal_sid: request.principal_sid().to_string(),
+            grant_generation: request.grant_generation(),
+            method: request.method().as_str().to_string(),
+            target_id: request.target_id().to_string(),
+            artifact_digest: request.artifact_digest().map(str::to_string),
+            request_digest: request.request_digest().as_str().to_string(),
             job_id: Some(job_id.into_string()),
             correlation_id: correlation_id.into_string(),
             accepted_at_ms: record.accepted_at_ms(),
@@ -468,13 +468,13 @@ fn mutation_accepted_payload_json(
     accepted_at_ms: i64,
 ) -> String {
     serde_json::json!({
-        "method": request.method.as_str(),
-        "principal_sid": request.principal_sid,
-        "target_id": request.target_id,
-        "artifact_digest": request.artifact_digest,
+        "method": request.method().as_str(),
+        "principal_sid": request.principal_sid(),
+        "target_id": request.target_id(),
+        "artifact_digest": request.artifact_digest(),
         "job_id": job_id.as_str(),
-        "idempotency_key": request.idempotency_key.as_str(),
-        "request_digest": request.request_digest.as_str(),
+        "idempotency_key": request.idempotency_key().as_str(),
+        "request_digest": request.request_digest().as_str(),
         "accepted_at_ms": accepted_at_ms,
     })
     .to_string()

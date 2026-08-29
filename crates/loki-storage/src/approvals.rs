@@ -21,17 +21,21 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::error::StorageError;
 use crate::storage::Storage;
 
+pub const CURRENT_BINDING_VERSION: i64 = 1;
+
 const SELECT_COLUMNS: &str = "approval_id, request_digest, requester_sid, actor_id, operation, \
      target_id, artifact_digest, parameters_digest, idempotency_key, reason, requested_at_ms, \
-     expires_at_ms, granted_at_ms, granted_by_sid, consumed_at_ms";
+     expires_at_ms, granted_at_ms, granted_by_sid, consumed_at_ms, binding_version, grant_generation";
 
 /// Fields required to persist a newly requested approval.
 #[derive(Debug, Clone)]
 pub struct NewApproval {
     pub approval_id: String,
     pub request_digest: String,
+    pub binding_version: i64,
     pub requester_sid: String,
     pub actor_id: String,
+    pub grant_generation: u64,
     pub operation: String,
     pub target_id: String,
     pub artifact_digest: Option<String>,
@@ -47,8 +51,10 @@ pub struct NewApproval {
 pub struct ApprovalRow {
     pub approval_id: String,
     pub request_digest: String,
+    pub binding_version: i64,
     pub requester_sid: String,
     pub actor_id: String,
+    pub grant_generation: u64,
     pub operation: String,
     pub target_id: String,
     pub artifact_digest: Option<String>,
@@ -154,8 +160,8 @@ pub fn insert_approval_core(conn: &Connection, approval: &NewApproval) -> Result
         "INSERT INTO local_approvals
          (approval_id, request_digest, requester_sid, actor_id, operation,
           target_id, artifact_digest, parameters_digest, idempotency_key,
-          reason, requested_at_ms, expires_at_ms)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+          reason, requested_at_ms, expires_at_ms, binding_version, grant_generation)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             approval.approval_id,
             approval.request_digest,
@@ -169,6 +175,11 @@ pub fn insert_approval_core(conn: &Connection, approval: &NewApproval) -> Result
             approval.reason,
             approval.requested_at_ms,
             approval.expires_at_ms,
+            approval.binding_version,
+            i64::try_from(approval.grant_generation).map_err(|_| StorageError::InvalidId {
+                kind: "GrantGeneration",
+                reason: "generation exceeds representable range".to_string(),
+            })?,
         ],
     )?;
     Ok(())
@@ -195,8 +206,8 @@ pub fn grant_approval_core(
 ) -> Result<bool, StorageError> {
     let changed = conn.execute(
         "UPDATE local_approvals SET granted_at_ms=?1, granted_by_sid=?2
-         WHERE approval_id=?3 AND granted_at_ms IS NULL",
-        params![now_ms, granted_by_sid, approval_id],
+         WHERE approval_id=?3 AND granted_at_ms IS NULL AND binding_version=?4",
+        params![now_ms, granted_by_sid, approval_id, CURRENT_BINDING_VERSION],
     )?;
     Ok(changed == 1)
 }
@@ -222,7 +233,9 @@ pub fn consume_approval_core(
     let Some(row) = get_approval_core(conn, approval_id)? else {
         return Ok(ConsumeOutcome::NotFound);
     };
-    if row.request_digest != expected_request_digest || row.requester_sid != expected_requester_sid
+    if row.binding_version != CURRENT_BINDING_VERSION
+        || row.request_digest != expected_request_digest
+        || row.requester_sid != expected_requester_sid
     {
         return Ok(ConsumeOutcome::BindingMismatch);
     }
@@ -275,5 +288,13 @@ fn row_to_approval(row: &Row<'_>) -> rusqlite::Result<ApprovalRow> {
         granted_at_ms: row.get(12)?,
         granted_by_sid: row.get(13)?,
         consumed_at_ms: row.get(14)?,
+        binding_version: row.get(15)?,
+        grant_generation: u64::try_from(row.get::<_, i64>(16)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                16,
+                rusqlite::types::Type::Integer,
+                Box::new(error),
+            )
+        })?,
     })
 }

@@ -24,12 +24,10 @@
 //! struct implements verbatim) does not name one, unlike ADR-0006's
 //! decision text — see the same §9 item 5 note in the handoff.
 
-use crate::digest::{IdempotencyKey, RequestDigest, compute_request_digest};
+use crate::digest::{IdempotencyKey, OperationBinding, RequestDigest};
 use crate::error::MutationContractError;
 use crate::method::MutationMethod;
 use crate::result::MutationRejection;
-
-const MAX_FIELD: usize = 256;
 
 /// A single-use reference to a consumed (or consumable) approval, bound to
 /// the exact canonical request digest it authorizes. Populated on
@@ -68,65 +66,94 @@ pub fn evaluate_approval_reference(
     Ok(())
 }
 
-/// The envelope binding principal, grant generation, method, target,
-/// artifact digest (optional), full canonical request digest, idempotency
-/// key, and an `Option<ApprovalReference>` (populated iff the method's
-/// policy tier requires it) — `Docs/graph/tasks/P1-MUTATION-CONTRACT-001.md`
-/// §6.
-///
-/// `request_digest` is never supplied independently by a caller: it is
-/// always derived by [`MutationAcceptanceRequest::new`] via
-/// [`compute_request_digest`] over this struct's own other fields, so a
-/// constructed `MutationAcceptanceRequest` can never carry a digest that
-/// does not match its own bound fields.
+/// An immutable operation binding plus its optional approval reference.
+/// The bound fields are private and can only be observed through accessors,
+/// so no caller can mutate a field after the canonical digest is derived.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationAcceptanceRequest {
-    pub principal_sid: String,
-    pub grant_generation: u64,
-    pub method: MutationMethod,
-    pub target_id: String,
-    pub artifact_digest: Option<String>,
-    pub request_digest: RequestDigest,
-    pub idempotency_key: IdempotencyKey,
-    pub approval_reference: Option<ApprovalReference>,
+    binding: OperationBinding,
+    approval_reference: Option<ApprovalReference>,
 }
 
 impl MutationAcceptanceRequest {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor exposes the complete closed operation binding with no mutable builder"
+    )]
     pub fn new(
         principal_sid: impl Into<String>,
+        actor_id: impl Into<String>,
         grant_generation: u64,
         method: MutationMethod,
         target_id: impl Into<String>,
         artifact_digest: Option<String>,
+        parameters_digest: impl Into<String>,
         idempotency_key: IdempotencyKey,
         approval_reference: Option<ApprovalReference>,
     ) -> Result<Self, MutationContractError> {
-        let principal_sid = principal_sid.into();
-        let target_id = target_id.into();
-        if principal_sid.is_empty() || principal_sid.len() > MAX_FIELD {
-            return Err(MutationContractError::InvalidInput {
-                field: "principal_sid",
-                reason: format!("must contain 1..={MAX_FIELD} bytes"),
-            });
-        }
-        let request_digest = compute_request_digest(
-            &principal_sid,
-            grant_generation,
-            method,
-            &target_id,
-            artifact_digest.as_deref(),
-            &idempotency_key,
-        )?;
-        Ok(Self {
+        let binding = OperationBinding::new(
             principal_sid,
+            actor_id,
             grant_generation,
             method,
             target_id,
             artifact_digest,
-            request_digest,
+            parameters_digest,
             idempotency_key,
+        )?;
+        Ok(Self {
+            binding,
             approval_reference,
         })
+    }
+
+    pub fn binding(&self) -> &OperationBinding {
+        &self.binding
+    }
+
+    pub fn request_digest(&self) -> RequestDigest {
+        self.binding.digest()
+    }
+
+    pub fn approval_reference(&self) -> Option<&ApprovalReference> {
+        self.approval_reference.as_ref()
+    }
+
+    pub fn principal_sid(&self) -> &str {
+        self.binding.principal_sid()
+    }
+
+    pub fn actor_id(&self) -> &str {
+        self.binding.actor_id()
+    }
+
+    pub fn grant_generation(&self) -> u64 {
+        self.binding.grant_generation()
+    }
+
+    pub fn method(&self) -> MutationMethod {
+        self.binding.method()
+    }
+
+    pub fn target_id(&self) -> &str {
+        self.binding.target_id()
+    }
+
+    pub fn artifact_digest(&self) -> Option<&str> {
+        self.binding.artifact_digest()
+    }
+
+    pub fn parameters_digest(&self) -> &str {
+        self.binding.parameters_digest()
+    }
+
+    pub fn idempotency_key(&self) -> &IdempotencyKey {
+        self.binding.idempotency_key()
+    }
+
+    pub fn with_approval_reference(mut self, reference: ApprovalReference) -> Self {
+        self.approval_reference = Some(reference);
+        self
     }
 }
 
@@ -146,40 +173,47 @@ mod tests {
     fn request_digest_is_always_derived_not_caller_supplied() {
         let request = MutationAcceptanceRequest::new(
             "S-1-5-21-principal",
+            "agent-1",
             1,
             MutationMethod::AgentRunRegister,
             "target-1",
             None,
+            "sha256:parameters",
             IdempotencyKey::new("idem-1").unwrap(),
             None,
         )
         .unwrap();
-        let expected = compute_request_digest(
+        let expected = OperationBinding::new(
             "S-1-5-21-principal",
+            "agent-1",
             1,
             MutationMethod::AgentRunRegister,
             "target-1",
             None,
-            &IdempotencyKey::new("idem-1").unwrap(),
+            "sha256:parameters",
+            IdempotencyKey::new("idem-1").unwrap(),
         )
-        .unwrap();
-        assert_eq!(request.request_digest, expected);
+        .unwrap()
+        .digest();
+        assert_eq!(request.request_digest(), expected);
     }
 
     #[test]
     fn approval_reference_may_be_bound_to_the_computed_digest() {
         let request = MutationAcceptanceRequest::new(
             "S-1-5-21-principal",
+            "agent-1",
             1,
             MutationMethod::Flash,
             "target-1",
             Some("sha256:artifact".to_string()),
+            "sha256:parameters",
             IdempotencyKey::new("idem-1").unwrap(),
             None,
         )
         .unwrap();
-        let reference = approval_ref(&request.request_digest);
-        assert_eq!(reference.bound_request_digest, request.request_digest);
+        let reference = approval_ref(&request.request_digest());
+        assert_eq!(reference.bound_request_digest, request.request_digest());
     }
 
     #[test]
