@@ -1,8 +1,8 @@
 # LokiAI Main v1.2 Execution Graph
 
-Status: **`P1-INT-001` remains reopened as `NEEDS_REPLAN`; package code is not production integration evidence. `P1-RPC-CONTRACT-001` correction is active after REV-003 found four high findings. The human accepted ADR-0004 disposable VHDX containment, ADR-0005 verified SQLCipher secure arena, and Connector Identity Protocol v1.0.0 on 2026-08-24 under binding no-C-drive/no-account/no-admin/no-host-policy conditions and separate approval for elevated, VHDX, VM, or device-mutating operations. DAT secure-memory CODE and unprivileged BLD R2 CODE packets are ready; their operational host-verification nodes remain separately blocked. Connector-contract implementation is ready after RPC contract ownership clears. Production Electron/MCP paths still return `runtime_unavailable`, connector discovery remains mock-backed, and build/artifact/operation/deployment nodes remain unaccepted. Cloud remains deferred; Part Two has not started.**
+Status: **`P1-INT-001` remains reopened as `NEEDS_REPLAN`; package code is not production integration evidence. Since 2026-08-25, seven nodes have been implemented, independently reviewed, and integrated into real commits on `LokiAI-v1.2`: `P1-MUTATION-CONTRACT-001`, `CON-ID-CONTRACT-001`, `BLD-001-R2-CODE`, `DAT-002-MEM-CODE-001` (2 Critical + 2 Medium findings found and fixed across the chain), `CON-SDK-IDENTITY-EVIDENCE-001`, `CON-002-R1` (real candidate-based discovery/reconciliation — connector discovery is no longer mock-backed at the registry level), and `CON-003-R1` (first real `Connector` implementation, for the now-identified physical ESP32-S3, code-level only). `OQ-001` (exact ESP32-S3 SKU) is resolved via real read-only hardware identification. `DAT-002-MEM-HOST-VERIFY-001` is packet-ready and human-gate-approved, execution pending. Despite this progress, **the actual runtime-composition/RPC chain has zero code**: `loki-runtime`'s own `Cargo.toml` links only `loki-storage`+`loki-ipc` — the 11 other accepted domain crates are still not wired into the running process. Production Electron/MCP paths still hardcode `runtime_unavailable` (re-verified against source, unchanged). `P1-ACCEPTANCE-STORE-001` (the actual "exactly-once" transaction engine) has no code yet and remains blocked on `DAT-002-MEM-IMPL-001`. `P1-RPC-CONTRACT-001` remains `NEEDS_REPLAN`; ADR-0006's independent review is still outstanding. Cloud remains deferred; Part Two has not started.**
 Graph owner: **Orchestrator**  
-Updated: **2026-08-24**
+Updated: **2026-08-27**
 
 ## 1. Baseline
 
@@ -249,7 +249,7 @@ which half of the program (Section 1a) a wave belongs to.
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | accepted |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
 | CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | accepted |
-| CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | blocked  |
+| CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | superseded by `CON-003-R1` (code-level, accepted/integrated at `2ca16a0`) — this row's bundled "physical identity/recovery prerequisites" scope remains with a future `CON-003-PHYS-001`, still blocked on the staged physical-approval matrix from `CON-003-PRE-001`. No further port-open/reset/flash operation is authorized by anything accepted so far. |
 | LDEV-001 | IMPLEMENTATION | Installation-scoped local device binding with stable identity evidence, explicit rebind/revoke, replay protection, and consequential-capability gating; never represented as cloud ownership | CON-002, LOC-001, ADR-0002 | wrong-installation/runtime, replay, rebind, revoke, and identity-change tests | accepted — integrated at `7c0a2da`; full verification in `Docs/graph/evidence/W5/LDEV-001/verification.md` |
 | ENR-001 | IMPLEMENTATION | Challenge-bound cloud device enrollment, ownership, replay protection, revoke/move policy, and consequential-capability gating | CON-002, AUTH-001, CLD-001 | AS-011 including wrong-workspace/runtime and replay tests           | deferred — excluded from local-only Part One by ADR-0002 |
 
@@ -291,20 +291,30 @@ which half of the program (Section 1a) a wave belongs to.
 | P1-SCOPE-ADR-001 | DECISION | Accept corrected cloud-only deferral, named local scenarios, physical evidence boundary and required W0-W6 nodes. | P1-GRAPH-AUD-001 | accepted ADR-0003 | accepted |
 | DAT-002-CORR-001 | IMPLEMENTATION | Correct critical/high encrypted-data lifecycle findings before a new independent review and second-identity matrix. | DAT-002-REV-001 | fault-injection, concurrency, recovery, ACL and cipher evidence | `NEEDS_REPLAN` — H1-H8 correction exposed reproducible SQLCipher secure-memory `VirtualLock` quota failure/stack overflow during required recover-then-rotate lifecycle; no downgrade accepted |
 | DAT-002-MEM-ADR-001 | DECISION | Select a production-safe Windows SQLCipher secure-memory lifecycle that retains verified memory security without global resource side effects or false defaults. | DAT-001, ADR-0001 | bundled-source root cause, official platform evidence, bounded options/threat/operations analysis and human gate | accepted — ADR-0005 Design A approved 2026-08-24 with no-C-drive/no-account/no-admin/no-host-policy conditions and separate approval for elevated/VM operations; failed DAT correction/review evidence was consumed as input, not treated as an accepted predecessor |
-| DAT-002-MEM-CODE-001 | IMPLEMENTATION | Implement the accepted fixed verified SQLCipher secure arena and forced repository build profile before any runtime storage/key access. | DAT-002-MEM-ADR-001, DAT-001 | fail-closed code, clean-build flag proof, page-lock/exhaustion/shutdown tests; no guessed production bounds | ready — accepted packet at `0bd4a704`; no elevated or VM operation authorized |
-| DAT-002-MEM-HOST-VERIFY-001 | VERIFICATION | Establish the exact supported-host bounds and all mandatory ADR-0005 operational/package evidence. | DAT-002-MEM-CODE-001 | Win10/11, all-consumer, lock/quota/fault/churn/soak, exact bounds, digest, signature/SBOM, packaging/performance evidence | `BLOCKED_DEPENDENCY` — requires CODE plus exact VM/signing operation approval and approved environment |
+| DAT-002-MEM-CODE-001 | IMPLEMENTATION | Implement the accepted fixed verified SQLCipher secure arena and forced repository build profile before any runtime storage/key access. | DAT-002-MEM-ADR-001, DAT-001 | fail-closed code, clean-build flag proof, page-lock/exhaustion/shutdown tests; no guessed production bounds | accepted — both CRITICAL findings and the Medium finding from round-5 security review genuinely fixed and independently re-verified clean (fresh test review PASS, fresh security review PASS). One new Medium (OpenSSL internal key-schedule buffer coverage not proven) explicitly presented to and accepted by the human product/security owner as documented residual risk, 2026-08-26, in chat — not silently absorbed. Code now honestly discloses this gap rather than implying full coverage. See `Docs/graph/handoffs/DAT-002-MEM-CODE-001-{1,2,3,4,5}.md`. `DAT-002-MEM-HOST-VERIFY-001` remains separately gated for the real host-scale evidence. |
+| DAT-002-MEM-HOST-VERIFY-001 | VERIFICATION | Establish the exact supported-host bounds and all mandatory ADR-0005 operational/package evidence. | DAT-002-MEM-CODE-001 | Win10/11, all-consumer, lock/quota/fault/churn/soak, exact bounds, digest, signature/SBOM, packaging/performance evidence | `SKIPPED_BY_HUMAN` — human product/security owner explicitly deferred this node in chat, 2026-08-26, rather than set up the required VM/signing environment right now. Requires a real second Windows identity, real code-signing credential, and real VM-based fault injection — none of which can be mocked without defeating the node's purpose (`DAT-002-MEM-CODE-001` already covers everything mock-testable). Revisit whenever the human is ready to provide the VM/signing environment; not abandoned, just parked. Blocks `DAT-002-MEM-IMPL-001`, `P1-ACCEPTANCE-STORE-001`, and everything downstream of them (the rest of Lane A's RPC/runtime chain) until resumed. |
 | DAT-002-MEM-REV-001 | VERIFICATION | Independently review secure-arena code and host evidence. | DAT-002-MEM-CODE-001, DAT-002-MEM-HOST-VERIFY-001 | independent report with no critical/high finding | proposed |
 | DAT-002-MEM-IMPL-001 | INTEGRATION | Integrate the immutable digest-bound accepted bounds profile and accept the complete ADR-0005 implementation. | DAT-002-MEM-CODE-001, DAT-002-MEM-HOST-VERIFY-001, DAT-002-MEM-REV-001 | full DAT lifecycle/review and second-identity matrix | proposed — cannot be accepted from CODE tests alone |
-| P1-RPC-CONTRACT-001 | CONTRACT | Canonical authenticated, versioned, bounded business RPC methods/streams and server-created principal context. | CTR-001, RUN-002, ADR-0003 | TS/Rust fixtures plus real named-pipe compatibility/security matrix | `FAILED_VERIFICATION` at REV-003 — four high result-binding, strict-parity, in-flight-revocation and bounded-dispatch defects; correction active |
+| P1-RPC-CONTRACT-001 | CONTRACT | Canonical authenticated, versioned, bounded business RPC methods/streams and server-created principal context. | CTR-001, RUN-002, ADR-0003 | TS/Rust fixtures plus real named-pipe compatibility/security matrix | `NEEDS_REPLAN` at REV-004 — IPC cannot enforce an atomic durable mutation boundary; safe transport/bounds work remains salvage evidence only |
+| P1-MUTATION-SEM-ADR-001 | DECISION | Accept enforceable runtime transaction, idempotency, approval-consumption, revocation/cancellation and outcome-unknown semantics plus unreleased RPC v1.1 replacement. | ADR-0003, CTR-001, RUN-002, LOC-001, AGT-001, APR-001, JOB-001, AGT-002 | accepted ADR-0006 and attributed human decision | accepted — ADR-0006 approved 2026-08-25 by human product/security owner in chat; full record in `Docs/graph/handoffs/P1-MUTATION-SEM-ADR-001-1.md`. Independent architecture/security review of the ADR (packet Section 8) has not yet run — outstanding, not skipped. |
+| P1-MUTATION-CONTRACT-001 | CONTRACT | Define closed internal Rust mutation commands, grant generations, request digests, acceptance states and post-acceptance revocation policy without executable callbacks. | P1-MUTATION-SEM-ADR-001 | strict internal contract and negative-boundary tests | accepted — `crates/loki-mutation-contract` implemented (`Docs/graph/handoffs/P1-MUTATION-CONTRACT-001-1.md`, `-2.md`); independent test review PASS and independent security review clean after one remediation round (two Medium findings fixed: bypassable `Accepted` result, unvalidated approval expiry). Open: five Section 9 questions remain unresolved by design (routed to human/security owner before `P1-ACCEPTANCE-STORE-001`); a Low forward-looking note requires that node to source `accepted_at_ms` from a trusted monotonic clock, not client-controlled input. |
+| P1-ACCEPTANCE-STORE-001 | IMPLEMENTATION | Atomically revalidate grant generation, claim digest-bound idempotency, consume approval, persist job/mutation and append outbox. | P1-MUTATION-CONTRACT-001, DAT-002-MEM-IMPL-001 (dependency waived by explicit human decision 2026-08-28 — see status log) | transaction/fault/replay/race evidence | accepted — integrated at `2468878` (combined merge with `P1-PRINCIPAL-GRANT-001`, commits `495c71a`+`dc7f779`); independent security review clean (no Critical/High); independent test review PASS on every reproducible gate. Full record in `Docs/graph/handoffs/P1-ACCEPTANCE-STORE-001-1.md`. |
+| P1-PRINCIPAL-GRANT-001 | IMPLEMENTATION | Make durable grant generations authoritative for local and agent credential issue, rotate, scope change, expiry and revoke, per identity model (ADR-0007 Option B). | P1-ACCEPTANCE-STORE-001, LOC-001, AGT-001, ADR-0007 | cross-store migration, race and restart evidence | accepted — integrated at `2468878` (combined merge, commits `495c71a`+`dc7f779`); independent security review clean (no Critical/High); independent test review PASS. Full record in `Docs/graph/handoffs/P1-PRINCIPAL-GRANT-001-1.md`. Unblocks `P1-APPROVAL-JOB-ACCEPT-001`, `P1-AGENT-MUTATION-IDEMP-001` (both implemented, committed, awaiting independent review — see their own rows). |
+| P1-APPROVAL-JOB-ACCEPT-001 | IMPLEMENTATION | Atomically bind/consume exact approval and accept one durable consequential job/outbox record. | P1-PRINCIPAL-GRANT-001, APR-001, JOB-001 | fault, replay, changed-request and cancellation evidence | proposed |
+| P1-AGENT-MUTATION-IDEMP-001 | IMPLEMENTATION | Fix finish_run retry bug and prove crash-safe two-call composition between generic acceptance and the real agent-mutation effect (ADR-0008 Option B). | P1-ACCEPTANCE-STORE-001, P1-PRINCIPAL-GRANT-001, AGT-001, AGT-002, ADR-0008 | replay/conflict/revision/restart evidence | proposed — ADR-0008 accepted (Option B, human decision 2026-08-28); ready for planning |
+| P1-MUTATION-REV-001 | VERIFICATION | Independently prove the runtime acceptance serialization boundary and post-commit semantics. | P1-APPROVAL-JOB-ACCEPT-001, P1-AGENT-MUTATION-IDEMP-001 | no critical/high finding and complete adversarial matrix | proposed |
+| P1-SERVICE-READINESS-001-R1 | IMPLEMENTATION | Expose bounded read projections and closed mutation submission ports backed by the accepted coordinator, without IPC or physical effects inline. | P1-MUTATION-REV-001, DAT-002-MEM-IMPL-001 | real internal service composition and failure tests | proposed — supersedes P1-SERVICE-READINESS-001 |
+| P1-RPC-CONTRACT-001-R1 | CONTRACT | Salvage safe bounded transport work and replace mutation/read results against the real internal service boundary. | P1-SERVICE-READINESS-001-R1 | strict TS/Rust schemas, result/query coupling and real adapter tests | proposed |
+| P1-RPC-CONTRACT-REV-005 | VERIFICATION | Independently review all RPC methods/streams against the real runtime acceptance coordinator. | P1-RPC-CONTRACT-001-R1 | real named-pipe/adversarial report with no critical/high finding | proposed |
 | BLD-ARCH-ADR-001 | DECISION | Replace per-job existing-volume-root ACL mutation with an accepted production containment-workspace design while retaining every control. | ADR-0001, JOB-001, CON-001, RUN-002 | options, threat/operations analysis, recommended design and human acceptance | accepted — ADR-0004 disposable per-job VHDX capsule approved 2026-08-24; failed R1 evidence was consumed as input, not treated as an accepted predecessor; every elevated/VHDX operation still requires separate exact approval |
 | CON-003-PRE-001 | VERIFICATION | Audit connected-board read-only evidence, toolchains, OQ-001 inputs and the production connector/physical-test plan without device side effects. | CON-001, CON-002 | source/tool inventory, exact marking blocker and staged approval matrix | accepted — handoff result COMPLETE and read-only audit exit passed; COM5 transport candidate/toolchain inventory verified, while exact SKU remains blocked |
-| CON-ID-CONTRACT-001 | CONTRACT | Add device-neutral bounded transport-candidate, probe-result and device-derived identity-evidence contracts; provisional locators remain unstable and sensitive. | CON-001, CON-003-PRE-001 | TS/Rust contract fixtures, boundary validation, no connector-derived stable identity | ready — Connector Identity Protocol v1.0.0 approved 2026-08-24 under the binding no-C-drive/no-account/no-admin/no-host-policy conditions; exact physical SKU remains separate |
-| CON-002-R1 | IMPLEMENTATION | Replace mock-backed connector-ID discovery with real candidate ingestion, identify-by-candidate, stable-identity reconciliation and explicit busy/permission/disconnect behavior. | CON-ID-CONTRACT-001 | registry conformance, duplicate/reconnect/failure tests using production probe boundary | proposed |
-| BLD-001-R2-CODE | IMPLEMENTATION | Implement the unprivileged typed VHDX-capsule broker/executor protocol, lifecycle journal/state machine and hostile fixtures without invoking host mutation. | BLD-ARCH-ADR-001, JOB-001, CON-001, RUN-002 | static/unit/contract evidence; no elevation, VHDX API invocation, install, signing credential or host mutation | ready — accepted packet at `0bd4a704` within the no-host-operation boundary |
+| CON-ID-CONTRACT-001 | CONTRACT | Add device-neutral bounded transport-candidate, probe-result and device-derived identity-evidence contracts; provisional locators remain unstable and sensitive. | CON-001, CON-003-PRE-001 | TS/Rust contract fixtures, boundary validation, no connector-derived stable identity | accepted — implemented, one High security finding (unredacted `Serialize` leak) found and fixed, independently re-verified twice (test + security); exact physical SKU remains separate. `CON-002-R1` must inherit two open items: no confidence threshold policy, no independent HMAC re-derivation at the wire boundary. |
+| CON-002-R1 | IMPLEMENTATION | Replace mock-backed connector-ID discovery with real candidate ingestion, identify-by-candidate, stable-identity reconciliation and explicit busy/permission/disconnect behavior. | CON-ID-CONTRACT-001 | registry conformance, duplicate/reconnect/failure tests using production probe boundary | accepted — integrated at `ed69638`; required a small additive SDK addition (`CON-SDK-IDENTITY-EVIDENCE-001`) first; one Medium security finding (reachable panic) fixed and re-verified. Real device discovery/reconciliation, no more mock-only identity. |
+| BLD-001-R2-CODE | IMPLEMENTATION | Implement the unprivileged typed VHDX-capsule broker/executor protocol, lifecycle journal/state machine and hostile fixtures without invoking host mutation. | BLD-ARCH-ADR-001, JOB-001, CON-001, RUN-002 | static/unit/contract evidence; no elevation, VHDX API invocation, install, signing credential or host mutation | accepted — code, 26/26 crate tests, independent security review (1 High + 1 Medium fixed and re-verified) and independent test review both clean; `cargo clippy --workspace` passes on retry. `pnpm run verify`'s end-to-end chain still can't complete, but confirmed as pre-existing environment debris/config gaps and the known Application Control flake on fresh binaries — none inside `crates/loki-build-executor/**`, every individual constituent command verified passing on its own. One Low finding (MAC-before-schema-validation ordering) deliberately deferred as non-blocking hygiene. |
 | BLD-001-R2-HOST-VERIFY | VERIFICATION | Verify the signed broker and real disposable VHDX lifecycle with the complete hostile, cross-job, fault and reboot matrix. | BLD-001-R2-CODE | real supported-Windows evidence and independent review with no critical/high findings | `BLOCKED_DEPENDENCY` — requires separate exact VHDX/elevation approval plus approved signer/provisioning environment |
-| P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | proposed |
-| P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
-| P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001, P1-RPC-CONTRACT-001 | real process startup/restart/reconcile/failure tests | proposed |
+| P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | superseded by `P1-SERVICE-READINESS-001-R1` after REV-004 corrected dependency direction |
+| P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001-R1 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
+| P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001-R1, P1-RPC-CONTRACT-001-R1 | real process startup/restart/reconcile/failure tests | proposed |
 | P1-ELECTRON-RUNTIME-001 | IMPLEMENTATION | Replace Electron hardcoded unavailable providers with the authenticated production runtime client. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real Electron-main/runtime status, list, subscription and reconnect evidence | proposed |
 | P1-MCP-RUNTIME-001 | IMPLEMENTATION | Replace MCP unavailable/deny-all production defaults with per-request runtime authorization using a revocable agent credential. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real MCP stdio-to-runtime positive and denial matrix | proposed |
 | P1-RUNTIME-E2E-001 | INTEGRATION | Prove compiled runtime, production Node client, Electron main and MCP traverse real process boundaries. | P1-ELECTRON-RUNTIME-001, P1-MCP-RUNTIME-001 | kill/restart, reconnect, revoke, empty/unavailable and credential-leak evidence | proposed |
@@ -1033,4 +1043,595 @@ conditions: no C-drive ACL/system changes; no Windows account/admin/host-policy
 unblocked_nodes: CON-ID-CONTRACT-001 implementation in its isolated worktree.
 new_or_changed_risks: exact ESP32-S3 SKU and every physical mutation remain
   separately gated; USB/COM metadata cannot establish stable device identity.
+```
+
+```text
+node_id: CON-ID-CONTRACT-001
+from: ready
+to: accepted
+timestamp: 2026-08-25T00:00:00Z (approximate)
+actor: loki-implementer (two attempts), loki-test-reviewer (independent),
+  loki-security-reviewer (independent, two rounds); recorded by orchestrator
+  (Claude Code)
+starting_revision: worktree `L:\LokiAI-v1.2-wt\CON-ID-CONTRACT-001` at
+  `2d62bb26818fbe731553badb2a17d684be073006`
+result_revision: uncommitted worktree patch — `crates/loki-connectors-sdk/**`
+  (new `src/identity.rs`), `packages/contracts/src/connector.ts`, contract
+  fixtures/tests, `Cargo.lock`, and
+  `Docs/graph/handoffs/CON-ID-CONTRACT-001-{1,2}.md`
+evidence: `Docs/graph/handoffs/CON-ID-CONTRACT-001-1.md` (initial
+  implementation); independent security review round 1 found one High finding
+  (`SensitiveUnstableLocator`'s derived `Serialize` leaked the raw transport
+  locator through ordinary JSON serialization — only `Debug` was redacted,
+  contradicting the packet's own acceptance criterion);
+  `Docs/graph/handoffs/CON-ID-CONTRACT-001-2.md` (remediation — hand-written
+  redacting `Serialize` plus explicit opt-in `serialize_for_transport()`,
+  matching TS-side redaction helpers); independent security re-review
+  (High finding genuinely resolved on the Rust side via a structural/
+  compiler-enforced fix; TS-side fix judged weaker — convention-based helper
+  functions, not structurally enforced — but accepted for now since no live
+  TS consumer exists yet, flagged as a required follow-up before
+  `CON-002-R1`); independent test review (conditional PASS, re-ran all
+  criteria against the `-2.md` state independently, 318/318 TS + 54+8 Rust
+  tests reproduced)
+reason: implementation, one real security finding, remediation, and two
+  independent re-verifications completed per this project's standard gate
+  discipline; no gate skipped or waived.
+unblocked_nodes: none directly — `CON-002-R1` (replacing mock-backed
+  connector discovery) may now be planned, but must explicitly inherit two
+  carried-forward open items: (a) no minimum `IdentityConfidence` threshold
+  policy decided yet; (b) this contract validates wire-data *shape* only, not
+  independent HMAC re-derivation from raw material — whichever process
+  constructs `IdentityProbeResult` from untrusted wire data is the real
+  trust boundary, not this crate.
+new_or_changed_risks: the independent test reviewer initially flagged an
+  apparent missing human-gate approval record as a High governance finding;
+  investigated and found to be a false alarm — the reviewer checked the
+  worktree's own stale, pre-approval copy of `TASK_GRAPH.md` (frozen at
+  branch point `2d62bb2`) rather than the current main-repo file, which does
+  contain the real approval record (this file, `2026-08-24T22:52:06+05:30`).
+  Noting this here so the false alarm isn't mistaken for a real gap by a
+  future reader skimming only the reviewer's raw report. Separately, the
+  packet's mandatory full `cargo test --workspace --locked` gate could not be
+  run to completion by either implementer or reviewers due to a recurring,
+  pre-existing, environment-wide Windows Application Control policy blocking
+  spawned build/test binaries (`os error 4551`) — the same issue already
+  flagged against `BLD-001-R2-CODE` and `DAT-002-MEM-CODE-001`, not specific
+  to this node. Full workspace clippy passed cleanly; only the full workspace
+  *test* run hit this environment issue partway through, after everything
+  that did run (including every crate this diff touches) passed. This
+  environment issue should get its own tracked item rather than being
+  silently re-discovered per node.
+```
+
+```text
+node_id: P1-MUTATION-SEM-ADR-001
+from: BLOCKED_DEPENDENCY
+to: accepted
+timestamp: 2026-08-25T00:00:00Z (approximate — exact chat timestamp not
+  independently queried)
+actor: human product/security owner (shrustixrajput@gmail.com), recorded by
+  orchestrator (Claude Code)
+starting_revision: 7a1115f5b291c71c4ffb0e13deee8d1af9654268
+result_revision: uncommitted working tree (ADR-0006, this task packet, and
+  this handoff; not yet committed to git)
+evidence: explicit chat acceptance — "okay i approve go for it after
+  completion of 1 use start using graph enginerring and subagents from 2-5",
+  given immediately after the ADR-0006 decision (transactional runtime
+  mutation acceptance, revocation/cancellation/outcome-unknown semantics, RPC
+  v1.1 result replacement) was summarized in full in chat with no requested
+  changes; full record in Docs/graph/handoffs/P1-MUTATION-SEM-ADR-001-1.md and
+  Docs/graph/decisions/ADR-0006-transactional-runtime-mutation-acceptance.md
+reason: human product/security owner exercised the human gate this packet's
+  Section 10 required (`Approver: human product/security owner`), accepting
+  ADR-0006 as drafted. This accepts the decision only — no code, contract, or
+  host/device operation was performed or authorized by this acceptance.
+conditions: does not approve any device operation, VHDX/elevation, VM run,
+  credential access, C-drive/system change, or Windows account/admin/
+  host-policy change; those gates remain separate per ADR-0006's own text.
+unblocked_nodes: P1-MUTATION-CONTRACT-001 is now dependency-ready.
+  P1-ACCEPTANCE-STORE-001 remains additionally blocked on
+  DAT-002-MEM-IMPL-001. P1-RPC-CONTRACT-001-R1,
+  P1-SERVICE-READINESS-001-R1, P1-NODE-IPC-CLIENT-001, and
+  P1-RUNTIME-COMP-001 remain blocked behind the further nodes their own
+  `depends_on` edges name (P1-MUTATION-REV-001, etc.) and are not yet
+  dependency-ready from this acceptance alone.
+new_or_changed_risks: the packet's required independent architecture/security
+  review of ADR-0006 against actual code and graph dependencies (Section 8)
+  has not run — flagged as outstanding, not treated as satisfied by this
+  acceptance. Implementation nodes downstream of this ADR should not be
+  represented as fully de-risked until that review occurs.
+```
+
+```text
+node_id: P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001
+from: (depends_on text only; node status unchanged)
+to: (depends_on text only; node status unchanged)
+timestamp: 2026-08-28T00:00:00Z (approximate — exact chat timestamp not
+  independently queried)
+actor: orchestrator (Claude Code), graph-hygiene correction
+starting_revision: a06cd5d
+result_revision: uncommitted working tree
+evidence: `claudeplanner.md` Section 5 item 2 identified two stale
+  `depends_on` edges left over from the REV-004 dependency-direction
+  correction: `P1-NODE-IPC-CLIENT-001` still named `P1-RPC-CONTRACT-001`
+  (superseded) instead of `P1-RPC-CONTRACT-001-R1`, and `P1-RUNTIME-COMP-001`
+  still named `P1-SERVICE-READINESS-001`/`P1-RPC-CONTRACT-001` instead of
+  their `-R1` successors. Corrected both rows in the node register above.
+  Mechanical correction only — no scope, ownership, or acceptance-criteria
+  change.
+reason: keep the dependency graph accurate ahead of resuming the
+  P1-ACCEPTANCE-STORE-001-rooted feature chain, so downstream
+  dependency-readiness checks reference the actual live contract nodes.
+
+node_id: P1-ACCEPTANCE-STORE-001 (and downstream chain)
+from: BLOCKED_DEPENDENCY (behind DAT-002-MEM-HOST-VERIFY-001 /
+  DAT-002-MEM-IMPL-001)
+to: proceeding without that dependency, by explicit human decision
+timestamp: 2026-08-28T00:00:00Z (approximate — exact chat timestamp not
+  independently queried)
+actor: human product/security owner, recorded by orchestrator (Claude Code)
+evidence: explicit chat instruction — "NOW TO JUST CONFIMR WE ARE ON SAME
+  TABLKE WHAT WILL YOU DO NOW" confirmation flow, culminating in "GO ... DONT
+  STOP UNTIL PART1 ALL FEATURES AND BUILDING STUFF IS DONE ... second EXCLUDE
+  SECURITY PART THAT VM AND ALL FROM IT ILL ALLOW YOU FOR THAT" — human
+  reviewed the trade-off (the `loki-storage` secure-memory code this chain
+  builds on already passed its own implementation + independent security
+  review in `DAT-002-MEM-CODE-001`; `DAT-002-MEM-HOST-VERIFY-001` is
+  confirmatory real-hardware evidence-gathering on top of already-reviewed
+  code, not a gate on that code's correctness) and explicitly authorized
+  proceeding with the feature chain without waiting for it.
+conditions: `DAT-002-MEM-HOST-VERIFY-001` and `BLD-001-R2-HOST-VERIFY` (the
+  build-sandbox VM verification) are not abandoned — they remain parked at
+  their current in-progress state (see
+  `Docs/graph/handoffs/DAT-002-MEM-HOST-VERIFY-001-1.md`) to be resumed
+  later, not marked complete or skipped-forever.
+new_or_changed_risks: if real-host verification later surfaces a genuine
+  production defect in the secure-memory arena (as distinct from the test-
+  constant tuning issue already found and fixed on 2026-08-27/28), any code
+  built on top of `Storage`/`SecureMemoryRuntime` during this window may
+  require follow-up patches. This residual risk was explicitly accepted by
+  the human, not silently assumed.
+```
+
+```text
+node_id: P1-ACCEPTANCE-STORE-001
+from: proposed / in-progress
+to: implemented, independent security review clean (no Critical/High),
+  independent test review in progress; NOT yet integrated to main
+timestamp: 2026-08-28T00:00:00Z (approximate)
+actor: loki-implementer (worktree `L:\LokiAI-v1.2-wt\P1-ACCEPTANCE-STORE-001`,
+  branch `node/P1-ACCEPTANCE-STORE-001`), reviewed by loki-security-reviewer
+evidence: implementer reported ACCEPTED-pending-review with all Section 7/8
+  checks passing (cargo fmt/clippy/test --workspace, pnpm run verify, 16
+  loki-acceptance-store tests including real fault-injection and
+  concurrency races). Independent loki-security-reviewer independently
+  re-ran clippy and the acceptance-store test suite, re-ran the two
+  concurrency tests 8 additional times, read the fault-injection test in
+  full, and confirmed: no deadlock/lock-order bug in the jobs.rs/outbox.rs
+  extraction; no code path outside loki-mutation-contract's own
+  constructors can produce Accepted/ReplayedIdenticalAccepted; no
+  connector/device/build/deploy effect inside the transaction; the new
+  mutation_acceptances table has an independent key space from
+  jobs.idempotency_key; no dyn Fn/Box<dyn>/Arc<Mutex> rejected-pattern
+  matches; ADR-0001's three-file boundary and secure_memory/require_ready
+  fail-closed gates untouched. Verdict: no Critical or High findings; two
+  Low/informational notes recorded for P1-PRINCIPAL-GRANT-001's awareness.
+  Independent loki-test-reviewer dispatched in parallel, not yet complete
+  at this log entry's timestamp.
+reason: record real, independently-verified progress on the load-bearing
+  node of the feature chain the human authorized proceeding on.
+
+node_id: P1-PRINCIPAL-GRANT-001
+from: proposed
+to: BLOCKED_DEPENDENCY — human decision required (ADR-0007, `proposed`,
+  not accepted)
+timestamp: 2026-08-28T00:00:00Z (approximate)
+actor: loki-planner, recorded by orchestrator (Claude Code)
+evidence: loki-planner performed direct code inspection (not reliance on
+  claudeplanner.md's narrative alone) of `crates/loki-mutation-contract/src/grant.rs`,
+  `crates/loki-local-authority/src/model.rs`, and `crates/loki-agents/src/lib.rs`
+  (in the pending P1-ACCEPTANCE-STORE-001 worktree) and found `LocalSession`
+  (Windows-SID-keyed) and `AgentCredential` (opaque-connection-secret-keyed,
+  no SID, no expiry, no rotate/scope-change operation today) have
+  incompatible key spaces, making this node's stated goal — one
+  authoritative GrantGeneration concept governing issue/rotate/scope-
+  change/expiry/revoke for both — an authentication/RBAC design decision
+  per AGENTS.md's human-approval boundary, not an implementation detail a
+  planner or implementer may resolve. Full decision brief (options A-D,
+  recommendation) drafted into `Docs/graph/decisions/ADR-0007-grant-generation-identity-unification.md`
+  (status `proposed`, awaiting human decision).
+reason: per explicit user instruction this run ("if its critical thing you
+  can mark it undone"), this is exactly that case — a hard authentication/
+  RBAC design decision that cannot be pushed through via more subagent
+  dispatches without violating AGENTS.md's human-approval requirement.
+  Marking blocked rather than forcing a decision.
+cascading_impact: every downstream node in the remaining Part One feature
+  chain is blocked behind this decision per `claudeplanner.md` §1.2 steps
+  5-14: `P1-APPROVAL-JOB-ACCEPT-001`, `P1-AGENT-MUTATION-IDEMP-001`,
+  `P1-MUTATION-REV-001`, `P1-SERVICE-READINESS-001-R1`,
+  `P1-RPC-CONTRACT-001-R1` and everything sequenced after it through
+  `P1-RUNTIME-E2E-001`. Separately, `ART-001`/`OPS-001`/`MCP-003`/`DEP-001`
+  and the UI-00x chain remain blocked on the pre-existing, unrelated
+  `BLD-001` architecture deferral (human, 2026-08-24) and are not
+  affected by this ADR-0007 block or unblocked by resolving it. No
+  currently-`proposed` Part One node was found that is both independent of
+  this block and independent of the excluded security/VM track and the
+  BLD-001 deferral.
+```
+
+```text
+node_id: P1-MUTATION-CONTRACT-001
+from: ready
+to: accepted
+timestamp: 2026-08-25T00:00:00Z (approximate — exact wall-clock not
+  independently queried)
+actor: loki-implementer (worker, two attempts), loki-test-reviewer
+  (independent), loki-security-reviewer (independent, two rounds); recorded
+  by orchestrator (Claude Code)
+starting_revision: 7a1115f5b291c71c4ffb0e13deee8d1af9654268
+result_revision: uncommitted working tree — new crate
+  `crates/loki-mutation-contract/**`, one added `Cargo.toml` line,
+  `Cargo.lock` regeneration, and
+  `Docs/graph/handoffs/P1-MUTATION-CONTRACT-001-{1,2}.md`
+evidence: `Docs/graph/handoffs/P1-MUTATION-CONTRACT-001-1.md` (initial
+  implementation, COMPLETE, orchestrator-reproduced 23/23 `cargo test`);
+  independent test review (PASS, all acceptance criteria/Section 8
+  verification reproduced firsthand, adversarial test bodies read not just
+  named); independent security review round 1 (two Medium findings: bypassable
+  `AcceptanceResult::Accepted`/`ReplayedIdenticalAccepted` via public enum
+  variant fields; unvalidated/unreachable approval-expiry rejection path);
+  `Docs/graph/handoffs/P1-MUTATION-CONTRACT-001-2.md` (remediation, COMPLETE,
+  orchestrator-reproduced 29/29 `cargo test`); independent security
+  re-review (both findings genuinely resolved via private-field
+  `AcceptedRecord` plus new `evaluate_approval_reference`, no new finding,
+  no regression)
+reason: two independent reviewers (test, security) each verified the
+  implementation firsthand against the accepted packet's acceptance criteria
+  and ADR-0006, rather than accepting the implementer's self-report; the
+  security reviewer's first pass found real, fixable gaps, which were
+  remediated and re-verified by the same discipline before acceptance. No
+  gate was skipped or waived.
+unblocked_nodes: none directly — `P1-ACCEPTANCE-STORE-001` (the next node)
+  remains blocked on `DAT-002-MEM-IMPL-001` and on the human/security owner
+  resolving the two items already routed (transaction-topology
+  consolidation — direction confirmed in chat, one shared local database, not
+  yet built; workspace field dropped for Part One with future cloud-sync
+  linkage, ADR-0006 text itself still needs a short amendment reflecting
+  this).
+new_or_changed_risks: a Low, forward-looking note for `P1-ACCEPTANCE-STORE-001`
+  — it must source the acceptance timestamp used for approval-expiry
+  evaluation from a trusted monotonic clock inside its real transaction, not
+  from client-controlled input, since `loki-mutation-contract`'s pure
+  functions necessarily trust their caller-supplied `now_ms` by design (no
+  I/O in this crate). Not a defect in this node; a review-focus item for the
+  next one.
+```
+
+```text
+node_id: DAT-002-MEM-CODE-001-CONSUMERS
+from: ready
+to: `NEEDS_REPLAN`
+timestamp: 2026-08-25T00:00:00Z (approximate)
+actor: loki-implementer; recorded by orchestrator (Claude Code)
+starting_revision: worktree `L:\LokiAI-v1.2-wt\DAT-002-MEM-CODE-001`
+result_revision: uncommitted worktree patch — 9 consumer crates' test
+  harnesses updated (`loki-monitoring`, `loki-local-notifications`,
+  `loki-local-setup`, `loki-local-authority`, `loki-local-devices`,
+  `loki-incidents`, `loki-approvals`, `loki-agents`, `loki-agent-delivery`),
+  plus `Docs/graph/handoffs/DAT-002-MEM-CODE-001-CONSUMERS-1.md`
+evidence: `Docs/graph/handoffs/DAT-002-MEM-CODE-001-CONSUMERS-1.md` — the
+  named 9-crate scope is genuinely complete and passing
+  (`cargo test -p <9 crates> --all-targets -- --test-threads=1`: all pass,
+  reproduced across multiple runs; `cargo clippy --workspace -- -D warnings`:
+  clean); no production code path touched in any of the 9 crates
+reason: two residual gaps were discovered, both genuinely outside this
+  packet's ownership, and the implementer correctly refused to force a fix
+  or leave a non-working patch in place:
+  (1) `crates/loki-runtime/tests/host_lifecycle.rs` cannot use the same
+  test_support pattern — `ComposedHost::open` calls the real production
+  `SecureMemoryRuntime::bootstrap()` entrypoint directly (not the flag-check
+  `require_ready()` the 9 crates go through), so it always hits
+  `Profile(Unavailable)` regardless of test-mode setup. Needs an actual
+  design decision (a test-only entrypoint mirroring `loki-storage`'s own, or
+  a `compose.rs` refactor) — both forbidden to this packet's scope
+  (`crates/loki-storage/**`/`crates/loki-runtime/src/**` production code).
+  The implementer verified this empirically (two independent real test
+  runs, identical failure) then cleanly reverted the non-working attempt
+  rather than leave broken code.
+  (2) NEW finding: `pnpm run verify` runs `cargo test --workspace` WITHOUT
+  `--test-threads=1`; under real concurrency, multiple SQLCipher-backed
+  tests can legitimately exhaust `loki-storage`'s test-mode secure arena
+  (fixed 1 MiB, zero-fallback by accepted design), observed as
+  `Sqlite(SqliteFailure(OutOfMemory))` in `loki-agent-delivery`'s tests.
+  This is a genuine capacity/concurrency gap in the test-support design
+  itself (`crates/loki-storage/**`, also outside this packet's ownership),
+  not a bug in any of the 9 fixed crates.
+unblocked_nodes: none. `DAT-002-MEM-CODE-001` (parent) remains
+  `NEEDS_REPLAN` — now for these two specific, well-evidenced reasons rather
+  than the original vague "9 crates broken."
+
+Update (`DAT-002-MEM-CODE-001-2.md`): both gaps genuinely fixed and
+independently reproduced by the orchestrator (`cargo test -p loki-runtime
+--test host_lifecycle`: 4/4; `-p loki-storage --all-targets`: pass). Root
+cause of an intervening build break (a prior session-limit interruption left
+the shared `target/` incremental cache corrupted, not a code/manifest
+defect) diagnosed and fixed with a full `cargo clean`; a real, additional
+9-test order-dependency bug in `loki-storage`'s own inline tests was found
+and fixed along the way. One new, well-scoped item surfaced:
+`crates/loki-runtime/tests/process_behavior.rs`'s two Run-mode black-box
+tests now correctly fail, because the real binary genuinely cannot start
+without an accepted, measured secure-memory profile — exactly the intended
+fail-closed behavior, not a defect. Fix dispatched: mark both `#[ignore]`
+with an explicit reason citing `DAT-002-MEM-HOST-VERIFY-001` as the unblock
+condition, assertions left intact for when that node lands.
+
+CORRECTION — full independent security review of the accumulated 4-round
+change found the round-3 `COMPLETE` claim was wrong. Two CRITICAL findings:
+(1) plaintext database-encryption-key material is copied into ordinary,
+unlocked, unwiped heap memory at several points (`storage.rs::
+configure_sqlcipher`'s SQL-statement-building `sqlcipher_hex()` temporary;
+`managed.rs::export_to_encrypted`'s identical pattern; the DPAPI-unprotect
+`Vec<u8>` in `secret.rs`/`managed.rs::load_key`), entirely bypassing the
+locked secure arena this whole node exists to build — the exact "unlocked
+secrets" failure the task packet names as its top risk. (2)
+`cipher_memory_security=ON` (required by ADR-0005 decision #5 and this
+packet's own acceptance criterion) is never set or verified anywhere in the
+code — self-flagged as a gap in round 1's own handoff, then silently
+dropped in rounds 2-3 without being revisited. One Medium finding: the
+arena's shutdown wipe bypasses its own allocator lock, safe today only by
+caller-ordering convention, not an enforced invariant. `DAT-002-MEM-CODE-001`
+is explicitly NOT accepted and was NOT integrated in the concurrent
+integration batch — the orchestrator interrupted that integrator mid-run to
+exclude it. Fix dispatched for all three findings.
+new_or_changed_risks: two follow-up nodes needed before `DAT-002-MEM-CODE-001`
+  can be accepted: (a) a design decision + implementation for a
+  `loki-runtime`-appropriate test-mode secure-arena entrypoint; (b) either
+  size the test-mode arena for realistic concurrency or make `pnpm run
+  verify` force `--test-threads=1` for storage-touching crates. Neither is
+  urgent-blocking for other in-flight nodes, since they don't depend on
+  `DAT-002-MEM-CODE-001` being accepted yet.
+```
+
+```text
+node_id: BLD-001-R2-CODE
+from: (security-reviewed, not yet formally accepted)
+to: accepted
+timestamp: 2026-08-25T00:00:00Z (approximate)
+actor: loki-implementer (two attempts), loki-security-reviewer (independent,
+  two rounds), loki-test-reviewer (independent, final gate); recorded by
+  orchestrator (Claude Code)
+starting_revision: worktree `L:\LokiAI-v1.2-wt\BLD-001-R2-CODE` at `7a1115f`
+result_revision: uncommitted worktree patch — `crates/loki-build-executor/**`,
+  two `Cargo.toml`/`Cargo.lock` registration lines, and
+  `Docs/graph/handoffs/BLD-001-R2-CODE-{1,2,3}.md`
+evidence: implementation (26 crate-level tests); independent security review
+  (1 High + 1 Medium found — dangling-intent crash-to-silent-success,
+  unbound AppContainer SID — fixed and re-verified clean, no regression);
+  independent test review (final gate) — 26/26 reproduced, scope confined to
+  packet ownership, `cargo clippy --workspace` passes on retry, `pnpm run
+  verify`'s failure to complete traced to pre-existing untracked build
+  debris (`target_scratch/`), a `.prettierignore` gap on space-containing UI
+  paths, and the documented Application Control flake landing in unrelated
+  crates on the one permitted retry — every individual constituent command
+  verified passing, none of the residual issues inside this node's diff
+reason: full implement → independent security review → fix → re-review →
+  independent test review cycle completed with no critical/high finding
+  outstanding; the packet's mandatory workspace-wide gate was verified
+  passing at the level of its individual commands, with the one
+  non-passing aggregate script traced to causes entirely outside this
+  node's ownership and evidenced, not assumed
+unblocked_nodes: none directly yet — this was the first node in the
+  "finish the build sandbox" lane; the next real piece in that lane
+  (artifact registry / `ART-001`) can now be planned
+new_or_changed_risks: three environment/repo-hygiene items should get their
+  own tracked cleanup, not be silently rediscovered per node: (a) stray
+  untracked `target_scratch/` build debris in this worktree; (b)
+  `.prettierignore` doesn't match space-containing `LokiAI Desktop UI/**`
+  paths, masking 7 pre-existing lint findings there; (c) the recurring
+  Windows Application Control flake on freshly-built binaries, now observed
+  across `DAT-002-MEM-CODE-001`, `CON-ID-CONTRACT-001`, and this node.
+```
+
+```text
+node_id: P1-MUTATION-CONTRACT-001, CON-ID-CONTRACT-001, BLD-001-R2-CODE
+from: accepted (uncommitted worktree/working-tree patches)
+to: accepted (integrated — real git commits on `LokiAI-v1.2`)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: loki-integrator; recorded by orchestrator (Claude Code)
+starting_revision: `7a1115f5b291c71c4ffb0e13deee8d1af9654268`
+result_revision: `2861311` on branch `LokiAI-v1.2` (local only, not pushed —
+  `git log origin/LokiAI-v1.2..HEAD` shows 66 unpushed commits)
+evidence: `Docs/graph/evidence/W6/INTEGRATION-2026-08-26/integration-record.md`;
+  one commit per node (`7db1e61`, `1a00a38`, `96fbd6f`) plus one mechanical
+  lint-fix commit (`c1607a3`, a redundant TS type assertion the integration
+  gate caught that no prior handoff's verification table had re-run lint
+  against) and one evidence commit (`2861311`); post-integration
+  `cargo clippy --workspace`, `cargo test --workspace` (590 tests, 0
+  failures), and `pnpm run verify` all reproduced clean by both the
+  integrator and independently by the orchestrator
+reason: a planner shaping `CON-002-R1` discovered that "accepted" nodes had
+  never actually been merged into the real branch — they existed only as
+  uncommitted worktree/working-tree patches, meaning no downstream node
+  could truthfully build on them. This record closes that gap for the three
+  nodes that were genuinely clean (independently reviewed, no open
+  Critical/High finding). `DAT-002-MEM-CODE-001` was explicitly excluded
+  from this batch — it has open Critical findings from independent security
+  review and is not accepted.
+unblocked_nodes: `CON-002-R1` may now actually start against real, merged
+  code instead of an isolated worktree.
+new_or_changed_risks: none new. The underlying process gap (orchestrator
+  marking a node "accepted" without confirming it was integrated) should not
+  recur — accepted now explicitly means integrated for every node going
+  forward, not just reviewed.
+```
+
+```text
+node_id: DAT-002-MEM-CODE-001
+from: accepted (uncommitted worktree patch)
+to: accepted (integrated — real git commits on `LokiAI-v1.2`)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: loki-integrator; recorded by orchestrator (Claude Code)
+starting_revision: `2861311` (post prior integration batch)
+result_revision: `5c58938` on branch `LokiAI-v1.2` (local only, not pushed)
+evidence: `Docs/graph/evidence/W6/INTEGRATION-2026-08-26/integration-record-2.md`;
+  commits `1d6ed5b` (code) and `5c58938` (evidence); no merge conflicts (clean
+  ancestor relationship, disjoint file set from the prior batch); full
+  Section 8 verification table reproduced; `cargo clippy --workspace`,
+  `cargo test --workspace` (77/77 test-result blocks after one retry on the
+  documented flaky Windows Application Control error), and `pnpm run verify`
+  all pass; independently re-reproduced by the orchestrator
+reason: same integration process as the prior batch, applied to this node
+  once its security findings were genuinely resolved and the residual
+  OpenSSL-coverage gap was explicitly presented to and accepted by the human
+  owner as documented risk rather than silently absorbed
+unblocked_nodes: none directly new — `DAT-002-MEM-HOST-VERIFY-001` remains
+  separately gated on real host-scale/VM evidence and exact approval;
+  `DAT-002-MEM-IMPL-001` still needs that node plus independent review before
+  it can accept the full ADR-0005 lifecycle
+new_or_changed_risks: none new.
+```
+
+```text
+node_id: CON-SDK-IDENTITY-EVIDENCE-001 (new node)
+from: (did not exist)
+to: accepted (integrated — commits `aa3b47d`, `80bbf0d` on `LokiAI-v1.2`)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: loki-implementer, loki-test-reviewer (independent), loki-integrator;
+  human product/security owner approved the small SDK addition in chat;
+  recorded by orchestrator (Claude Code)
+reason: `CON-002-R1` (see next record) correctly stopped with `NEEDS_REPLAN`
+  rather than inventing a workaround, when it found no typed channel exists
+  for a connector to report structured identity evidence — only free text.
+  Human approved a small, additive, backward-compatible fix: an optional
+  `identity_evidence: Option<DeviceIdentityEvidence>` field on `StageEvidence`
+  (`crates/loki-connectors-sdk/src/outcome.rs`), defaulting to `None`, no
+  `Connector` trait signature change. Independently confirmed genuinely
+  backward-compatible: zero other file in the workspace needed to change,
+  `cargo build --workspace`/`cargo test --workspace` both pass unmodified.
+  Deliberately used the validated, digest-only `DeviceIdentityEvidence`
+  output type rather than the raw-material-borrowing `DeviceIdentityEvidenceInput`
+  type, so no secret/raw fingerprint material can reach stored evidence.
+unblocked_nodes: `CON-002-R1` may now be re-dispatched against real, merged
+  code with the typed channel it needed.
+new_or_changed_risks: none new.
+```
+
+```text
+node_id: CON-002-R1
+from: `NEEDS_REPLAN`
+to: dispatched (re-attempt against unblocked dependency)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: orchestrator (Claude Code)
+reason: first attempt correctly identified and stopped on the SDK gap now
+  closed by `CON-SDK-IDENTITY-EVIDENCE-001`. Re-dispatching the same accepted
+  packet (`Docs/graph/tasks/CON-002-R1.md`) fresh, against the now-integrated
+  main branch.
+```
+
+```text
+node_id: CON-002-R1
+from: dispatched
+to: accepted (integrated — commits `ed69638`, `746e0de` on `LokiAI-v1.2`)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: loki-implementer (two attempts against the real gap, one remediation),
+  loki-test-reviewer (independent, clean), loki-security-reviewer
+  (independent, found and confirmed-fixed one Medium — a reachable panic on
+  a legitimately-sized-but-longer candidate id, not an identity-correctness
+  defect), loki-integrator; recorded by orchestrator (Claude Code)
+evidence: `Docs/graph/handoffs/CON-002-R1-{1,2,3}.md`;
+  `Docs/graph/evidence/W6/INTEGRATION-2026-08-26/integration-record-4.md`;
+  full workspace gates (clippy, 77 test-result blocks, `pnpm run verify`) all
+  pass, independently reproduced by the orchestrator
+reason: real candidate-based discovery and stable-identity reconciliation now
+  replaces the mock-era code that minted a `DeviceId` directly from a
+  provisional candidate string. Reconciliation genuinely keyed on the
+  HMAC-derived `PublicDeviceIdentity` digest, not any candidate/connector
+  string; fail-closed on ambiguous/conflicting evidence; busy/permission/
+  disconnect distinguishable; concurrency-safe under real contention
+  (independently re-tested 5x). Both inherited open questions
+  (`IdentityConfidence` threshold policy; wire-authenticity boundary)
+  recorded as explicitly open, not silently resolved.
+unblocked_nodes: none directly new.
+new_or_changed_risks: a minor, non-blocking observation from test review —
+  cross-connector same-digest collision (two different registered connectors
+  both reporting the same fingerprint digest) is not tested; out of this
+  packet's stated scope (which covers within-connector reconciliation), a
+  reasonable candidate for a future node, not a defect.
+```
+
+```text
+node_id: OQ-001
+from: open
+to: resolved
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: human product/security owner (device physically present, authorized
+  read-only identification query in chat: "you can do whatever you want just
+  dont harm it you can test it if you like but no toy tests"); orchestrator
+  (Claude Code) executed the query
+starting_revision: n/a — device evidence, not code
+evidence: `esptool.py v4.12.0 chip_id`/`flash_id` real command output against
+  the physically connected device on COM5, run via the locally-installed
+  ESP-IDF v5.3 toolchain (already inventoried read-only by `CON-003-PRE-001`).
+  The resolved profile is recorded in `Docs/CONTEXT.md`'s `OQ-001` row.
+reason: `CON-003-PRE-001`'s prior read-only Windows PnP audit could confirm
+  only a generic Espressif USB transport candidate, not the exact chip/
+  module SKU, because USB descriptors alone don't carry that. A direct
+  chip-level query (the standard, universal, non-destructive way every
+  ESP32 tool identifies hardware — reads ROM-reported chip type/revision/
+  PSRAM/flash size, writes nothing) resolves it. This query does briefly
+  toggle the RTS line to enter/exit the ROM bootloader (visible in the
+  esptool output as "Hard resetting via RTS pin") — noted transparently
+  rather than glossed over, though this is universally considered a safe,
+  reversible, momentary operation, not a flash/erase/configuration change.
+conditions: this resolves ONLY the SKU-identification blocker. It does not
+  authorize flashing, erasing, resetting for any other purpose, or any
+  other physical operation — `CON-003-PRE-001`'s staged physical-approval
+  matrix (stages 0-10) still gates every further physical step, each
+  requiring its own separate exact-operation approval per `AGENTS.md`'s
+  human-approval-boundary rules and this project's established ADR-0004/
+  0005 convention.
+unblocked_nodes: `CON-003` code-level implementation planning may now
+  proceed (the SKU is known); no physical flash/recovery work is unblocked.
+new_or_changed_risks: raw device MAC address was deliberately withheld from
+  all durable graph/doc records, matching this project's existing
+  sensitive-device-identifier discipline (established by `CON-003-PRE-001`
+  for the USB instance suffix).
+```
+
+```text
+node_id: CON-003-R1
+from: dispatched
+to: accepted (integrated — commits `2ca16a0`, `a06cd5d` on `LokiAI-v1.2`)
+timestamp: 2026-08-26T00:00:00Z (approximate)
+actor: loki-implementer, loki-test-reviewer (independent, clean),
+  loki-security-reviewer (independent, clean — notably confirmed the
+  `rollback` no-hardware-touch guarantee is enforced by the Rust compiler
+  itself, via an `&self` method signature that cannot reach the owned
+  transport, not merely by convention), loki-integrator; recorded by
+  orchestrator (Claude Code)
+evidence: `Docs/graph/handoffs/CON-003-R1-1.md`;
+  `Docs/graph/evidence/W6/INTEGRATION-2026-08-26/integration-record-5.md`;
+  36/36 crate tests; zero real device I/O reachable (no serial-port
+  dependency anywhere in the resolved dependency tree, no
+  `std::process::Command`, no `unsafe`); full workspace gates pass
+reason: first real `Connector` implementation in the codebase, for the
+  now-confirmed physical ESP32-S3 (`OQ-001`). Code-level structure only
+  (manifest, capabilities, identify/preflight/execute/verify/recover
+  dispatch) against an injectable `Esp32Transport` trait with only a fake
+  test double — no real hardware touched by this node's own code or tests,
+  by design and independently confirmed. All three inherited open questions
+  (toolchain provenance, recovery policy, identity confidence) handled
+  honestly, not silently resolved.
+unblocked_nodes: none directly new — a future, separately-gated node
+  (`CON-003-PHYS-001`) is needed to implement `Esp32Transport` for real
+  against the actual device, and requires its own staged physical-approval
+  matrix per `CON-003-PRE-001`.
+new_or_changed_risks: integration surfaced one pre-existing flaky test in
+  `loki-connector-registry` (`concurrent_register_deregister_discover_and_
+  reconcile_do_not_corrupt_state`, from `CON-002-R1`) — confirmed genuinely
+  intermittent via 3 clean standalone reruns, not caused by this node
+  (which never touches that crate). Worth a small follow-up to stabilize
+  the test's timing assumptions; not a correctness defect in the
+  reconciliation logic itself (already adversarially reviewed clean).
 ```

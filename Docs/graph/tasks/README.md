@@ -57,7 +57,8 @@ silently editing a worker's contract.
 | `DAT-002-MEM-HOST-VERIFY-001` | packet pending | `BLOCKED_DEPENDENCY` | Requires CODE plus exact VM/signing operation approval and an approved supported-host environment. |
 | `DAT-002-MEM-REV-001` | packet pending | proposed | Independent review follows accepted CODE and HOST-VERIFY evidence. |
 | `DAT-002-MEM-IMPL-001` | packet pending | proposed | Final integration/acceptance cannot occur from code tests alone. |
-| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | `FAILED_VERIFICATION`, correction active | REV-003 found four high result-binding, strict-parity, in-flight-revocation, and bounded-dispatch defects; correction is active in its isolated worktree. |
+| `P1-RPC-CONTRACT-001` | [`P1-RPC-CONTRACT-001.md`](P1-RPC-CONTRACT-001.md) | `NEEDS_REPLAN` | REV-004 proved IPC cannot enforce the durable mutation boundary; safe transport work remains salvage evidence only. |
+| `P1-MUTATION-SEM-ADR-001` | [`P1-MUTATION-SEM-ADR-001.md`](P1-MUTATION-SEM-ADR-001.md) | `BLOCKED_DEPENDENCY` | ADR-0006 needs the exact human security/public-contract semantics decision. |
 | `BLD-ARCH-ADR-001` | [`BLD-ARCH-ADR-001.md`](BLD-ARCH-ADR-001.md) | accepted 2026-08-24 | ADR-0004 Design A accepted for implementation; every elevated/VHDX operation remains separately gated. |
 | `BLD-001-R2-CODE` | [`BLD-001-R2-CODE.md`](BLD-001-R2-CODE.md) | ready | Accepted packet at `0bd4a704`; no VHDX invocation, elevation, install, signing credential, or host mutation. |
 | `BLD-001-R2-HOST-VERIFY` | packet pending | `BLOCKED_DEPENDENCY` | Requires accepted R2 code plus separate exact VHDX/elevation approval and an approved signer/provisioning environment. |
