@@ -19,7 +19,10 @@
 use std::{fmt, path::Path, sync::Arc};
 
 use loki_local_authority::{AuthorityError, LocalAuthority, LocalCapability, LocalContext};
-use loki_storage::agents::{AgentRunRow, AgentsRepository, NewRunEvent};
+use loki_storage::agents::{
+    AgentConnectionRow, AgentRunRow, AgentsRepository, NewRunEvent, finish_agent_run_core,
+    get_agent_connection_core, get_agent_run_core,
+};
 use loki_storage::{Cipher, Storage};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -492,20 +495,51 @@ impl AgentRegistry {
         state: RunState,
         now_ms: i64,
     ) -> Result<(), AgentError> {
-        self.authenticate(connection_id, secret, AgentScope::RegisterRuns)?;
         if !state.terminal() {
             return Err(AgentError::InvalidTransition);
         }
-        let run = load_run(&self.storage, run_id)?.ok_or(AgentError::NotFound)?;
-        if run.connection_id != connection_id {
-            return Err(AgentError::AuthenticationFailed);
-        }
-        if run.state.terminal() {
-            return Err(AgentError::TerminalRun);
-        }
-        self.storage
-            .finish_agent_run(run_id, state.wire(), now_ms)?;
-        Ok(())
+        self.storage.transaction(|tx| {
+            let Some(connection) = get_agent_connection_core(tx, connection_id)? else {
+                return Ok(Err(AgentError::AuthenticationFailed));
+            };
+            if let Err(error) =
+                authenticate_connection(&connection, secret, AgentScope::RegisterRuns)
+            {
+                return Ok(Err(error));
+            }
+            let Some(run) = get_agent_run_core(tx, run_id)? else {
+                return Ok(Err(AgentError::NotFound));
+            };
+            let run = match row_to_agent_run(run) {
+                Ok(run) => run,
+                Err(error) => return Ok(Err(error)),
+            };
+            if run.connection_id != connection_id {
+                return Ok(Err(AgentError::AuthenticationFailed));
+            }
+            if run.state.terminal() {
+                return Ok(if run.state == state {
+                    Ok(())
+                } else {
+                    Err(AgentError::TerminalRun)
+                });
+            }
+            if finish_agent_run_core(tx, run_id, state.wire(), now_ms)? {
+                return Ok(Ok(()));
+            }
+            let Some(observed) = get_agent_run_core(tx, run_id)? else {
+                return Ok(Err(AgentError::NotFound));
+            };
+            let observed = match row_to_agent_run(observed) {
+                Ok(run) => run,
+                Err(error) => return Ok(Err(error)),
+            };
+            Ok(if observed.state == state {
+                Ok(())
+            } else {
+                Err(AgentError::TerminalRun)
+            })
+        })?
     }
 
     pub fn append_event(
@@ -561,22 +595,30 @@ impl AgentRegistry {
             .storage
             .get_agent_connection(connection_id)?
             .ok_or(AgentError::AuthenticationFailed)?;
-        if row.revoked_at_ms.is_some() {
-            return Err(AgentError::Revoked);
-        }
-        if !constant_time_eq(row.secret_hash.as_bytes(), hash_secret(secret).as_bytes()) {
-            return Err(AgentError::AuthenticationFailed);
-        }
-        if !row
-            .scopes
-            .split(',')
-            .filter_map(AgentScope::parse)
-            .any(|s| s == scope)
-        {
-            return Err(AgentError::ScopeDenied);
-        }
-        Ok(())
+        authenticate_connection(&row, secret, scope)
     }
+}
+
+fn authenticate_connection(
+    row: &AgentConnectionRow,
+    secret: &str,
+    scope: AgentScope,
+) -> Result<(), AgentError> {
+    if row.revoked_at_ms.is_some() {
+        return Err(AgentError::Revoked);
+    }
+    if !constant_time_eq(row.secret_hash.as_bytes(), hash_secret(secret).as_bytes()) {
+        return Err(AgentError::AuthenticationFailed);
+    }
+    if !row
+        .scopes
+        .split(',')
+        .filter_map(AgentScope::parse)
+        .any(|s| s == scope)
+    {
+        return Err(AgentError::ScopeDenied);
+    }
+    Ok(())
 }
 
 fn hash_secret(value: &str) -> String {
@@ -774,16 +816,178 @@ mod tests {
             4200,
         )
         .unwrap();
+
+        // An identical terminal retry is an idempotent replay. It must not
+        // rewrite the completion timestamp supplied by the first commit.
+        r.finish_run(
+            &c.connection_id,
+            secret,
+            &run.run_id,
+            RunState::Failed,
+            4300,
+        )
+        .unwrap();
+        let completed = r
+            .require_run_for_connection(&c.connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(completed.state, RunState::Failed);
+        assert_eq!(completed.completed_at_ms, Some(4200));
+
+        // A different terminal result can never replace the committed one.
         assert!(matches!(
             r.finish_run(
                 &c.connection_id,
                 secret,
                 &run.run_id,
-                RunState::Failed,
-                4300
+                RunState::Succeeded,
+                4400
             ),
             Err(AgentError::TerminalRun)
         ));
+        let unchanged = r
+            .require_run_for_connection(&c.connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(unchanged.state, RunState::Failed);
+        assert_eq!(unchanged.completed_at_ms, Some(4200));
+    }
+
+    #[test]
+    fn finish_revalidates_revocation_and_run_ownership_before_transition() {
+        let (a, ctx, session_id, r, owner) = setup(&all());
+        let other = r
+            .register(&a, &ctx, &session_id, "other agent", &all(), 3100)
+            .unwrap();
+        let run = r
+            .start_run(
+                &owner.connection_id,
+                owner.secret.expose_for_client_configuration(),
+                "owned-run",
+                None,
+                4000,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            r.finish_run(
+                &other.connection_id,
+                other.secret.expose_for_client_configuration(),
+                &run.run_id,
+                RunState::Succeeded,
+                4100,
+            ),
+            Err(AgentError::AuthenticationFailed)
+        ));
+        let still_running = r
+            .require_run_for_connection(&owner.connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(still_running.state, RunState::Running);
+        assert_eq!(still_running.completed_at_ms, None);
+
+        r.revoke(&a, &ctx, &session_id, &owner.connection_id, 4200)
+            .unwrap();
+        assert!(matches!(
+            r.finish_run(
+                &owner.connection_id,
+                owner.secret.expose_for_client_configuration(),
+                &run.run_id,
+                RunState::Succeeded,
+                4300,
+            ),
+            Err(AgentError::Revoked)
+        ));
+        let still_running = r
+            .require_run_for_connection(&owner.connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(still_running.state, RunState::Running);
+        assert_eq!(still_running.completed_at_ms, None);
+    }
+
+    #[test]
+    fn file_backed_concurrent_terminal_attempts_commit_exactly_one_result() {
+        use std::sync::{Arc, Barrier, mpsc};
+        use std::time::Duration;
+
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("agents.db");
+        let key = d.path().join("agents.key.dpapi");
+        let a = LocalAuthority::open_in_memory().unwrap();
+        let ctx = LocalContext::current("ipc-agent-terminal-race").unwrap();
+        a.initialize_current(&ctx, 1000).unwrap();
+        let session = a.issue_session(&ctx, 2000, 100000).unwrap();
+        let registry = Arc::new(AgentRegistry::open(&p, &key).unwrap());
+        let credential = registry
+            .register(&a, &ctx, &session.session_id, "agent", &all(), 3000)
+            .unwrap();
+        let connection_id = credential.connection_id;
+        let secret = credential.secret.0;
+        let run = registry
+            .start_run(&connection_id, &secret, "terminal-race", None, 4000)
+            .unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let (send, receive) = mpsc::channel();
+        let mut handles = Vec::new();
+        for (state, completed_at_ms) in [(RunState::Succeeded, 5000), (RunState::Failed, 6000)] {
+            let registry = Arc::clone(&registry);
+            let barrier = Arc::clone(&barrier);
+            let send = send.clone();
+            let connection_id = connection_id.clone();
+            let secret = secret.clone();
+            let run_id = run.run_id.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let result =
+                    registry.finish_run(&connection_id, &secret, &run_id, state, completed_at_ms);
+                send.send((state, completed_at_ms, result)).unwrap();
+            }));
+        }
+        drop(send);
+        barrier.wait();
+
+        let first = receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first terminal attempt must return without re-locking Storage");
+        let second = receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("second terminal attempt must return without re-locking Storage");
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let outcomes = [first, second];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(_, _, result)| result.is_ok())
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(_, _, result)| matches!(result, Err(AgentError::TerminalRun)))
+                .count(),
+            1
+        );
+        let (winning_state, winning_timestamp, _) = outcomes
+            .iter()
+            .find(|(_, _, result)| result.is_ok())
+            .unwrap();
+        let committed = registry
+            .require_run_for_connection(&connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(committed.state, *winning_state);
+        assert_eq!(committed.completed_at_ms, Some(*winning_timestamp));
+
+        // The result remains durable after closing and reopening the real
+        // encrypted file-backed registry.
+        drop(registry);
+        let reopened = AgentRegistry::open(&p, &key).unwrap();
+        let durable = reopened
+            .require_run_for_connection(&connection_id, &run.run_id)
+            .unwrap();
+        assert_eq!(durable, committed);
     }
     #[test]
     fn restart_preserves_revocation() {
