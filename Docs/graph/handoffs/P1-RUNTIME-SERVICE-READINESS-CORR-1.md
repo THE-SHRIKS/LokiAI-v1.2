@@ -88,3 +88,57 @@ Mandatory verification not run / partially run:
 
 - **Required, not optional**: once the operation-binding correction (sibling in-progress node, e.g. `P1-MUTATION-SEM-ADR-001` / the corrected `loki-acceptance-store` contract) integrates, this node must be rebased and `services::mutation`'s `ClosedMutationSubmission` must be replaced with a real submission path that calls into the corrected acceptance coordinator. Until that follow-up lands, `MutationSubmissionPort::submit_mutation` will keep returning `Err(MutationUnavailable { OperationBindingNotIntegrated })` for every caller — this is correct today but must not be forgotten as "already done."
 - No other new graph nodes/edges proposed. Only the orchestrator updates the task graph.
+
+## 10. Follow-up completed — real mutation submission wired (2026-08-30, commit `f72c0c3`)
+
+The required follow-up from §9 above is now done. Summary, since §1-§8 above describe the now-superseded fail-closed revision:
+
+### 10.1 What changed
+
+- **Rebase**: branch rebased from `9f6e7ab` (on top of `2468878`) onto current `LokiAI-v1.2` at `8e47588` (`docs(integration): record W7 integration of P1-APPROVAL-OPERATION-BINDING-CORR`). The rebase was clean — zero conflicts (`git rebase FETCH_HEAD` reported "Successfully rebased" with no manual resolution needed), confirming this branch's `crates/loki-runtime/**` changes are genuinely disjoint from the `loki-agents`/`loki-approvals`/`loki-storage`/`loki-mutation-contract` files the agent-terminal and operation-binding corrections touched. New commits on top: `e85c55a` (`fix: unify approval mutation operation binding`), `e13ae46` (`fix(approvals): eliminate cross-storage authorization bypass and standalone approval consumption`), `0c8c535` (docs), then this node's own `8deb947`/`77a853b` (the original fail-closed work, replayed by the rebase), then the new work described below.
+- **`crates/loki-runtime/src/services/mutation.rs`**: `ClosedMutationSubmission`/`ClosedMutationRequest`/`MutationAcceptance`/`MutationUnavailable`/`MutationUnavailableReason` are gone. Replaced with `RealMutationSubmission`, which holds the same privately-owned `Arc<loki_storage::Storage>` `RuntimeServices` already composes, and whose `submit_mutation` takes a `&loki_mutation_contract::MutationAcceptanceRequest` (that crate's own closed, already-hardened, digest-derived-not-caller-supplied request type — unchanged by this node) and forwards it, unmodified, into `loki_acceptance_store::accept_mutation(self.storage.as_ref(), request)`, returning whatever real `AcceptanceResult` that call produces (`Accepted`/`Rejected`/`ReplayedIdenticalAccepted`/`ApprovalRequired`) wrapped in `Ok(..)`. Infrastructure failures (`AcceptanceStoreError::Storage`/`::Contract`) map to a new `MutationSubmissionError` — genuine database/construction faults, never a business rejection (a business rejection stays `Ok(AcceptanceResult::Rejected(..))`).
+- **`crates/loki-runtime/src/services/mod.rs`**: `RuntimeServices` now composes `mutation::RealMutationSubmission::new(storage)` instead of the closed unit struct; the `MutationSubmissionPort` impl signature changed to match (`&MutationAcceptanceRequest -> Result<AcceptanceResult, MutationSubmissionError>`); re-exports `loki_mutation_contract::{AcceptanceResult, MutationAcceptanceRequest}` alongside the port so a caller never has to reach into `loki-mutation-contract` directly by accident. Module doc comment updated to describe the real boundary instead of "sealed and explicitly unavailable."
+- **`crates/loki-runtime/Cargo.toml`**: added `loki-acceptance-store` and `loki-mutation-contract` as path dependencies (both workspace `publish = false` crates, no external license/maintenance review triggered), with rationale comments matching this crate's existing dependency-documentation convention.
+- **`Cargo.lock`**: two new dependency-edge lines under `loki-runtime`'s existing package entry (`loki-acceptance-store`, `loki-mutation-contract`) — both packages were already resolved elsewhere in the workspace, so no new package version entries were added.
+- **`crates/loki-runtime/src/host/compose.rs`**: one doc-comment sentence updated (no code change) to stop describing the mutation boundary as "sealed."
+
+### 10.2 What this node did **not** do (deliberately out of scope)
+
+- No IPC/MCP-facing business method was added that calls `RuntimeServices::submit_mutation` — `ComposedHost::services()` still has zero external callers, exactly as before this node. Wiring a real IPC business method through this port is a distinct, later node's scope (this node's task description was explicitly "wire `RuntimeServices`'s mutation submission to call the real `accept_mutation`," not "expose it over IPC").
+- No change to `loki-acceptance-store`, `loki-mutation-contract`, `loki-approvals`, or `loki-storage` themselves — this node only became a *consumer* of `accept_mutation`, an already-complete, already-reviewed public entry point (see `Docs/graph/handoffs/P1-APPROVAL-OPERATION-BINDING-CORR-1.md`).
+
+### 10.3 Required evidence
+
+| Criterion (from the dispatch instructions) | Result | Evidence |
+|---|---|---|
+| A real accepted mutation via `RuntimeServices` produces the exact same result as calling `accept_mutation` directly (no divergence/wrapper bug) | pass | `services::mutation::tests::accepted_mutation_matches_calling_accept_mutation_directly` (compares both an independently-accepted request and a same-idempotency-key replay across the port vs. a direct call, asserting identical `job_id`/`correlation_id`/`accepted_at_ms`); `services::tests::runtime_services_submit_mutation_matches_direct_accept_mutation_call` (same property through the top-level `RuntimeServices` façade, not just the inner port) |
+| A rejected mutation (bad approval reference / expired grant) is correctly surfaced as rejected, not silently swallowed or converted to a generic error that loses information | pass | `services::mutation::tests::rejected_mutation_surfaces_the_real_rejection_not_a_generic_error` (no matching agent connection → real `Ok(Rejected(GrantInvalid{..}))`, not `Err`); `services::mutation::tests::expired_local_grant_is_rejected_not_swallowed` (a genuinely expired local-authority session → real `Ok(Rejected(GrantExpired))`); `services::tests::runtime_services_submit_mutation_surfaces_a_real_rejection` (same property through the façade) |
+| No raw `Storage` handle or connection is ever returned/exposed through `RuntimeServices`'s public API | pass | `services::mutation::tests::port_never_returns_storage_or_a_connection` (compile-time-shape assertion on `submit_mutation`/`availability`'s return types); structurally, `RealMutationSubmission.storage`/`RuntimeServices.storage` are both private fields with no accessor exposing them — `ComposedHost::storage()` (pre-existing, unchanged) is the only place a `&Storage` is ever handed out, and that predates and is unrelated to this port |
+| Never fabricate success | pass | `submit_mutation` never constructs an `AcceptanceResult` itself — every variant it can return originates inside `loki-mutation-contract`'s own closed constructors (`construct_accepted`/`replayed_result`), reached only via `accept_mutation` |
+| Preserve everything else about the existing bounded/validated/redacted design | pass | `read.rs` untouched; `RuntimeReadPort`/`DeviceSummary`/`PersistedHealthEvidence`/pagination/`NotObserved` semantics all unchanged (`git diff --stat` shows zero changes to `read.rs`) |
+| `cargo fmt --all -- --check` | pass | ran twice (before/after adding the façade-level tests), clean both times |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass, 0 warnings | full workspace, after adding the new dependency edges |
+| `cargo test -p loki-runtime -- --test-threads=1` | pass | 62 lib tests (up from 57 — 4 new `services::mutation::tests::*`, 2 new `services::tests::*`), 4 `host_lifecycle`, 4 passed/2 known-pre-existing-ignored `process_behavior`, 1 `secure_memory_arena_runtime`; one transient spurious failure was observed on a single run of the full multi-binary command and did not reproduce on immediate re-run or on isolated `--test host_lifecycle` — consistent with the documented "concurrent agents sharing this checkout's `target/` cache" hazard, not a real regression (the final confirming run, captured in the commit, was clean) |
+
+### 10.4 Verification performed
+
+| Command | Result |
+|---|---|
+| `git rebase FETCH_HEAD` (rebase onto `LokiAI-v1.2`@`8e47588`) | clean, zero conflicts |
+| `cargo build -p loki-runtime --target-dir L:/LokiAI-v1.2/target` | pass (PDB link warnings only, pre-existing/unrelated to this crate's own code) |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --workspace --all-targets --target-dir L:/LokiAI-v1.2/target -- -D warnings` | pass, 0 warnings |
+| `cargo test -p loki-runtime --target-dir L:/LokiAI-v1.2/target -- --test-threads=1` | pass (62+4+4+1, doctest execution blocked by the documented host os error 4551) |
+| `cargo test -p loki-runtime --no-run --target-dir L:/LokiAI-v1.2/target` | pass — confirms the doctest failure is execution-only, not a compile error (no doctest content was added or changed) |
+| `cargo test -p loki-acceptance-store -p loki-mutation-contract --target-dir L:/LokiAI-v1.2/target -- --test-threads=1` | pass, 31/31 (sanity check that the crate this node now depends on is itself green; same doctest-execution host limitation on `loki-acceptance-store`, unrelated to this node) |
+
+### 10.5 Security notes
+
+- The mutation-submission trust boundary is now real, not closed-by-construction — the reviewer should re-verify (independently of this handoff's own claim) that `RealMutationSubmission::submit_mutation` truly performs no transformation of the request or result beyond the direct `accept_mutation(..)` call (`services/mutation.rs`'s `submit_mutation` body is a single expression: `Ok(accept_mutation(self.storage.as_ref(), request)?)`).
+- `MutationAcceptanceRequest` construction (validation, digest derivation, principal/actor/grant-generation binding) is entirely `loki-mutation-contract`'s existing, already-reviewed responsibility — this node introduces no new request-construction logic of its own; `RuntimeServices`/`RealMutationSubmission` only ever receive an already-constructed request from their caller.
+- No approval-bypass, digest-bypass, or transaction-boundary-bypass was introduced: the only call this crate makes into `loki-acceptance-store` is its single `pub fn accept_mutation`, which internally wraps its entire ADR-0006 sequence in one `Storage::transaction()` call — this node adds no alternate path into `loki-storage`'s approval/mutation-acceptance tables.
+- This node still has zero real callers (no IPC/MCP business method invokes `RuntimeServices::submit_mutation` yet) — the real device-mutation risk surface this unlocks is real but currently unreachable from outside `loki-runtime`'s own tests, exactly as intended at this stage of the graph.
+
+## 11. Result
+
+`ACCEPTED-pending-review`. Rebase clean, real mutation submission wired and tested against the corrected `loki-acceptance-store`/`loki-approvals` contracts, all required verification passing except the pre-existing, documented, host-environment-only doctest-execution limitation. Not self-marked `COMPLETE` in the task graph — only the orchestrator does that.
