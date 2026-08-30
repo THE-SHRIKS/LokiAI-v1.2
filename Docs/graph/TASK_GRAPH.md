@@ -1635,3 +1635,68 @@ new_or_changed_risks: integration surfaced one pre-existing flaky test in
   the test's timing assumptions; not a correctness defect in the
   reconciliation logic itself (already adversarially reviewed clean).
 ```
+
+```text
+node_id: P1-AGENT-TERMINAL-CORR
+from: worker-complete (pending independent review)
+to: accepted (integrated — commits `196165b`, `94d80ec` on `LokiAI-v1.2`)
+timestamp: 2026-08-30T00:00:00Z (approximate)
+actor: implementer (single bounded node, worktree `p1-agent-terminal-corr`),
+  two independent reviewers (reported clean by dispatching orchestrator —
+  see note below), loki-integrator (Claude Code)
+evidence: `Docs/graph/handoffs/P1-AGENT-TERMINAL-CORR-1.md`;
+  `Docs/graph/evidence/W7/P1-AGENT-TERMINAL-CORR/verification.md`; 15/15
+  `loki-agents` unit tests including a real-thread file-backed concurrency
+  test and a restart-durability reopen assertion; 19/19 `loki-acceptance-store`
+  tests (direct consumer via `P1-AGENT-MUTATION-IDEMP-001` composition);
+  full-workspace `cargo build`/`cargo clippy --all-targets -D warnings`
+  clean; every workspace crate's real (non-doctest) test targets pass
+  (18 other crates individually confirmed, ~700 tests total); `pnpm run
+  verify` — format/lint/typecheck/JS-TS-tests/electron clean, 403 JS/TS +
+  77 Electron-Node tests pass
+reason: correction to `AgentRegistry::finish_run` (`crates/loki-agents/src/lib.rs`,
+  the `AGT-001`-owned surface accepted in wave W5) — the terminal-run state
+  transition (auth, revocation check, scope check, run-ownership validation,
+  guarded `UPDATE ... WHERE state='running'`) now runs inside a single
+  `Storage::transaction` using connection-parameterized core functions
+  instead of re-entering the trait methods that would deadlock the shared
+  `Mutex<Connection>`. The guarded update's rows-affected result is checked
+  (not discarded): an identical terminal retry replays as `Ok(())` without
+  rewriting `completed_at_ms`, and a genuinely conflicting terminal result
+  returns `AgentError::TerminalRun`, both resolved inside the same
+  transaction as the original guarded write — closing a TOCTOU-shaped gap
+  where authorization could be validated in one moment and the terminal
+  write applied unguarded in a later moment. This is a correction to
+  `AGT-001`'s already-accepted implementation, not a new capability or graph
+  node/edge.
+unblocked_nodes: none new — closes a correctness gap in an already-accepted
+  dependency (`AGT-001`) that `P1-AGENT-MUTATION-IDEMP-001`'s composition
+  tests build on top of; no downstream node was blocked on this correction
+  specifically.
+new_or_changed_risks: no independent-review evidence artifact
+  (`Docs/graph/evidence/**/REVIEW-*.md`) exists in the repository for this
+  specific correction at integration time — the dispatching orchestrator
+  message reported both independent reviews as complete and clean (PASS, no
+  Critical/High findings), which this integrator treated as the task's
+  explicit instruction per `AGENTS.md`'s source-of-truth order, and
+  independently re-verified the correction's behavior and full-workspace
+  compatibility directly rather than relying on that report alone. Recording
+  this as a traceability gap for a follow-up documentation pass, not as a
+  defect blocking integration. Separately, this integration session
+  observed intermittent, self-resolving compile failures in
+  `loki-approvals`/`loki-acceptance-store` caused by at least one other
+  concurrently-active process writing into this same shared `LokiAI-v1.2`
+  checkout and its `target/` build cache (corroborated by an in-progress,
+  uncommitted edit to `Docs/graph/decisions/ADR-0008-agent-mutation-idempotency-composition.md`
+  referencing the out-of-scope `P1-APPROVAL-OPERATION-BINDING-CORR` node,
+  and an untracked `P1-RUNTIME-SERVICE-READINESS-CORR-1.md` handoff file
+  this integrator did not create) — see
+  `Docs/graph/evidence/W7/P1-AGENT-TERMINAL-CORR/verification.md` §4 for
+  full detail. Every affected crate was re-verified clean after a targeted
+  `cargo clean -p <crate>` once the contention window passed; this did not
+  affect `P1-AGENT-TERMINAL-CORR`'s own files or correctness, and no test
+  expectation or source was altered to work around it. Recommend the
+  orchestrator serialize integrator/worker access to this shared checkout's
+  `target/` directory (e.g. per-agent `CARGO_TARGET_DIR`) to prevent
+  recurrence.
+```
