@@ -38,6 +38,7 @@ pub mod health;
 pub mod host;
 pub mod logging;
 pub mod runtime;
+pub mod services;
 pub mod shutdown;
 
 pub use app::run;

@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use loki_ipc::auth::AuthToken;
@@ -25,6 +26,7 @@ use crate::host::discovery::{self, RecordedState};
 use crate::host::paths::HostPaths;
 use crate::host::token;
 use crate::runtime::{self, RunOutcome};
+use crate::services::RuntimeServices;
 use crate::shutdown::ShutdownReason;
 
 /// How long [`ComposedHost::run`] waits for the IPC accept loop to drain
@@ -96,7 +98,12 @@ impl From<SecureMemoryError> for HostStartError {
 /// A fully started background host: storage migrated, IPC pipe bound, and
 /// the desktop-discovery file already reflecting `"serving"`.
 pub struct ComposedHost {
-    storage: Storage,
+    storage: Arc<Storage>,
+    /// Application services composed over the same migrated store the host
+    /// just opened, so no adapter or future business method can open a
+    /// second, divergent database. See `crate::services` for why mutation
+    /// submission stays sealed until the operation-binding correction lands.
+    services: RuntimeServices,
     server: Server,
     discovery_file: PathBuf,
     started_at_unix_millis: u64,
@@ -158,6 +165,8 @@ impl ComposedHost {
         let storage = Storage::open_managed(&database_file, &config.paths.database_key_file())?;
         let report = storage.run_migrations(&now_utc_iso8601())?;
         tracing::info!(applied = ?report.applied_versions, "background host: storage migrated");
+        let storage = Arc::new(storage);
+        let services = RuntimeServices::compose(Arc::clone(&storage));
 
         let started_at_unix_millis = unix_millis_now();
         let discovery_file = config.paths.discovery_file();
@@ -185,6 +194,7 @@ impl ComposedHost {
 
         Ok(Self {
             storage,
+            services,
             server,
             discovery_file,
             started_at_unix_millis,
@@ -198,7 +208,15 @@ impl ComposedHost {
     /// ships only `ping`/`echo_stream`; real business methods are later
     /// nodes' scope).
     pub fn storage(&self) -> &Storage {
-        &self.storage
+        self.storage.as_ref()
+    }
+
+    /// The runtime's composed application services, bounded to the read
+    /// projections and closed mutation port in `crate::services`. Future
+    /// authenticated IPC business methods read through this instead of
+    /// opening or querying storage directly.
+    pub fn services(&self) -> &RuntimeServices {
+        &self.services
     }
 
     /// Runs the host until `shutdown_signal` resolves (clean exit) or
@@ -217,6 +235,7 @@ impl ComposedHost {
     {
         let ComposedHost {
             storage,
+            services,
             mut server,
             discovery_file,
             started_at_unix_millis,
@@ -251,9 +270,14 @@ impl ComposedHost {
             tracing::warn!(error = %err, "failed to mark the discovery file stopped on shutdown");
         }
 
-        // No SQLite connection may survive arena teardown.  `Storage` owns
-        // the last core connection, so close it before `sqlite3_shutdown`,
-        // wipe/unlock/free, and current-process working-set restoration.
+        // No SQLite connection may survive arena teardown.  `storage` is an
+        // `Arc<Storage>` shared with every service in `services` (see
+        // `crate::services::RuntimeServices::compose`), so every other clone
+        // must drop first or the final `drop(storage)` below would merely
+        // decrement a refcount instead of closing the last core connection
+        // before `sqlite3_shutdown`, wipe/unlock/free, and current-process
+        // working-set restoration.
+        drop(services);
         drop(storage);
         if let Err(err) = secure_memory.shutdown() {
             tracing::error!(error = %err, "secure-memory shutdown did not complete cleanly");

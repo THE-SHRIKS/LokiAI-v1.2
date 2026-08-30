@@ -107,6 +107,17 @@ serde_json = "=1.0.151"
 # (`publish = false`).
 loki-storage = { path = "../loki-storage" }
 
+# Production application services composed by `src/services`. Each service
+# already accepts an `Arc<loki_storage::Storage>`; the runtime supplies one
+# migrated store to all of them instead of allowing per-service databases.
+# These are workspace crates (`publish = false`), so no external license or
+# maintenance dependency is introduced here.
+loki-local-authority = { path = "../loki-local-authority" }
+loki-agents = { path = "../loki-agents" }
+loki-approvals = { path = "../loki-approvals" }
+loki-agent-delivery = { path = "../loki-agent-delivery" }
+loki-jobs = { path = "../loki-jobs" }
+
 [target.'cfg(windows)'.dependencies]
 # RUN-003: `crates/loki-ipc` (`RUN-002`) — the background host binds and
 # serves the real named-pipe IPC listener (`src/host/compose.rs`), and the
