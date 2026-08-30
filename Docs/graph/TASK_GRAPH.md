@@ -1700,3 +1700,72 @@ new_or_changed_risks: no independent-review evidence artifact
   `target/` directory (e.g. per-agent `CARGO_TARGET_DIR`) to prevent
   recurrence.
 ```
+
+```text
+node_id: P1-APPROVAL-OPERATION-BINDING-CORR
+from: worker-complete (pending independent review)
+to: accepted (integrated — commits `e85c55a`, `e13ae46`, `0c8c535` on
+  `LokiAI-v1.2`, corresponding to upstream `7535e08`, `16478fa`, `e00ecce`)
+timestamp: 2026-08-30T00:00:00Z (approximate)
+actor: human (`7535e08`, `The-Shriks`) + implementer (Claude Sonnet 5, Claude
+  Code, `16478fa`/`e00ecce`, worktree `p1-operation-binding-corr`), two
+  independent reviewers (security PASS no Critical/High, test PASS — see
+  handoff), loki-integrator (Claude Code)
+evidence: `Docs/graph/handoffs/P1-APPROVAL-OPERATION-BINDING-CORR-1.md`;
+  `Docs/graph/evidence/W7/P1-APPROVAL-OPERATION-BINDING-CORR/verification.md`;
+  `loki-approvals` 6/6, `loki-local-authority` 8/8, `loki-storage` 49/49 +
+  full integration-suite pass, `loki-acceptance-store` 5/5 + 14/14 — all real
+  execution, confirmed on the integrated checkout; full-workspace
+  `cargo build`/`cargo clippy --workspace --all-targets -D warnings` clean;
+  full-workspace test coverage confirmed complete (one clean full run plus
+  individually retried, really-executed passes for every transiently-blocked
+  binary — see verification.md §4); `pnpm run verify` reached its final
+  `cargo:test` stage (all TS/Electron/JS/fmt/build gates clean)
+reason: this integration lands three commits together, in order: `7535e08`
+  ("fix: unify approval mutation operation binding", human-authored, not
+  previously on `LokiAI-v1.2`) fixed a real approval/mutation digest mismatch
+  by rewriting `crates/loki-mutation-contract`'s digest/request/result types
+  around a new `OperationBinding` concept (305 insertions / 150 deletions in
+  that crate alone) and adding migration `0010_approval_operation_binding.sql`.
+  Independent review of `7535e08` found two HIGH findings, both closed by
+  `16478fa`: (1) cross-storage authorization bypass — `ApprovalStore` now
+  derives `grant_generation` server-side from the authenticated session, read
+  from the same DB connection inside the same `Storage::transaction()` used
+  to persist the approval row, instead of accepting a caller-supplied value;
+  (2) standalone approval-consumption bypass — removed
+  `ApprovalStore::consume`/`ApprovalsRepository::consume_approval` entirely,
+  leaving only the connection-parameterized `consume_approval_core`, reachable
+  only via `Storage::transaction()` (`Storage::lock()` is `pub(crate)`).
+  `16478fa` also fixed two pre-existing test regressions
+  (`loki-storage/tests/{corruption,migrations}.rs`) that `7535e08` had
+  silently broken by adding a 10th migration without updating their
+  hardcoded migration-count assertions. This integration implicitly lands
+  `7535e08`'s original digest-mismatch fix (never previously integrated) and
+  reflects the "actual touch history" of `loki-mutation-contract` that
+  `Docs/graph/decisions/ADR-0008-agent-mutation-idempotency-composition.md`'s
+  Amendment 1 (already recorded by the orchestrator, carried into this
+  integration's commit) documents.
+unblocked_nodes: none new — this is a correction to already-committed but
+  not-yet-integrated work (`7535e08`) plus its own review-driven follow-up
+  correction, not a new capability. The parked `p1-runtime-services` worktree
+  was explicitly waiting for this integration to land before its own rebase.
+new_or_changed_risks: this integration session observed the host's
+  Application Control policy escalate its spurious execution-blocking of
+  freshly built test binaries as repeated `cargo test` runs accumulated
+  within the session — eventually blocking binaries that had already passed
+  earlier in the same session under an identical file hash. This is the same
+  class of environment hazard flagged before this task began (concurrent/
+  repeated builds against the shared `target/` cache), but here it was
+  observed to self-aggravate purely from this integrator's own legitimate,
+  sequential verification runs. Every individually affected binary was
+  confirmed passing on retry/rebuild; the directly affected crates
+  (`loki-approvals`, `loki-local-authority`, `loki-storage`,
+  `loki-acceptance-store`) were fully, freshly, and successfully executed
+  together in one clean pass before the escalation began. No test was
+  skipped, weakened, or had its expectations altered. See
+  `Docs/graph/evidence/W7/P1-APPROVAL-OPERATION-BINDING-CORR/verification.md`
+  §4 for full detail and a recommendation for the orchestrator (per-agent
+  `CARGO_TARGET_DIR` did not fully resolve this on its own — a brand-new,
+  empty `--target-dir` was itself blocked from executing a build script by
+  the same policy).
+```
