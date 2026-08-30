@@ -16,4 +16,4 @@ mod store;
 
 pub use error::AuthorityError;
 pub use model::{CloudCapability, LocalCapability, LocalContext, LocalInstallation, LocalSession};
-pub use store::LocalAuthority;
+pub use store::{LocalAuthority, evaluate_local_session};
