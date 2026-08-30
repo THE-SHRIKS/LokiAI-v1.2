@@ -247,6 +247,7 @@ which half of the program (Section 1a) a wave belongs to.
 | RUN-001-CORR-001 | CORRECTION | Restore RUN-001's structured-stdout diagnostics contract and deterministic default-logging process tests          | RUN-001, RUN-003           | runtime and IPC real-process/named-pipe regression suites           | accepted |
 | RUN-002 | IMPLEMENTATION | Authenticated local named-pipe RPC, version/capability handshake, deadlines, cancellation, streams                       | RUN-001, CTR-001           | malformed/auth/replay/version/backpressure contract tests           | accepted |
 | RUN-003 | IMPLEMENTATION | User background host and gateway-service lifecycle with restart/recovery and desktop discovery                           | RUN-002, DAT-001           | window-close/relaunch/service recovery scenarios                    | accepted |
+| P1-RUNTIME-SERVICE-READINESS-CORR | CORRECTION | Completes RUN-002/DAT-001's original runtime service-readiness scope: composes `RuntimeServices` (bounded device listing/readiness projection/redacted health reporting, and mutation submission) over one shared `Arc<Storage>` inside `ComposedHost`, then replaces the initial deliberate fail-closed mutation-submission stub with real wiring to `loki_acceptance_store::accept_mutation`. Zero external reachability yet — no IPC/MCP caller invokes it. | RUN-002, DAT-001, P1-APPROVAL-OPERATION-BINDING-CORR | `cargo build --workspace`/`clippy -D warnings`/full-workspace `cargo test` clean; `loki-runtime` 62/62 lib + integration suites; accepted-mutation-parity, real-rejection-surfacing, and no-storage-leak tests | accepted — integrated at `a91bca2`; full verification in `Docs/graph/evidence/W7/P1-RUNTIME-SERVICE-READINESS-CORR/verification.md` |
 | CON-001 | CONTRACT       | Device-neutral connector trait, manifest, capability, health, operation, verification, recovery contracts                | CTR-001                    | connector conformance harness                                       | accepted |
 | CON-002 | IMPLEMENTATION | Connector registry plus discovery, identity, support, capability, and health orchestration                               | CON-001, RUN-002           | AS-003/AS-004 through conformance connector inputs                  | accepted |
 | CON-003 | IMPLEMENTATION | Confirmed ESP32-S3 connector and pinned toolchain integration                                                            | CON-001, OQ-001            | connector conformance plus physical identity/recovery prerequisites | superseded by `CON-003-R1` (code-level, accepted/integrated at `2ca16a0`) — this row's bundled "physical identity/recovery prerequisites" scope remains with a future `CON-003-PHYS-001`, still blocked on the staged physical-approval matrix from `CON-003-PRE-001`. No further port-open/reset/flash operation is authorized by anything accepted so far. |
@@ -1768,4 +1769,71 @@ new_or_changed_risks: this integration session observed the host's
   `CARGO_TARGET_DIR` did not fully resolve this on its own — a brand-new,
   empty `--target-dir` was itself blocked from executing a build script by
   the same policy).
+```
+
+```text
+node_id: P1-RUNTIME-SERVICE-READINESS-CORR
+from: worker-complete (pending independent review)
+to: accepted (integrated — fast-forward merge to `a91bca2` on `LokiAI-v1.2`,
+  landing commits `8deb947`, `77a853b`, `f72c0c3`, `a91bca2` unchanged)
+timestamp: 2026-08-30T10:00:00Z (approximate)
+actor: implementer (Claude Sonnet 5, Claude Code, worktree
+  `p1-runtime-services`, branch `codex/p1-runtime-services`), two independent
+  reviewers (security PASS no Critical/High — one Low finding; test PASS,
+  independently corroborating the same Low finding — see handoff and
+  verification.md §5), loki-integrator (Claude Code)
+evidence: `Docs/graph/handoffs/P1-RUNTIME-SERVICE-READINESS-CORR-1.md`;
+  `Docs/graph/evidence/W7/P1-RUNTIME-SERVICE-READINESS-CORR/verification.md`;
+  `loki-runtime` 62/62 lib tests + 4/4 `host_lifecycle` + 4/4
+  `process_behavior` + 1/1 `secure_memory_arena_runtime`, all real execution
+  on the integrated checkout; full-workspace `cargo build`/
+  `cargo clippy --workspace --all-targets -D warnings` clean; full-workspace
+  `cargo test --workspace --no-fail-fast` confirmed complete (every real,
+  non-doctest test target passing, transiently-blocked binaries individually
+  retried and confirmed passing — see verification.md §3-4); `pnpm run
+  verify` clean through every stage except the same systemic doctest-execution
+  host hazard
+reason: this node composes `RuntimeServices` — bounded device listing,
+  readiness projection, redacted health reporting, and mutation submission —
+  over one shared `Arc<loki_storage::Storage>` inside `ComposedHost`, wiring
+  previously-dead composition code (`RuntimeServices::compose`) into the real
+  production/host startup path for the first time. It then replaces the
+  initial deliberate fail-closed mutation-submission stub
+  (`ClosedMutationSubmission`, unconditionally `Err`) with real wiring to the
+  already-integrated, already-reviewed `loki_acceptance_store::accept_mutation`
+  (`P1-APPROVAL-OPERATION-BINDING-CORR`), confirmed by dedicated tests to
+  produce identical results to a direct `accept_mutation` call and to
+  correctly surface real rejections rather than swallowing or genericizing
+  them. This completes `RUN-002`/`DAT-001`'s original runtime
+  service-readiness scope rather than introducing a new capability; the
+  branch was rebased by the worker onto `LokiAI-v1.2`@`8e47588` (this
+  integration's exact starting revision) and merged with a clean fast-forward
+  — zero conflicts of any kind, confirming the node's files
+  (`crates/loki-runtime/**`) are disjoint from every other node integrated so
+  far in this wave.
+unblocked_nodes: none new — mutation submission is now real but still has
+  zero external callers (no IPC/MCP business method invokes
+  `RuntimeServices::submit_mutation` yet); wiring a real caller through this
+  port remains distinct future scope, not implied by this node.
+new_or_changed_risks: one Low finding, independently identified by both
+  reviewers and confirmed by this integrator's direct inspection:
+  `crates/loki-runtime/src/services/mutation.rs`'s
+  `port_never_returns_storage_or_a_connection` test only asserts `'static`
+  on its checked types, not the actual absence of a `Storage`/connection type
+  from them. The underlying property holds today by structural inspection
+  (private fields, no accessor) but is not test-enforced against a future
+  regression. Recorded as a tracked, non-blocking follow-up — recommend a
+  small future task to strengthen that one test with a genuine negative
+  structural/trait-bound check — rather than left silently accepted. See
+  `Docs/graph/evidence/W7/P1-RUNTIME-SERVICE-READINESS-CORR/verification.md`
+  §5. Separately, this integration session again observed the documented
+  host Application Control policy transiently blocking freshly-linked test
+  binaries and all `rustdoc.exe` doctest execution with `os error 4551`;
+  every occurrence was resolved by immediate retry with no test, source, or
+  verification-scope change — see verification.md §4. This is the last of
+  the three original W7 correction worktrees to integrate
+  (`P1-AGENT-TERMINAL-CORR` and `P1-APPROVAL-OPERATION-BINDING-CORR` landed
+  earlier in this wave); the next dispatched work is
+  `P1-RPC-CONTRACT-001-R1`, a separate future node not part of this
+  integration.
 ```
