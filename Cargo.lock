@@ -435,12 +435,14 @@ dependencies = [
 name = "loki-runtime"
 version = "1.2.0"
 dependencies = [
+ "loki-acceptance-store",
  "loki-agent-delivery",
  "loki-agents",
  "loki-approvals",
  "loki-ipc",
  "loki-jobs",
  "loki-local-authority",
+ "loki-mutation-contract",
  "loki-runtime",
  "loki-storage",
  "serde",

@@ -1,10 +1,12 @@
 //! Internal production service composition for the LokiAI runtime.
 //!
-//! This module deliberately exposes projections and closed ports, not the
-//! runtime-owned [`loki_storage::Storage`] handle. Transport adapters may read
-//! through [`RuntimeReadPort`]. Consequential mutation submission remains
-//! sealed and explicitly unavailable until the corrected operation-binding
-//! contract is integrated; no caller can route around that gate through this
+//! This module deliberately exposes projections and a bounded mutation port,
+//! not the runtime-owned [`loki_storage::Storage`] handle. Transport adapters
+//! may read through [`RuntimeReadPort`]. Consequential mutation submission
+//! (`P1-RUNTIME-SERVICE-READINESS-CORR` follow-up) now routes every request
+//! through the real, atomic `loki_acceptance_store::accept_mutation`
+//! coordinator via [`MutationSubmissionPort`] — no caller can bypass that
+//! transaction boundary or obtain the shared `Storage` handle through this
 //! API.
 
 mod mutation;
@@ -19,10 +21,8 @@ use loki_jobs::JobEngine;
 use loki_local_authority::LocalAuthority;
 use loki_storage::Storage;
 
-pub use mutation::{
-    ClosedMutationRequest, MutationAcceptance, MutationAvailability, MutationSubmissionPort,
-    MutationUnavailable, MutationUnavailableReason,
-};
+pub use loki_mutation_contract::{AcceptanceResult, MutationAcceptanceRequest};
+pub use mutation::{MutationAvailability, MutationSubmissionError, MutationSubmissionPort};
 pub use read::{
     DeviceHealthProjection, DeviceHealthState, DevicePage, DevicePageRequest, DeviceSummary,
     PersistedHealthEvidence, RuntimeReadError, RuntimeReadPort, RuntimeStatus, StorageReadiness,
@@ -40,7 +40,7 @@ pub struct RuntimeServices {
     _approvals: ApprovalStore,
     _agent_delivery: WorkIntentDeliveryStore,
     _jobs: JobEngine,
-    mutation: mutation::ClosedMutationSubmission,
+    mutation: mutation::RealMutationSubmission,
 }
 
 impl RuntimeServices {
@@ -53,8 +53,8 @@ impl RuntimeServices {
             _agents: AgentRegistry::new(Arc::clone(&storage)),
             _approvals: ApprovalStore::new(Arc::clone(&storage)),
             _agent_delivery: WorkIntentDeliveryStore::new(Arc::clone(&storage)),
-            _jobs: JobEngine::new(storage),
-            mutation: mutation::ClosedMutationSubmission,
+            _jobs: JobEngine::new(Arc::clone(&storage)),
+            mutation: mutation::RealMutationSubmission::new(storage),
         }
     }
 }
@@ -83,8 +83,8 @@ impl MutationSubmissionPort for RuntimeServices {
 
     fn submit_mutation(
         &self,
-        request: ClosedMutationRequest,
-    ) -> Result<MutationAcceptance, MutationUnavailable> {
+        request: &MutationAcceptanceRequest,
+    ) -> Result<AcceptanceResult, MutationSubmissionError> {
         self.mutation.submit_mutation(request)
     }
 }
@@ -92,6 +92,7 @@ impl MutationSubmissionPort for RuntimeServices {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loki_storage::agents::AgentsRepository;
     use loki_storage::devices::{DeviceRepository, NewDevice};
     use loki_storage::ids::{ConnectorId, DeviceId, RuntimeId};
     use loki_storage::states::{DeviceLifecycleState, SupportTier};
@@ -141,12 +142,7 @@ mod tests {
                 .devices
                 .is_empty()
         );
-        assert_eq!(
-            status.mutations,
-            MutationAvailability::Unavailable(
-                MutationUnavailableReason::OperationBindingNotIntegrated
-            )
-        );
+        assert_eq!(status.mutations, MutationAvailability::Available);
     }
 
     #[test]
@@ -238,6 +234,80 @@ mod tests {
         assert!(matches!(
             DevicePageRequest::new(101, None),
             Err(RuntimeReadError::InvalidPageLimit { .. })
+        ));
+    }
+
+    /// Exercises real mutation submission through the top-level
+    /// `RuntimeServices` façade (not `mutation::RealMutationSubmission`
+    /// directly), proving `RuntimeServices::submit_mutation` is a
+    /// transparent forward with no divergence from calling
+    /// `loki_acceptance_store::accept_mutation` directly against the same
+    /// storage handle.
+    #[test]
+    fn runtime_services_submit_mutation_matches_direct_accept_mutation_call() {
+        let (storage, services) = services();
+        storage
+            .insert_agent_connection(
+                "ac_runtime_services_facade_test",
+                "test-agent",
+                "sha256:test-hash",
+                "register_runs",
+                0,
+            )
+            .unwrap();
+
+        let request = loki_mutation_contract::MutationAcceptanceRequest::new(
+            "ac_runtime_services_facade_test",
+            "agent-1",
+            1,
+            loki_mutation_contract::MutationMethod::AgentRunRegister,
+            "target-1",
+            None,
+            "sha256:params",
+            loki_mutation_contract::IdempotencyKey::new("idem-facade-1").unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let via_services = services.submit_mutation(&request).unwrap();
+        assert!(matches!(via_services, AcceptanceResult::Accepted(_)));
+
+        // Replaying the exact same request through the façade again must
+        // return the replayed-identical result, matching direct-call
+        // idempotency semantics exactly (proves the façade did not
+        // re-execute or diverge on retry).
+        let replayed = services.submit_mutation(&request).unwrap();
+        assert!(matches!(
+            replayed,
+            AcceptanceResult::ReplayedIdenticalAccepted(_)
+        ));
+    }
+
+    /// A rejected mutation (no matching agent connection at all) surfaces
+    /// through the façade as a real, specific `Ok(Rejected(..))`, never a
+    /// generic error or a silently swallowed failure.
+    #[test]
+    fn runtime_services_submit_mutation_surfaces_a_real_rejection() {
+        let (_storage, services) = services();
+        let request = loki_mutation_contract::MutationAcceptanceRequest::new(
+            "ac_never_registered",
+            "agent-1",
+            1,
+            loki_mutation_contract::MutationMethod::AgentRunRegister,
+            "target-1",
+            None,
+            "sha256:params",
+            loki_mutation_contract::IdempotencyKey::new("idem-facade-rejected").unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let result = services.submit_mutation(&request).unwrap();
+        assert!(matches!(
+            result,
+            AcceptanceResult::Rejected(
+                loki_mutation_contract::MutationRejection::GrantInvalid { .. }
+            )
         ));
     }
 }

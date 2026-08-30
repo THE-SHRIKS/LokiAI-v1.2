@@ -118,6 +118,17 @@ loki-approvals = { path = "../loki-approvals" }
 loki-agent-delivery = { path = "../loki-agent-delivery" }
 loki-jobs = { path = "../loki-jobs" }
 
+# Real consequential-mutation submission boundary (`P1-RUNTIME-SERVICE-READINESS-CORR`
+# follow-up): `src/services/mutation.rs` calls the real, atomic
+# `loki_acceptance_store::accept_mutation` coordinator against the same
+# shared `Arc<Storage>` every other service uses, instead of the earlier
+# fail-closed placeholder. `loki-mutation-contract` supplies the closed,
+# already-hardened `MutationAcceptanceRequest`/`AcceptanceResult` types the
+# port's public signature is expressed in. Both are workspace crates
+# (`publish = false`), no external license/maintenance dependency introduced.
+loki-acceptance-store = { path = "../loki-acceptance-store" }
+loki-mutation-contract = { path = "../loki-mutation-contract" }
+
 [target.'cfg(windows)'.dependencies]
 # RUN-003: `crates/loki-ipc` (`RUN-002`) — the background host binds and
 # serves the real named-pipe IPC listener (`src/host/compose.rs`), and the

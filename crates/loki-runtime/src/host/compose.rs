@@ -101,8 +101,8 @@ pub struct ComposedHost {
     storage: Arc<Storage>,
     /// Application services composed over the same migrated store the host
     /// just opened, so no adapter or future business method can open a
-    /// second, divergent database. See `crate::services` for why mutation
-    /// submission stays sealed until the operation-binding correction lands.
+    /// second, divergent database. See `crate::services` for the real,
+    /// atomic mutation-submission boundary this composes.
     services: RuntimeServices,
     server: Server,
     discovery_file: PathBuf,
