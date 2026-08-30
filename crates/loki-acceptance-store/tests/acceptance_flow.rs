@@ -229,7 +229,6 @@ fn real_flash_request_with_granted_approval(
     let approvals = ApprovalStore::new(Arc::clone(storage));
     let approval_request = ApprovalRequest {
         actor_id: "agent-1".to_string(),
-        grant_generation: session.generation,
         operation: "flash".to_string(),
         target_id: target.to_string(),
         artifact_digest: Some("sha256:artifact".to_string()),
@@ -239,7 +238,6 @@ fn real_flash_request_with_granted_approval(
     };
     let record = approvals
         .create(
-            &authority,
             &context,
             &session.session_id,
             &approval_request,
@@ -248,18 +246,12 @@ fn real_flash_request_with_granted_approval(
         )
         .unwrap();
     approvals
-        .grant(
-            &authority,
-            &context,
-            &session.session_id,
-            &record.approval_id,
-            now + 1,
-        )
+        .grant(&context, &session.session_id, &record.approval_id, now + 1)
         .unwrap();
     let request = MutationAcceptanceRequest::new(
         context.principal_sid(),
         approval_request.actor_id,
-        session.generation,
+        record.grant_generation,
         MutationMethod::Flash,
         approval_request.target_id,
         approval_request.artifact_digest,

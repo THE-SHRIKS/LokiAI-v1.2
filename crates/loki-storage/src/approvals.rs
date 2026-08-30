@@ -9,12 +9,18 @@
 //!
 //! Same shape as `src/jobs.rs`'s deadlock-avoidance split: every
 //! [`ApprovalsRepository`] method is a `self.lock()` wrapper around a
-//! private, connection-parameterized `..._core` function that
-//! `crates/loki-acceptance-store` also calls directly from inside a
-//! `Storage::transaction()` closure, for ADR-0006 step 4's "validate and
-//! consume the exact approval" — see `src/storage.rs`'s `Storage::transaction`
-//! doc comment for why calling the trait methods themselves from inside
-//! that closure would deadlock.
+//! public, connection-parameterized `..._core` function of the same name —
+//! see `src/storage.rs`'s `Storage::transaction` doc comment for why calling
+//! the trait methods themselves from inside a transaction closure would
+//! deadlock.
+//!
+//! [`consume_approval_core`] is the one exception: it has no
+//! `ApprovalsRepository` wrapper. ADR-0006 step 4 ("validate and consume the
+//! exact approval") requires consumption to happen in the same transaction
+//! as the job/outbox/mutation-acceptance writes it authorizes, so this crate
+//! deliberately exposes no lock-owning, standalone way to consume an
+//! approval — only `crates/loki-acceptance-store` calls this function,
+//! and only from inside its `Storage::transaction()` closure.
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
@@ -68,8 +74,8 @@ pub struct ApprovalRow {
     pub consumed_at_ms: Option<i64>,
 }
 
-/// Outcome of a single-use consumption attempt
-/// ([`ApprovalsRepository::consume_approval`]/[`consume_approval_core`]) —
+/// Outcome of the acceptance transaction's single-use consumption attempt
+/// ([`consume_approval_core`]) —
 /// closed, so a caller cannot mistake "no matching row" for "already
 /// consumed" or silently ignore either.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,15 +110,6 @@ pub trait ApprovalsRepository {
         granted_by_sid: &str,
         now_ms: i64,
     ) -> Result<bool, StorageError>;
-    /// Validates and atomically consumes exactly once. See
-    /// [`ConsumeOutcome`].
-    fn consume_approval(
-        &self,
-        approval_id: &str,
-        expected_request_digest: &str,
-        expected_requester_sid: &str,
-        now_ms: i64,
-    ) -> Result<ConsumeOutcome, StorageError>;
 }
 
 impl ApprovalsRepository for Storage {
@@ -134,23 +131,6 @@ impl ApprovalsRepository for Storage {
     ) -> Result<bool, StorageError> {
         let conn = self.lock();
         grant_approval_core(&conn, approval_id, granted_by_sid, now_ms)
-    }
-
-    fn consume_approval(
-        &self,
-        approval_id: &str,
-        expected_request_digest: &str,
-        expected_requester_sid: &str,
-        now_ms: i64,
-    ) -> Result<ConsumeOutcome, StorageError> {
-        let conn = self.lock();
-        consume_approval_core(
-            &conn,
-            approval_id,
-            expected_request_digest,
-            expected_requester_sid,
-            now_ms,
-        )
     }
 }
 
@@ -212,10 +192,9 @@ pub fn grant_approval_core(
     Ok(changed == 1)
 }
 
-/// Connection-parameterized core of
-/// [`ApprovalsRepository::consume_approval`] — ADR-0006 step 4's "validate
-/// and consume the exact approval when required," applied atomically. This
-/// is the exact function `crates/loki-acceptance-store` calls from inside
+/// ADR-0006 step 4's "validate and consume the exact approval when
+/// required," applied atomically. This is the exact function
+/// `crates/loki-acceptance-store` calls from inside
 /// its `Storage::transaction()` closure after
 /// `loki_mutation_contract::construct_accepted` has already independently
 /// confirmed digest/expiry match via `evaluate_approval_reference`; this
@@ -223,6 +202,10 @@ pub fn grant_approval_core(
 /// directly against the row (defense in depth — never trusts the caller's
 /// claim that a reference is still valid) before performing the one
 /// permitted write.
+/// Transaction-only primitive used by `loki-acceptance-store`. There is no
+/// lock-owning repository wrapper or approval-service method for this write:
+/// consumption must be composed with job, outbox, and mutation-acceptance
+/// persistence before the surrounding transaction commits.
 pub fn consume_approval_core(
     conn: &Connection,
     approval_id: &str,
@@ -257,12 +240,12 @@ pub fn consume_approval_core(
         // Lost a race with another consumer between the read above and this
         // write. Under `Storage`'s single `Mutex<Connection>` this is only
         // reachable if `conn` is a bare `&Connection` obtained without
-        // holding that mutex for this whole call (never true for the two
-        // real callers: `ApprovalsRepository::consume_approval`'s
-        // `self.lock()` wrapper, and `Storage::transaction`'s closure,
-        // which holds the mutex for the closure's entire duration) — kept
-        // as a defended outcome rather than an `unreachable!()` panic
-        // (`AGENTS.md` rule 1).
+        // holding that mutex for this whole call — never true for the one
+        // real caller, `Storage::transaction`'s closure, which holds the
+        // mutex for the closure's entire duration (there is no
+        // `ApprovalsRepository`-level `self.lock()` wrapper for this write;
+        // see this module's doc comment) — kept as a defended outcome
+        // rather than an `unreachable!()` panic (`AGENTS.md` rule 1).
         return Ok(ConsumeOutcome::AlreadyConsumed);
     }
     let Some(updated) = get_approval_core(conn, approval_id)? else {

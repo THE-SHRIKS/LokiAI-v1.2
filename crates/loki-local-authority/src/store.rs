@@ -162,17 +162,11 @@ impl LocalAuthority {
         capability: LocalCapability,
         now_ms: i64,
     ) -> Result<(), AuthorityError> {
-        let session = self.require_live_session(context, session_id, now_ms)?;
-        let allowed = matches!(
-            capability,
-            LocalCapability::ReadLocalState
-                | LocalCapability::RegisterAgent
-                | LocalCapability::BindLocalDevice
-                | LocalCapability::RequestConsequentialApproval
-        );
-        if !allowed || session.installation_id.is_empty() {
-            return Err(AuthorityError::CapabilityDenied);
-        }
+        let session = self
+            .storage
+            .get_authority_session(session_id)?
+            .ok_or(AuthorityError::SessionNotFound)?;
+        evaluate_local_session(&session, context, capability, now_ms)?;
         Ok(())
     }
 
@@ -213,33 +207,47 @@ impl LocalAuthority {
         }
         Ok(())
     }
+}
 
-    fn require_live_session(
-        &self,
-        context: &LocalContext,
-        session_id: &str,
-        now_ms: i64,
-    ) -> Result<LocalSession, AuthorityError> {
-        let session = self
-            .storage
-            .get_authority_session(session_id)?
-            .ok_or(AuthorityError::SessionNotFound)?;
-        let session = row_to_session(session);
-        validate_context(&session, context)?;
-        if session.revoked_at_ms.is_some() {
-            return Err(AuthorityError::SessionRevoked);
-        }
-        if now_ms < session.issued_at_ms {
-            return Err(AuthorityError::InvalidInput {
-                field: "now_ms",
-                reason: "cannot predate session issuance".to_string(),
-            });
-        }
-        if now_ms >= session.expires_at_ms {
-            return Err(AuthorityError::SessionExpired);
-        }
-        Ok(session)
+/// Pure authorization evaluation over a session row already read from the
+/// caller's chosen transaction. Approval creation uses this function after
+/// reading the row from the same connection that persists the approval, so
+/// session validation and generation derivation cannot cross databases or
+/// race a revocation between authorization and insert.
+pub fn evaluate_local_session(
+    session: &AuthoritySessionRow,
+    context: &LocalContext,
+    capability: LocalCapability,
+    now_ms: i64,
+) -> Result<u64, AuthorityError> {
+    if session.principal_sid != context.principal_sid()
+        || session.ipc_session_id != context.ipc_session_id()
+    {
+        return Err(AuthorityError::SessionContextMismatch);
     }
+    if session.revoked_at_ms.is_some() {
+        return Err(AuthorityError::SessionRevoked);
+    }
+    if now_ms < session.issued_at_ms {
+        return Err(AuthorityError::InvalidInput {
+            field: "now_ms",
+            reason: "cannot predate session issuance".to_string(),
+        });
+    }
+    if now_ms >= session.expires_at_ms {
+        return Err(AuthorityError::SessionExpired);
+    }
+    let allowed = matches!(
+        capability,
+        LocalCapability::ReadLocalState
+            | LocalCapability::RegisterAgent
+            | LocalCapability::BindLocalDevice
+            | LocalCapability::RequestConsequentialApproval
+    );
+    if !allowed || session.installation_id.is_empty() {
+        return Err(AuthorityError::CapabilityDenied);
+    }
+    Ok(session.generation)
 }
 
 fn row_to_session(row: AuthoritySessionRow) -> LocalSession {
