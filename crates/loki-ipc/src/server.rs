@@ -54,7 +54,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::acl::{self, AclScope};
@@ -84,6 +85,71 @@ const OUTGOING_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// exit after the dispatch loop ends, before giving up on a graceful
 /// finish.
 const WRITER_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// How long [`Server::serve`] waits, after its own `shutdown` future
+/// resolves and every still-open connection has been asked to close, for
+/// every spawned per-connection dispatch task to actually finish, before
+/// forcibly aborting whichever ones have not (`JoinSet::abort_all`, which
+/// drops that task's future — and therefore any `BusinessService`/resource
+/// clone it still owns — at its very next await point). Deliberately larger
+/// than [`WRITER_SHUTDOWN_GRACE`] (which bounds a single connection's own
+/// writer-drain) since many connections' per-connection tasks race that
+/// grace period concurrently, not sequentially, but a caller such as
+/// `crate::host::compose::ComposedHost::run` still needs `serve` to return
+/// in bounded time no matter how many connections are open or how a
+/// misbehaving client stalls. See `P1-IPC-SHUTDOWN-CORR`'s handoff for the
+/// use-after-free this constant closes.
+///
+/// This is a genuine, enforced upper bound on how long `serve()` itself can
+/// take to return, because dropping a connection task's future (which
+/// `abort_all` triggers) also drops that task's own local
+/// [`tokio::task::JoinSet`] of per-call tasks (see [`CALL_TASK_DRAIN_GRACE`]),
+/// and `JoinSet`'s documented `Drop` behavior is to abort every task it
+/// still owns. A caller such as `ComposedHost::run` may therefore simply
+/// `.await` the task `serve()` runs in directly instead of racing it against
+/// a second, shorter, non-cancelling outer timeout — see that function's own
+/// doc comment for why a second race would be actively unsafe here.
+///
+/// Set comfortably larger than [`CALL_TASK_DRAIN_GRACE`] + [`WRITER_SHUTDOWN_GRACE`]
+/// (10s + 5s = 15s) so those two *inner*, sequential, per-connection grace
+/// periods normally have room to let a genuinely slow but legitimate
+/// in-flight call (the reproduced scenario is 6-9s) finish and drain on its
+/// own before this *outer* bound would ever force-abort the whole
+/// connection early — this outer bound exists purely as a last-resort
+/// backstop for a connection that does not respond to the inner mechanisms
+/// at all (e.g. is wedged in a way that never even reaches the per-call/
+/// writer drain steps), not as the primary mechanism for ordinary slow
+/// calls.
+const CONNECTION_DRAIN_GRACE: Duration = Duration::from_secs(20);
+
+/// How long a connection's dispatch loop waits, once it has ended (client
+/// disconnect, protocol error, or server-initiated shutdown), for every
+/// per-call task it spawned (`spawn_unary_call`/`spawn_stream_call`) to
+/// actually finish, before forcibly aborting whichever ones have not.
+///
+/// Closes `P1-IPC-SHUTDOWN-CORR`'s independent-review finding: per-call
+/// tasks used to be bare-`tokio::spawn`ed and untracked by any `JoinSet`,
+/// so a connection's dispatch loop (and therefore the outer
+/// [`Server::serve`]'s per-connection [`JoinSet`]) could report "done" while
+/// a business call it spawned — holding its own clone of the
+/// `BusinessService`/`SessionAuthority` — was still running detached,
+/// unbounded by anything but the client-supplied `deadline_unix_millis`
+/// (which the client fully controls and which has no server-side maximum).
+/// Tracking these in a per-connection `JoinSet` and draining it before the
+/// connection's own task is considered finished closes that gap completely:
+/// once the outer `Server::serve`'s per-connection `JoinSet` reports a
+/// connection task done, every call it ever spawned is provably also done
+/// (either it finished on its own, or it was aborted here or via the
+/// `Drop`-aborts-owned-tasks fallback described on [`CONNECTION_DRAIN_GRACE`]).
+///
+/// Set to 10s — comfortably above the 6-9s in-flight-call window the
+/// independent review's required re-verification reproduces (a genuinely
+/// slow but legitimate call, e.g. one gated by real backpressure on a slow
+/// reader) — so that scenario naturally finishes and is observed to finish
+/// (not merely safely aborted) before this grace elapses, while still
+/// bounding the pathological case (a call truly wedged forever) to a
+/// concrete, finite wait.
+const CALL_TASK_DRAIN_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 struct SessionAuthority {
@@ -236,6 +302,11 @@ pub enum ConnectionError {
     /// state (e.g. a `Call` before completing the handshake, or a second
     /// `Hello`).
     ProtocolViolation(String),
+    /// The server-side caller (e.g. [`Server::serve`]'s `shutdown` future
+    /// resolving) asked this connection to close before the client
+    /// completed its handshake. Never caused by the client itself — see
+    /// [`Connection::handle_until_shutdown`].
+    ServerShutdown,
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -251,6 +322,12 @@ impl std::fmt::Display for ConnectionError {
             }
             ConnectionError::ProtocolViolation(message) => {
                 write!(f, "protocol violation: {message}")
+            }
+            ConnectionError::ServerShutdown => {
+                write!(
+                    f,
+                    "server is shutting down; connection closed before handshake completed"
+                )
             }
         }
     }
@@ -306,21 +383,39 @@ impl Server {
         })
     }
 
-    /// Runs the accept loop, spawning [`Connection::handle`] for each
-    /// client, until `shutdown` resolves. Accept errors are logged and do
-    /// not stop the loop (a single failed accept must not take down the
-    /// whole server).
+    /// Runs the accept loop, spawning [`Connection::handle_until_shutdown`]
+    /// for each client, until `shutdown` resolves. Accept errors are logged
+    /// and do not stop the loop (a single failed accept must not take down
+    /// the whole server).
+    ///
+    /// Unlike the pre-`P1-IPC-SHUTDOWN-CORR` version of this method, `serve`
+    /// does **not** return the instant `shutdown` resolves. It first asks
+    /// every still-open connection to close (rather than waiting
+    /// indefinitely for the client to disconnect on its own, which may
+    /// never happen — see `tests/shutdown_drain.rs`), then actually waits
+    /// for every spawned per-connection dispatch task to finish, bounded by
+    /// [`CONNECTION_DRAIN_GRACE`] (after which any still-running tasks are
+    /// forcibly aborted, guaranteeing any `BusinessService`/resource clone
+    /// they still hold is dropped before this method returns). This closes
+    /// a real, reproduced use-after-free: a caller such as
+    /// `crate::host::compose::ComposedHost::run` tears down a resource
+    /// (`loki-storage`'s secure-memory arena) a still-running connection's
+    /// `BusinessService` clone may reference, and previously had no way to
+    /// know that teardown was actually safe.
     pub async fn serve<F>(&mut self, mut shutdown: F)
     where
         F: std::future::Future<Output = ()> + Unpin,
     {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let mut connections: JoinSet<()> = JoinSet::new();
         loop {
             tokio::select! {
                 accepted = self.accept() => {
                     match accepted {
                         Ok(connection) => {
-                            tokio::spawn(async move {
-                                if let Err(err) = connection.handle().await {
+                            let connection_shutdown = shutdown_rx.clone();
+                            connections.spawn(async move {
+                                if let Err(err) = connection.handle_until_shutdown(connection_shutdown).await {
                                     tracing::debug!(error = %err, "ipc connection ended");
                                 }
                             });
@@ -331,6 +426,26 @@ impl Server {
                     }
                 }
                 _ = &mut shutdown => break,
+            }
+        }
+
+        // Ask every still-open connection to stop reading and close. A
+        // connection blocked waiting for its next frame (the ordinary case
+        // for a client that stays connected across a host shutdown/restart)
+        // would otherwise never return on its own — see this method's doc
+        // comment.
+        let _ = shutdown_tx.send(true);
+
+        let drain = async { while connections.join_next().await.is_some() {} };
+        tokio::select! {
+            () = drain => {}
+            () = tokio::time::sleep(CONNECTION_DRAIN_GRACE) => {
+                tracing::warn!(
+                    "one or more ipc connections did not close within the shutdown drain grace \
+                     period; aborting the remaining dispatch tasks"
+                );
+                connections.abort_all();
+                while connections.join_next().await.is_some() {}
             }
         }
     }
@@ -364,8 +479,32 @@ impl std::fmt::Debug for Connection {
 
 impl Connection {
     /// Runs the handshake, then the post-handshake dispatch loop, until the
-    /// client disconnects or a protocol error ends the connection.
+    /// client disconnects or a protocol error ends the connection. Never
+    /// closes a connection on its own initiative — equivalent to calling
+    /// [`Self::handle_until_shutdown`] with a `shutdown` signal that never
+    /// fires, so every existing caller of this method keeps its exact
+    /// pre-`P1-IPC-SHUTDOWN-CORR` behavior.
     pub async fn handle(self) -> Result<(), ConnectionError> {
+        let (_never_signals_shutdown, shutdown_rx) = watch::channel(false);
+        self.handle_until_shutdown(shutdown_rx).await
+    }
+
+    /// Identical to [`Self::handle`], except the handshake wait for `Hello`
+    /// and the post-handshake dispatch loop's wait for the next frame are
+    /// both additionally raced against `shutdown` becoming `true`. Used by
+    /// [`Server::serve`] so a server-initiated shutdown can actually close
+    /// every still-open connection — including one that is otherwise idle,
+    /// waiting on a client that has no reason to disconnect on its own —
+    /// instead of leaving it running detached forever. Reaching the
+    /// `shutdown` branch during the handshake ends the connection with
+    /// [`ConnectionError::ServerShutdown`]; reaching it during dispatch ends
+    /// the connection the same way a normal client disconnect would
+    /// (`Ok(())`), after the same graceful writer-drain every other
+    /// disconnect path already goes through.
+    pub(crate) async fn handle_until_shutdown(
+        self,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<(), ConnectionError> {
         let Connection {
             pipe,
             config,
@@ -384,10 +523,15 @@ impl Connection {
             .await
             .map_err(ConnectionError::Frame)?;
 
-        let hello_message = match read_frame(&mut reader, config.max_frame_bytes).await {
-            Ok(Some(message)) => message,
-            Ok(None) => return Err(ConnectionError::ClosedDuringHandshake),
-            Err(err) => return Err(ConnectionError::Frame(err)),
+        let hello_message = tokio::select! {
+            frame = read_frame(&mut reader, config.max_frame_bytes) => {
+                match frame {
+                    Ok(Some(message)) => message,
+                    Ok(None) => return Err(ConnectionError::ClosedDuringHandshake),
+                    Err(err) => return Err(ConnectionError::Frame(err)),
+                }
+            }
+            _ = shutdown.changed() => return Err(ConnectionError::ServerShutdown),
         };
 
         let hello = match auth::expect_hello(hello_message) {
@@ -451,6 +595,7 @@ impl Connection {
                 session_id,
                 business_service: Arc::clone(&config.business_service),
             },
+            &mut shutdown,
         )
         .await
     }
@@ -475,6 +620,7 @@ async fn run_dispatch_loop<R, W>(
     mut writer: W,
     config: &Arc<ServerConfig>,
     session_authority: SessionAuthority,
+    shutdown: &mut watch::Receiver<bool>,
 ) -> Result<(), ConnectionError>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -492,6 +638,13 @@ where
 
     let mut cancel_senders: HashMap<Uuid, oneshot::Sender<()>> = HashMap::new();
     let (completed_tx, mut completed_rx) = mpsc::unbounded_channel::<Uuid>();
+    // Every per-call task (`spawn_unary_call`/`spawn_stream_call`) is spawned
+    // into this connection-local `JoinSet` rather than a bare `tokio::spawn`,
+    // and drained (bounded by `CALL_TASK_DRAIN_GRACE`, see its doc comment)
+    // below before this dispatch loop's own future resolves — see
+    // `CALL_TASK_DRAIN_GRACE`'s doc comment for the use-after-free-class gap
+    // this closes.
+    let mut call_tasks: JoinSet<()> = JoinSet::new();
 
     let outcome = loop {
         tokio::select! {
@@ -501,6 +654,7 @@ where
                         let (cancel_tx, cancel_rx) = oneshot::channel();
                         cancel_senders.insert(correlation_id, cancel_tx);
                         spawn_unary_call(
+                            &mut call_tasks,
                             correlation_id,
                             deadline_unix_millis,
                             method,
@@ -514,6 +668,7 @@ where
                         let (cancel_tx, cancel_rx) = oneshot::channel();
                         cancel_senders.insert(correlation_id, cancel_tx);
                         spawn_stream_call(
+                            &mut call_tasks,
                             correlation_id,
                             deadline_unix_millis,
                             method,
@@ -547,15 +702,48 @@ where
             Some(done_id) = completed_rx.recv() => {
                 cancel_senders.remove(&done_id);
             }
+            _ = shutdown.changed() => {
+                // A server-initiated shutdown (see `Server::serve`), not a
+                // client-side protocol violation or disconnect — end the
+                // connection the same way a clean disconnect would.
+                break Ok(());
+            }
         }
     };
+
+    // Bounded wait for every per-call task spawned during this connection's
+    // life to actually finish — before dropping this function's own
+    // `outgoing_tx` clone or touching the writer task — so a still-running
+    // business call (bounded only by its own client-supplied
+    // `deadline_unix_millis`, not by anything server-side) cannot outlive
+    // this dispatch loop's own future undetected. Any per-call task still
+    // running once `CALL_TASK_DRAIN_GRACE` elapses is forcibly aborted; the
+    // writer task (still running throughout this wait) keeps draining
+    // whatever those calls already sent, same as during normal operation.
+    let call_drain = async { while call_tasks.join_next().await.is_some() {} };
+    tokio::select! {
+        () = call_drain => {}
+        () = tokio::time::sleep(CALL_TASK_DRAIN_GRACE) => {
+            tracing::warn!(
+                "one or more in-flight calls did not finish within the call-task drain grace \
+                 period; aborting the remaining per-call tasks"
+            );
+            call_tasks.abort_all();
+            while call_tasks.join_next().await.is_some() {}
+        }
+    }
 
     drop(outgoing_tx);
     // Bounded wait for the writer task to drain and exit on its own;
     // `.abort()` on the timeout branch (rather than letting the `timeout()`
     // future merely stop *polling* the JoinHandle) guarantees the task is
     // actually stopped and the pipe's write half released, not left running
-    // detached in the background.
+    // detached in the background. Every per-call task's own `outgoing_tx`
+    // clone has already been dropped by the drain above (each task drops
+    // its clone when it finishes, is aborted, or was never given a chance
+    // to run), so this wait is now bounded purely by the writer task's own
+    // drain of whatever is left in the channel — it can never be kept alive
+    // by a still-running call task holding a live sender clone.
     let mut writer_task = writer_task;
     tokio::select! {
         _ = &mut writer_task => {}
@@ -579,7 +767,9 @@ async fn send_message(tx: &mpsc::Sender<WireMessage>, message: WireMessage) -> b
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_unary_call(
+    call_tasks: &mut JoinSet<()>,
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: Method,
@@ -588,7 +778,7 @@ fn spawn_unary_call(
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
 ) {
-    tokio::spawn(async move {
+    call_tasks.spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let outcome = tokio::select! {
             outcome = execute_method(
@@ -670,7 +860,9 @@ async fn execute_method(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_stream_call(
+    call_tasks: &mut JoinSet<()>,
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: StreamMethod,
@@ -679,7 +871,7 @@ fn spawn_stream_call(
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
 ) {
-    tokio::spawn(async move {
+    call_tasks.spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let result = tokio::select! {
             result = execute_stream_method(
