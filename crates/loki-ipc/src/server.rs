@@ -54,7 +54,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::acl::{self, AclScope};
@@ -84,6 +85,21 @@ const OUTGOING_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// exit after the dispatch loop ends, before giving up on a graceful
 /// finish.
 const WRITER_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// How long [`Server::serve`] waits, after its own `shutdown` future
+/// resolves and every still-open connection has been asked to close, for
+/// every spawned per-connection dispatch task to actually finish, before
+/// forcibly aborting whichever ones have not (`JoinSet::abort_all`, which
+/// drops that task's future — and therefore any `BusinessService`/resource
+/// clone it still owns — at its very next await point). Deliberately larger
+/// than [`WRITER_SHUTDOWN_GRACE`] (which bounds a single connection's own
+/// writer-drain) since many connections' per-connection tasks race that
+/// grace period concurrently, not sequentially, but a caller such as
+/// `crate::host::compose::ComposedHost::run` still needs `serve` to return
+/// in bounded time no matter how many connections are open or how a
+/// misbehaving client stalls. See `P1-IPC-SHUTDOWN-CORR`'s handoff for the
+/// use-after-free this constant closes.
+const CONNECTION_DRAIN_GRACE: Duration = Duration::from_secs(8);
 
 #[derive(Clone)]
 struct SessionAuthority {
@@ -236,6 +252,11 @@ pub enum ConnectionError {
     /// state (e.g. a `Call` before completing the handshake, or a second
     /// `Hello`).
     ProtocolViolation(String),
+    /// The server-side caller (e.g. [`Server::serve`]'s `shutdown` future
+    /// resolving) asked this connection to close before the client
+    /// completed its handshake. Never caused by the client itself — see
+    /// [`Connection::handle_until_shutdown`].
+    ServerShutdown,
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -251,6 +272,12 @@ impl std::fmt::Display for ConnectionError {
             }
             ConnectionError::ProtocolViolation(message) => {
                 write!(f, "protocol violation: {message}")
+            }
+            ConnectionError::ServerShutdown => {
+                write!(
+                    f,
+                    "server is shutting down; connection closed before handshake completed"
+                )
             }
         }
     }
@@ -306,21 +333,39 @@ impl Server {
         })
     }
 
-    /// Runs the accept loop, spawning [`Connection::handle`] for each
-    /// client, until `shutdown` resolves. Accept errors are logged and do
-    /// not stop the loop (a single failed accept must not take down the
-    /// whole server).
+    /// Runs the accept loop, spawning [`Connection::handle_until_shutdown`]
+    /// for each client, until `shutdown` resolves. Accept errors are logged
+    /// and do not stop the loop (a single failed accept must not take down
+    /// the whole server).
+    ///
+    /// Unlike the pre-`P1-IPC-SHUTDOWN-CORR` version of this method, `serve`
+    /// does **not** return the instant `shutdown` resolves. It first asks
+    /// every still-open connection to close (rather than waiting
+    /// indefinitely for the client to disconnect on its own, which may
+    /// never happen — see `tests/shutdown_drain.rs`), then actually waits
+    /// for every spawned per-connection dispatch task to finish, bounded by
+    /// [`CONNECTION_DRAIN_GRACE`] (after which any still-running tasks are
+    /// forcibly aborted, guaranteeing any `BusinessService`/resource clone
+    /// they still hold is dropped before this method returns). This closes
+    /// a real, reproduced use-after-free: a caller such as
+    /// `crate::host::compose::ComposedHost::run` tears down a resource
+    /// (`loki-storage`'s secure-memory arena) a still-running connection's
+    /// `BusinessService` clone may reference, and previously had no way to
+    /// know that teardown was actually safe.
     pub async fn serve<F>(&mut self, mut shutdown: F)
     where
         F: std::future::Future<Output = ()> + Unpin,
     {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let mut connections: JoinSet<()> = JoinSet::new();
         loop {
             tokio::select! {
                 accepted = self.accept() => {
                     match accepted {
                         Ok(connection) => {
-                            tokio::spawn(async move {
-                                if let Err(err) = connection.handle().await {
+                            let connection_shutdown = shutdown_rx.clone();
+                            connections.spawn(async move {
+                                if let Err(err) = connection.handle_until_shutdown(connection_shutdown).await {
                                     tracing::debug!(error = %err, "ipc connection ended");
                                 }
                             });
@@ -331,6 +376,26 @@ impl Server {
                     }
                 }
                 _ = &mut shutdown => break,
+            }
+        }
+
+        // Ask every still-open connection to stop reading and close. A
+        // connection blocked waiting for its next frame (the ordinary case
+        // for a client that stays connected across a host shutdown/restart)
+        // would otherwise never return on its own — see this method's doc
+        // comment.
+        let _ = shutdown_tx.send(true);
+
+        let drain = async { while connections.join_next().await.is_some() {} };
+        tokio::select! {
+            () = drain => {}
+            () = tokio::time::sleep(CONNECTION_DRAIN_GRACE) => {
+                tracing::warn!(
+                    "one or more ipc connections did not close within the shutdown drain grace \
+                     period; aborting the remaining dispatch tasks"
+                );
+                connections.abort_all();
+                while connections.join_next().await.is_some() {}
             }
         }
     }
@@ -364,8 +429,32 @@ impl std::fmt::Debug for Connection {
 
 impl Connection {
     /// Runs the handshake, then the post-handshake dispatch loop, until the
-    /// client disconnects or a protocol error ends the connection.
+    /// client disconnects or a protocol error ends the connection. Never
+    /// closes a connection on its own initiative — equivalent to calling
+    /// [`Self::handle_until_shutdown`] with a `shutdown` signal that never
+    /// fires, so every existing caller of this method keeps its exact
+    /// pre-`P1-IPC-SHUTDOWN-CORR` behavior.
     pub async fn handle(self) -> Result<(), ConnectionError> {
+        let (_never_signals_shutdown, shutdown_rx) = watch::channel(false);
+        self.handle_until_shutdown(shutdown_rx).await
+    }
+
+    /// Identical to [`Self::handle`], except the handshake wait for `Hello`
+    /// and the post-handshake dispatch loop's wait for the next frame are
+    /// both additionally raced against `shutdown` becoming `true`. Used by
+    /// [`Server::serve`] so a server-initiated shutdown can actually close
+    /// every still-open connection — including one that is otherwise idle,
+    /// waiting on a client that has no reason to disconnect on its own —
+    /// instead of leaving it running detached forever. Reaching the
+    /// `shutdown` branch during the handshake ends the connection with
+    /// [`ConnectionError::ServerShutdown`]; reaching it during dispatch ends
+    /// the connection the same way a normal client disconnect would
+    /// (`Ok(())`), after the same graceful writer-drain every other
+    /// disconnect path already goes through.
+    pub(crate) async fn handle_until_shutdown(
+        self,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<(), ConnectionError> {
         let Connection {
             pipe,
             config,
@@ -384,10 +473,15 @@ impl Connection {
             .await
             .map_err(ConnectionError::Frame)?;
 
-        let hello_message = match read_frame(&mut reader, config.max_frame_bytes).await {
-            Ok(Some(message)) => message,
-            Ok(None) => return Err(ConnectionError::ClosedDuringHandshake),
-            Err(err) => return Err(ConnectionError::Frame(err)),
+        let hello_message = tokio::select! {
+            frame = read_frame(&mut reader, config.max_frame_bytes) => {
+                match frame {
+                    Ok(Some(message)) => message,
+                    Ok(None) => return Err(ConnectionError::ClosedDuringHandshake),
+                    Err(err) => return Err(ConnectionError::Frame(err)),
+                }
+            }
+            _ = shutdown.changed() => return Err(ConnectionError::ServerShutdown),
         };
 
         let hello = match auth::expect_hello(hello_message) {
@@ -451,6 +545,7 @@ impl Connection {
                 session_id,
                 business_service: Arc::clone(&config.business_service),
             },
+            &mut shutdown,
         )
         .await
     }
@@ -475,6 +570,7 @@ async fn run_dispatch_loop<R, W>(
     mut writer: W,
     config: &Arc<ServerConfig>,
     session_authority: SessionAuthority,
+    shutdown: &mut watch::Receiver<bool>,
 ) -> Result<(), ConnectionError>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -546,6 +642,12 @@ where
             }
             Some(done_id) = completed_rx.recv() => {
                 cancel_senders.remove(&done_id);
+            }
+            _ = shutdown.changed() => {
+                // A server-initiated shutdown (see `Server::serve`), not a
+                // client-side protocol violation or disconnect — end the
+                // connection the same way a clean disconnect would.
+                break Ok(());
             }
         }
     };
