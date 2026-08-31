@@ -304,8 +304,8 @@ which half of the program (Section 1a) a wave belongs to.
 | P1-APPROVAL-JOB-ACCEPT-001 | IMPLEMENTATION | Atomically bind/consume exact approval and accept one durable consequential job/outbox record. | P1-PRINCIPAL-GRANT-001, APR-001, JOB-001 | fault, replay, changed-request and cancellation evidence | proposed |
 | P1-AGENT-MUTATION-IDEMP-001 | IMPLEMENTATION | Fix finish_run retry bug and prove crash-safe two-call composition between generic acceptance and the real agent-mutation effect (ADR-0008 Option B). | P1-ACCEPTANCE-STORE-001, P1-PRINCIPAL-GRANT-001, AGT-001, AGT-002, ADR-0008 | replay/conflict/revision/restart evidence | proposed — ADR-0008 accepted (Option B, human decision 2026-08-28); ready for planning |
 | P1-MUTATION-REV-001 | VERIFICATION | Independently prove the runtime acceptance serialization boundary and post-commit semantics. | P1-APPROVAL-JOB-ACCEPT-001, P1-AGENT-MUTATION-IDEMP-001 | no critical/high finding and complete adversarial matrix | proposed |
-| P1-SERVICE-READINESS-001-R1 | IMPLEMENTATION | Expose bounded read projections and closed mutation submission ports backed by the accepted coordinator, without IPC or physical effects inline. | P1-MUTATION-REV-001, DAT-002-MEM-IMPL-001 | real internal service composition and failure tests | proposed — supersedes P1-SERVICE-READINESS-001 |
-| P1-RPC-CONTRACT-001-R1 | CONTRACT | Salvage safe bounded transport work and replace mutation/read results against the real internal service boundary. | P1-SERVICE-READINESS-001-R1 | strict TS/Rust schemas, result/query coupling and real adapter tests | proposed |
+| P1-SERVICE-READINESS-001-R1 | IMPLEMENTATION | Expose bounded read projections and closed mutation submission ports backed by the accepted coordinator, without IPC or physical effects inline. | P1-MUTATION-REV-001, DAT-002-MEM-IMPL-001 (both waived — see status log 2026-08-30) | real internal service composition and failure tests | substantively complete, superseded by `P1-RUNTIME-SERVICE-READINESS-CORR` (integrated at `80bff05`) — `RuntimeServices` provides bounded/redacted read projections and a real, non-fail-closed mutation port backed by `loki-acceptance-store::accept_mutation`, zero IPC/physical-effect surface; independent security+test review both PASS (no Critical/High, one tracked Low). Formal `P1-MUTATION-REV-001`/`DAT-002-MEM-IMPL-001` dependency edges remain technically unsatisfied (the former unscheduled, the latter blocked on the excluded VM-verification track) but were explicitly bypassed by human instruction 2026-08-30, same pattern as `P1-ACCEPTANCE-STORE-001`'s earlier `DAT-002-MEM-HOST-VERIFY-001` waiver. Now independently confirmed sufficient as a real consumed dependency: `P1-RPC-CONTRACT-001-R1` (below) consumed its exact `RuntimeReadPort`/`MutationSubmissionPort` public shape without needing any further change here — no gap surfaced back to this node. |
+| P1-RPC-CONTRACT-001-R1 | CONTRACT | Salvage safe bounded transport work and replace mutation/read results against the real internal service boundary. | P1-SERVICE-READINESS-001-R1 | strict TS/Rust schemas, result/query coupling and real adapter tests | accepted — integrated at `f32a79e` on `LokiAI-v1.2` (commits `2181a9b`, `7a37ec1`, `eed3503` merged from `node/P1-RPC-CONTRACT-001-R1`). Corrected business RPC contract over the real `RuntimeServices` boundary: closed 23-method vocabulary, explicit `AcceptanceResult`/`MutationRejection` wire mapping, dynamic session revalidation (call and stream), 10-stream domain-authority matrix, hostile-downgrade capability gating, exact Rust/TS parity, entity-identity coupling. Independent security review PASS (no Critical/High, all 8 REVIEW-001/REVIEW-002 HIGH findings closed); independent test review found one real gap (mid-subscription revocation not proven, only the call path was) closed by follow-up commit `eed3503`, then independently re-verified PASS (8/8 repeated runs, no flakiness). Full gate re-run clean on the integrated baseline: `cargo build`/`clippy -D warnings`, 106/106 `loki-ipc` tests, 329/329 `packages/contracts` tests, full-workspace `cargo test` (two documented Windows Application Control flakes on unrelated crates, both isolated and confirmed passing on retry), `pnpm run verify` clean on first attempt. Evidence: `Docs/graph/evidence/P1/P1-RPC-CONTRACT-001-R1/verification.md`. |
 | P1-RPC-CONTRACT-REV-005 | VERIFICATION | Independently review all RPC methods/streams against the real runtime acceptance coordinator. | P1-RPC-CONTRACT-001-R1 | real named-pipe/adversarial report with no critical/high finding | proposed |
 | BLD-ARCH-ADR-001 | DECISION | Replace per-job existing-volume-root ACL mutation with an accepted production containment-workspace design while retaining every control. | ADR-0001, JOB-001, CON-001, RUN-002 | options, threat/operations analysis, recommended design and human acceptance | accepted — ADR-0004 disposable per-job VHDX capsule approved 2026-08-24; failed R1 evidence was consumed as input, not treated as an accepted predecessor; every elevated/VHDX operation still requires separate exact approval |
 | CON-003-PRE-001 | VERIFICATION | Audit connected-board read-only evidence, toolchains, OQ-001 inputs and the production connector/physical-test plan without device side effects. | CON-001, CON-002 | source/tool inventory, exact marking blocker and staged approval matrix | accepted — handoff result COMPLETE and read-only audit exit passed; COM5 transport candidate/toolchain inventory verified, while exact SKU remains blocked |
@@ -1836,4 +1836,88 @@ new_or_changed_risks: one Low finding, independently identified by both
   earlier in this wave); the next dispatched work is
   `P1-RPC-CONTRACT-001-R1`, a separate future node not part of this
   integration.
+```
+
+```text
+node_id: P1-RPC-CONTRACT-001-R1
+from: worker-complete (ACCEPTED-pending-review), independently reviewed
+to: accepted (integrated — no-fast-forward merge to `f32a79e` on
+  `LokiAI-v1.2`, landing commits `2181a9b`, `7a37ec1`, `eed3503` from
+  `node/P1-RPC-CONTRACT-001-R1`, starting revision `80bff05`)
+timestamp: 2026-08-31T13:00:00Z (approximate)
+actor: implementer (`loki-implementer`, worktree
+  `L:\LokiAI-v1.2-wt\P1-RPC-CONTRACT-001-R1`, branch
+  `node/P1-RPC-CONTRACT-001-R1`), two independent reviewers (security PASS
+  no Critical/High, all 8 REVIEW-001/REVIEW-002 HIGH findings closed; test
+  PASS after one real gap was identified and closed — see below),
+  loki-integrator (Claude Sonnet 5, Claude Code)
+evidence: `Docs/graph/handoffs/P1-RPC-CONTRACT-001-R1-1.md` (incl. §10
+  addendum); `Docs/graph/evidence/P1/P1-RPC-CONTRACT-001-R1/verification.md`;
+  106/106 `loki-ipc` tests (67 lib + 4 acl + 3 business_fixtures + 15
+  business_rpc + 4 deadline + 4 handshake + 6 malformed_frames + 3
+  streaming); 329/329 `packages/contracts` tests; full-workspace
+  `cargo build`/`clippy --all-targets -D warnings` clean; full-workspace
+  `cargo test --workspace` clean (two documented Windows Application
+  Control `os error 4551` flakes on unrelated crates —
+  `loki-connector-registry --test registry_lifecycle` and
+  `loki-runtime --test secure_memory_arena_runtime` — both isolated and
+  confirmed passing on retry, neither touching `loki-ipc`/
+  `packages/contracts`); `pnpm run verify` clean end-to-end on the first
+  attempt, no retry needed
+reason: this node replaces `P1-RPC-CONTRACT-001`'s rejected IPC-owns-
+  mutation-atomicity design (`NEEDS_REPLAN` at REV-004/ADR-0006) with a
+  corrected authenticated, versioned business RPC contract sitting strictly
+  on top of the now-real `RuntimeServices` boundary
+  (`P1-SERVICE-READINESS-001-R1`, itself substantively delivered by
+  `P1-RUNTIME-SERVICE-READINESS-CORR`). It salvages the safe bounded-
+  transport work (frame codec, handshake, deadlines, streaming
+  backpressure, closed 23-method vocabulary, `BusinessService` producer
+  seam) from the unmerged `codex/p1-rpc-contract-001` branch and replaces
+  every mutation/read result type with one structurally derived — never a
+  reinterpretation — from `loki_mutation_contract::AcceptanceResult`/
+  `MutationRejection` via a single, explicit, exhaustive-match mapping
+  module (`crates/loki-ipc/src/mutation_mapping.rs`), with `loki-ipc`
+  retaining zero production dependency on `loki-runtime`/
+  `loki-acceptance-store` (only a dev-dependency, for test-double
+  fidelity). This is the exact business-mutation wire surface that failed
+  two prior security reviews before ADR-0006 corrected the architecture;
+  this revision closes all 8 named REVIEW-001/REVIEW-002 HIGH findings:
+  dynamic per-call and per-event session revalidation (not merely at
+  `Hello`), the 10-stream domain-authority matrix, hostile v1.0→business-
+  capability downgrade gating, exact Rust/TS wire parity, and per-method
+  target/entity-identity result coupling. Independent test review found one
+  genuine remaining gap — no test proved authority re-checking on an
+  already-open, live-delivering subscription, only on the call path — and
+  the implementer closed it with a real, live-event-then-mid-stream-
+  revocation test (`eed3503`, test-support-only, zero production-code
+  change; the reviewer's re-check confirmed the production
+  `execute_stream_method` revalidation logic was already correct before any
+  test code was written). Merge to `LokiAI-v1.2` was a clean `--no-ff`
+  merge with zero conflicts, confirming the diff's confinement to
+  `crates/loki-ipc/**`, `packages/contracts/**`, `Cargo.lock`, and this
+  node's own handoff, exactly as declared in the task packet's Section 5
+  ownership — disjoint from every other node integrated so far.
+unblocked_nodes: `P1-NODE-IPC-CLIENT-001` and `P1-RUNTIME-COMP-001` may now
+  be planned/dispatched against a real, accepted business RPC contract
+  revision (both already named this node as their `depends_on` edge).
+  `P1-RPC-CONTRACT-REV-005`'s independent-review scope is substantively
+  fulfilled by the reviews already performed and recorded in the handoff/
+  this log entry, pending orchestrator confirmation of that node's own
+  status. No IPC/MCP/Electron caller wiring exists yet — that remains each
+  of those later nodes' own scope, not implied here.
+new_or_changed_risks: none newly introduced by integration. Carried forward
+  from the handoff as an explicit, tracked, out-of-scope gap (not silently
+  resolved): 13 of the 23 unary methods
+  (`HealthCheckRequest`, `PreflightRequest`, `JobCancel`,
+  `TestOnDeviceRequest`, `DeploymentRequest`, `RollbackRequest`,
+  `ApprovalGrant`, `ApprovalDeny`, `DeviceReadLogs`,
+  `DeviceQueryTelemetry`, `IncidentsList`, `IncidentGet`, `JobGet`) have no
+  real backing contract anywhere in the workspace yet and always fail
+  closed with `RpcError::UnsupportedMethod` after passing authorization —
+  correct fail-closed behavior, not a defect, but requires a future
+  contract-extension node before those methods can return a real result.
+  P1-SERVICE-READINESS-001-R1's row above is updated to reflect that this
+  integration is independent confirmation its consumed `RuntimeReadPort`/
+  `MutationSubmissionPort` shape needed no further change — no finding
+  routed back to it.
 ```
