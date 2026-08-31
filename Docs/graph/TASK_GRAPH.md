@@ -316,6 +316,7 @@ which half of the program (Section 1a) a wave belongs to.
 | P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | superseded by `P1-SERVICE-READINESS-001-R1` after REV-004 corrected dependency direction |
 | P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001-R1 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
 | P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001-R1, P1-RPC-CONTRACT-001-R1 | real process startup/restart/reconcile/failure tests | proposed |
+| P1-IPC-SHUTDOWN-CORR | CORRECTION | Correction discovered during `P1-RUNTIME-COMP-001`'s implementation: `loki-ipc`'s `Server::serve` spawned per-connection dispatch tasks fully detached, so a caller (`ComposedHost::run`) could tear down storage/secure-memory while a connection (and any `BusinessService` clone it held) was still running — a real, reproduced `STATUS_ACCESS_VIOLATION` use-after-free-class crash. Fixed via a `tokio::task::JoinSet`-tracked drain-on-shutdown mechanism with a `watch`-based shutdown signal, then a follow-up round closing two independent-review findings: an outer/inner shutdown-timeout mismatch (`compose.rs`'s now-removed 5s `IPC_SHUTDOWN_GRACE` raced shorter than `loki-ipc`'s own internal drain grace, letting the crash slip through for calls in the 5-8s window) and untracked per-call dispatch tasks (`spawn_unary_call`/`spawn_stream_call` now tracked in a connection-local `JoinSet`, drained-or-aborted-and-confirmed before a connection is considered done). | RUN-002, P1-RUNTIME-COMP-001 (correction target; not a graph dependency) | `cargo fmt`/`clippy --workspace --all-targets -D warnings` clean; `cargo test -p loki-ipc` 108/108; `cargo test -p loki-runtime` 72/72 (incl. new `host_lifecycle::slow_business_call` test proving `ComposedHost::run` genuinely waits ~7-9s for a real in-flight business call, not just aborts it); real before/after reproduction through the actual `ComposedHost::run` path (crash pre-fix, clean pass post-fix) confirmed by two independent reviewers; full-workspace `cargo build`/`clippy -D warnings`/`cargo test --workspace` and `pnpm run verify` all clean on the integrated baseline | accepted — integrated via `--no-ff` merge to `LokiAI-v1.2` (commits `85fa601`, `0cc6fde`, `f3023ab`, `fef20ad` from `node/P1-IPC-SHUTDOWN-CORR`, zero conflicts — disjoint file set from every other node integrated so far). Both fix rounds passed independent security review with no remaining Critical/High findings. Two narrow non-blocking follow-ups tracked, not silently dropped: (1) a secondary nested-abort-without-confirm edge case only reachable if a connection is already catastrophically stuck beyond the normal 20s `CONNECTION_DRAIN_GRACE` bound; (2) a doc-comment overclaim. Unblocks `P1-RUNTIME-COMP-001` (still `NEEDS_REPLAN` in worktree `L:\LokiAI-v1.2-wt\P1-RUNTIME-COMP-001`, commit `9149a06`, untouched by this node) to re-dispatch against this fix. Evidence: `Docs/graph/handoffs/P1-IPC-SHUTDOWN-CORR-1.md`; `Docs/graph/evidence/P1/P1-IPC-SHUTDOWN-CORR/README.md`. |
 | P1-ELECTRON-RUNTIME-001 | IMPLEMENTATION | Replace Electron hardcoded unavailable providers with the authenticated production runtime client. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real Electron-main/runtime status, list, subscription and reconnect evidence | proposed |
 | P1-MCP-RUNTIME-001 | IMPLEMENTATION | Replace MCP unavailable/deny-all production defaults with per-request runtime authorization using a revocable agent credential. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real MCP stdio-to-runtime positive and denial matrix | proposed |
 | P1-RUNTIME-E2E-001 | INTEGRATION | Prove compiled runtime, production Node client, Electron main and MCP traverse real process boundaries. | P1-ELECTRON-RUNTIME-001, P1-MCP-RUNTIME-001 | kill/restart, reconnect, revoke, empty/unavailable and credential-leak evidence | proposed |
@@ -1920,4 +1921,96 @@ new_or_changed_risks: none newly introduced by integration. Carried forward
   integration is independent confirmation its consumed `RuntimeReadPort`/
   `MutationSubmissionPort` shape needed no further change — no finding
   routed back to it.
+```
+
+```text
+node_id: P1-IPC-SHUTDOWN-CORR
+from: worker-complete (ACCEPTED-pending-review), independently reviewed
+  (second round)
+to: accepted (integrated — `--no-ff` merge to `LokiAI-v1.2`, landing commits
+  `85fa601`, `0cc6fde`, `f3023ab`, `fef20ad` unchanged from
+  `node/P1-IPC-SHUTDOWN-CORR`, starting revision `84168b5`; zero conflicts)
+timestamp: 2026-08-31T00:00:00Z (approximate)
+actor: implementer (`loki-implementer`, direct dispatch — scoped bug-fix
+  correction, no separate task packet; worktree
+  `L:\LokiAI-v1.2-wt\P1-IPC-SHUTDOWN-CORR`, branch
+  `node/P1-IPC-SHUTDOWN-CORR`), independent security review (second round,
+  PASS, no remaining Critical/High findings), loki-integrator (Claude Sonnet
+  5, Claude Code)
+evidence: `Docs/graph/handoffs/P1-IPC-SHUTDOWN-CORR-1.md` (incl. §10
+  independent-review-follow-up addendum);
+  `Docs/graph/evidence/P1/P1-IPC-SHUTDOWN-CORR/README.md`; `cargo test -p
+  loki-ipc` 108/108; `cargo test -p loki-runtime` 72/72 (incl. new
+  `host_lifecycle::slow_business_call` test); full-workspace `cargo build`,
+  `cargo clippy --workspace --all-targets -- -D warnings` (zero warnings),
+  `cargo test --workspace -- --test-threads=1` (all real test targets green
+  — 86/86 `test result: ok` blocks, zero failures; the documented Windows
+  Application Control `os error 4551` transient block on freshly-linked
+  binaries hit several unrelated crates during verification, each isolated
+  and resolved by deleting the specific blocked `.exe` and rebuilding, per
+  the known host hazard — no test, source, or verification-scope change),
+  `pnpm run verify` (exit 0, full chain including `cargo:test`)
+reason: `P1-RUNTIME-COMP-001`'s implementer discovered and documented (its
+  handoff §1/§6/§7) a real, reproduced `STATUS_ACCESS_VIOLATION`
+  use-after-free-class crash: `loki-ipc`'s `Server::serve` spawned every
+  per-connection dispatch task via a bare, detached `tokio::spawn`, so its
+  caller (`ComposedHost::run`) had no way to know a connection (and any
+  `BusinessService`/`loki-storage` secure-memory-arena clone it held) had
+  actually finished before tearing down that resource on shutdown. This
+  node's first round (`85fa601`) fixed `Server::serve` itself: every spawned
+  connection task is now tracked in a `tokio::task::JoinSet`, every
+  still-open connection is actively signalled to close via a new
+  `watch`-based channel reaching both the handshake wait and the
+  post-handshake dispatch loop, and `serve()` awaits every task to finish,
+  bounded by a grace period then force-abort as a backstop. An independent
+  security review of that first round found it did not actually close the
+  crash end-to-end and named two further findings, both closed in the
+  second round (`f3023ab`): (1) Critical — `compose.rs`'s `ComposedHost::run`
+  raced `ipc_task` against its own, shorter, non-cancelling 5s
+  `IPC_SHUTDOWN_GRACE` outer timeout, which — on firing — did not
+  cancel/confirm `ipc_task` but proceeded to tear down storage/secure-memory
+  regardless, reintroducing the exact hazard for any call in the 5-8s
+  window; fixed by removing the outer race entirely and relying on
+  `loki-ipc`'s own now-enforced bounded-then-abort-then-confirm shutdown as
+  the single owned bound. (2) High — `spawn_unary_call`/`spawn_stream_call`
+  were still bare-`tokio::spawn`ed and untracked; fixed by giving
+  `run_dispatch_loop` its own connection-local `JoinSet<()>`, drained (bound
+  `CALL_TASK_DRAIN_GRACE` = 10s) then abort-and-confirmed before a
+  connection's own task is considered finished, and recalibrating
+  `CONNECTION_DRAIN_GRACE` (8s → 20s) to nest around it with real margin.
+  The second round is independently, directly re-verified through the real
+  `ComposedHost::run` path (not `loki_ipc::Server::serve` in isolation, which
+  is what the first round's verification missed): a new
+  test-support-gated (`cfg(any(test, feature = "test-support"))`, zero
+  production reachability) hook
+  (`open_with_test_arena_and_business_service`) drives a real, timed
+  7-second `business_call` through the actual composed host; the new test
+  is confirmed to fail against the deliberately-reverted pre-fix code shapes
+  (`run()` returned at ~5.4s while the call was still in flight — the exact
+  hazard) and to pass against the restored fix (`run()` genuinely waits the
+  full ~7s). Merge to `LokiAI-v1.2` was a clean `--no-ff` merge with zero
+  conflicts, confirming the diff's confinement to
+  `crates/loki-ipc/src/server.rs`, `crates/loki-ipc/tests/shutdown_drain.rs`,
+  `crates/loki-runtime/src/host/compose.rs`,
+  `crates/loki-runtime/tests/host_lifecycle.rs`, and this node's own
+  handoff — disjoint from every other node integrated so far, exactly as
+  the dispatching instruction declared.
+unblocked_nodes: `P1-RUNTIME-COMP-001` (currently `NEEDS_REPLAN` in worktree
+  `L:\LokiAI-v1.2-wt\P1-RUNTIME-COMP-001`, commit `9149a06`, not touched by
+  this integration) named this exact correction as its own blocking
+  prerequisite in its handoff §9 and may now be re-dispatched against this
+  fix. Its own `tests/business_service.rs` suite still needs to be re-run as
+  part of that node's own re-dispatch, not implied complete by this
+  integration.
+new_or_changed_risks: none newly introduced by integration. Carried forward
+  from the handoff as explicit, tracked, non-blocking follow-ups (not
+  silently dropped): (1) a secondary nested-abort-without-confirm edge case,
+  only reachable if a connection is already catastrophically stuck beyond
+  the normal 20s `CONNECTION_DRAIN_GRACE` bound — Medium/Low, noted for a
+  possible future narrow follow-up, not required to close the reproduced
+  crash; (2) a doc-comment overclaim — Low, cosmetic. Grace-period
+  lengthening (8s → 20s outer bound) means a background host's clean
+  shutdown can now legitimately take up to ~20s in the worst case (a
+  genuinely wedged connection) instead of the old, unsafe-but-faster ~8s —
+  a deliberate, documented safety-over-speed tradeoff, not a regression.
 ```
