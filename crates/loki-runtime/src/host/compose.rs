@@ -20,6 +20,7 @@ use loki_ipc::auth::AuthToken;
 use loki_ipc::{Server, ServerConfig};
 use loki_storage::{SecureMemoryError, SecureMemoryRuntime, Storage};
 
+use crate::host::business_service::RuntimeBusinessService;
 use crate::host::clock::{now_utc_iso8601, unix_millis_now};
 use crate::host::discovery::{self, RecordedState};
 use crate::host::paths::HostPaths;
@@ -94,12 +95,39 @@ pub struct ComposedHost {
     /// Application services composed over the same migrated store the host
     /// just opened, so no adapter or future business method can open a
     /// second, divergent database. See `crate::services` for the real,
-    /// atomic mutation-submission boundary this composes.
-    services: RuntimeServices,
+    /// atomic mutation-submission boundary this composes. `Arc`-wrapped
+    /// (`P1-RUNTIME-COMP-001`) so the exact same composed instance can also
+    /// be shared into the real `BusinessService`
+    /// (`crate::host::business_service::RuntimeBusinessService`) installed
+    /// on `server` below — never a second `RuntimeServices::compose` call.
+    services: Arc<RuntimeServices>,
     server: Server,
     discovery_file: PathBuf,
     started_at_unix_millis: u64,
     secure_memory: SecureMemoryRuntime,
+}
+
+/// What `open_with_arena` installs beyond `loki_ipc::ServerConfig::new`'s own
+/// defaults. `None` (production `open()`, ordinary-test
+/// `open_with_test_arena()`) and [`BusinessOverride::CredentialOnly`] both
+/// still install the real [`RuntimeBusinessService`] (`P1-RUNTIME-COMP-001`)
+/// — only [`BusinessOverride::Full`] replaces it with a caller-supplied test
+/// double (e.g. `tests/host_lifecycle.rs`'s `SlowBusinessService` fixture,
+/// `P1-IPC-SHUTDOWN-CORR`).
+enum BusinessOverride {
+    /// Only the credential resolver is test-supplied; the real
+    /// `RuntimeBusinessService` is still installed over the same composed
+    /// `services`/`storage` this function opens. Used by this crate's own
+    /// `tests/business_service.rs` to drive real, authorized business calls
+    /// through the actual `ComposedHost::run` path without a second
+    /// `Server`/second database open.
+    CredentialOnly(Arc<dyn loki_ipc::auth::CredentialResolver>),
+    /// Both the credential resolver and the business service are
+    /// test-supplied, replacing the real `RuntimeBusinessService` entirely.
+    Full {
+        credential_resolver: Arc<dyn loki_ipc::auth::CredentialResolver>,
+        business_service: Arc<dyn loki_ipc::BusinessService>,
+    },
 }
 
 impl ComposedHost {
@@ -147,12 +175,12 @@ impl ComposedHost {
     /// Identical to [`Self::open_with_test_arena`], except the real IPC
     /// server is composed with `credential_resolver`/`business_service`
     /// instead of the crate's own fail-closed defaults (`loki_ipc::ServerConfig::new`'s
-    /// single legacy-core-client credential with empty authority, and
-    /// `loki_ipc`'s private `UnsupportedBusinessService` — no business method
-    /// is wired into production `open`/`open_with_test_arena` yet, see this
-    /// module's top doc comment). Both must be overridden together: a real
-    /// business call needs a principal actually authorized for it, not just a
-    /// service willing to answer it.
+    /// single legacy-core-client credential with empty authority). Both must
+    /// be overridden together: a real business call needs a principal
+    /// actually authorized for it, not just a service willing to answer it.
+    /// See [`Self::open_with_test_arena_and_credential_resolver`] for the
+    /// (more common) case of wanting the real `RuntimeBusinessService` with
+    /// only a test-supplied credential resolver.
     ///
     /// Exists so a test can exercise a real, controllable, slow-or-fast
     /// business call **through the actual production `Server`/`run` wiring**
@@ -175,25 +203,57 @@ impl ComposedHost {
         Self::open_with_arena(
             config,
             secure_memory,
-            Some((credential_resolver, business_service)),
+            Some(BusinessOverride::Full {
+                credential_resolver,
+                business_service,
+            }),
+        )
+    }
+
+    /// Identical to [`Self::open_with_test_arena`], except the real IPC
+    /// server's credential resolver is `credential_resolver` instead of
+    /// `loki_ipc::ServerConfig::new`'s own single legacy-core-client
+    /// credential (empty authority) — the real
+    /// [`crate::host::business_service::RuntimeBusinessService`] is still
+    /// installed, over the same composed `services`/`storage` this function
+    /// opens (never a second database open, never a second
+    /// `RuntimeServices::compose` call).
+    ///
+    /// Exists so a test can drive a real, authorized business call for an
+    /// arbitrary test-constructed principal **through the actual production
+    /// `Server`/`run` wiring** (`P1-RUNTIME-COMP-001`,
+    /// `tests/business_service.rs`) — the same rationale
+    /// [`Self::open_with_test_arena_and_business_service`]'s doc comment
+    /// gives for testing through `ComposedHost::run` rather than
+    /// `loki_ipc::Server::serve` in isolation, but without needing to also
+    /// replace the real business service under test. Compiled only for this
+    /// crate's own tests or the opt-in `test-support` feature, matching
+    /// [`Self::open_with_test_arena`]'s own reachability guarantee.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_with_test_arena_and_credential_resolver(
+        config: &HostConfig,
+        credential_resolver: Arc<dyn loki_ipc::auth::CredentialResolver>,
+    ) -> Result<Self, HostStartError> {
+        let secure_memory =
+            loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena();
+        Self::open_with_arena(
+            config,
+            secure_memory,
+            Some(BusinessOverride::CredentialOnly(credential_resolver)),
         )
     }
 
     /// Shared startup body once a `secure_memory` arena (production-bootstrapped
     /// or, in test builds only, disposable-test-bootstrapped) is already in
     /// hand. See [`Self::open`]/[`Self::open_with_test_arena`]/
-    /// [`Self::open_with_test_arena_and_business_service`]. `business_override`
-    /// is `None` for every production and ordinary-test caller (the real IPC
-    /// server then keeps `loki_ipc::ServerConfig::new`'s own fail-closed
-    /// defaults), and `Some` only for
-    /// [`Self::open_with_test_arena_and_business_service`]'s own callers.
+    /// [`Self::open_with_test_arena_and_business_service`]/
+    /// [`Self::open_with_test_arena_and_credential_resolver`] and
+    /// [`BusinessOverride`]'s own doc comment for exactly what each variant
+    /// (and `None`) installs.
     fn open_with_arena(
         config: &HostConfig,
         secure_memory: SecureMemoryRuntime,
-        business_override: Option<(
-            Arc<dyn loki_ipc::auth::CredentialResolver>,
-            Arc<dyn loki_ipc::BusinessService>,
-        )>,
+        business_override: Option<BusinessOverride>,
     ) -> Result<Self, HostStartError> {
         config.paths.ensure_base_dir()?;
 
@@ -202,7 +262,7 @@ impl ComposedHost {
         let report = storage.run_migrations(&now_utc_iso8601())?;
         tracing::info!(applied = ?report.applied_versions, "background host: storage migrated");
         let storage = Arc::new(storage);
-        let services = RuntimeServices::compose(Arc::clone(&storage));
+        let services = Arc::new(RuntimeServices::compose(Arc::clone(&storage)));
 
         let started_at_unix_millis = unix_millis_now();
         let discovery_file = config.paths.discovery_file();
@@ -219,10 +279,48 @@ impl ComposedHost {
         )?;
         let mut server_config =
             ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
-        if let Some((credential_resolver, business_service)) = business_override {
-            server_config = server_config
-                .with_credential_resolver(credential_resolver)
-                .with_business_service(business_service);
+        match business_override {
+            // Full override (`open_with_test_arena_and_business_service`):
+            // both the credential resolver and the business service are
+            // test-supplied, e.g. `tests/host_lifecycle.rs`'s
+            // `SlowBusinessService` fixture — this path must install exactly
+            // what the caller gave it, never the real `RuntimeBusinessService`.
+            Some(BusinessOverride::Full {
+                credential_resolver,
+                business_service,
+            }) => {
+                server_config = server_config
+                    .with_credential_resolver(credential_resolver)
+                    .with_business_service(business_service);
+            }
+            // Credential-only override
+            // (`open_with_test_arena_and_credential_resolver`): the real
+            // `RuntimeBusinessService` (below) is still installed, only the
+            // credential resolver is test-supplied — used by this crate's
+            // own `tests/business_service.rs` to drive real, authorized
+            // business calls through the actual `ComposedHost::run` path
+            // without needing a second `Server`/second database open.
+            Some(BusinessOverride::CredentialOnly(credential_resolver)) => {
+                server_config = server_config.with_credential_resolver(credential_resolver);
+                let business_service = Arc::new(RuntimeBusinessService::new(
+                    Arc::clone(&services),
+                    Arc::clone(&storage),
+                ));
+                server_config = server_config.with_business_service(business_service);
+            }
+            // Production `open()`/ordinary-test `open_with_test_arena()`:
+            // the real `RuntimeBusinessService`, over `loki_ipc::ServerConfig::new`'s
+            // own default (single legacy shared-secret token/principal,
+            // empty authority) credential resolver — see this module's top
+            // doc comment and `Docs/graph/tasks/P1-RUNTIME-COMP-001.md` §3/§5
+            // for why the credential mechanism itself is untouched here.
+            None => {
+                let business_service = Arc::new(RuntimeBusinessService::new(
+                    Arc::clone(&services),
+                    Arc::clone(&storage),
+                ));
+                server_config = server_config.with_business_service(business_service);
+            }
         }
         let server = Server::bind(server_config)?;
 
@@ -258,7 +356,7 @@ impl ComposedHost {
     /// authenticated IPC business methods read through this instead of
     /// opening or querying storage directly.
     pub fn services(&self) -> &RuntimeServices {
-        &self.services
+        self.services.as_ref()
     }
 
     /// Runs the host until `shutdown_signal` resolves (clean exit) or
@@ -345,11 +443,20 @@ impl ComposedHost {
 
         // No SQLite connection may survive arena teardown.  `storage` is an
         // `Arc<Storage>` shared with every service in `services` (see
-        // `crate::services::RuntimeServices::compose`), so every other clone
-        // must drop first or the final `drop(storage)` below would merely
-        // decrement a refcount instead of closing the last core connection
-        // before `sqlite3_shutdown`, wipe/unlock/free, and current-process
-        // working-set restoration.
+        // `crate::services::RuntimeServices::compose`) and, since
+        // `P1-RUNTIME-COMP-001`, with the `RuntimeBusinessService` installed
+        // on `server` (both `services`/`storage` are themselves `Arc`-cloned
+        // into it at construction — see `open_with_arena`), so every other
+        // clone must drop first or the final `drop(storage)` below would
+        // merely decrement a refcount instead of closing the last core
+        // connection before `sqlite3_shutdown`, wipe/unlock/free, and
+        // current-process working-set restoration. `server` (and, with it,
+        // its `Arc<dyn BusinessService>` clone) is already dropped above,
+        // since `ipc_task` is `.await`ed directly (not raced against a
+        // second, shorter, non-cancelling timeout — see this method's own
+        // doc comment) and `loki-ipc`'s own internal drain/abort sequence
+        // guarantees every connection- and call-level clone it held is gone
+        // by the time that await resolves.
         drop(services);
         drop(storage);
         if let Err(err) = secure_memory.shutdown() {
