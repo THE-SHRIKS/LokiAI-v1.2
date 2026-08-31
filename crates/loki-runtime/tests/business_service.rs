@@ -3,21 +3,18 @@
 //! (`crate::host::business_service::RuntimeBusinessService`,
 //! `P1-RUNTIME-COMP-001`, `Docs/graph/tasks/P1-RUNTIME-COMP-001.md`).
 //!
-//! Every test opens a real `ComposedHost` (`ComposedHost::open_with_test_arena`
-//! — a real, migrated `DAT-001` SQLite database, a real discovery file, a
-//! real named pipe) and drives the real business-RPC path over a real
-//! second named pipe bound with the exact same `Arc<RuntimeServices>`/
-//! `Arc<Storage>` the host already composed (`ComposedHost::services_handle`/
-//! `ComposedHost::storage_handle` — no second database open, no second
-//! `RuntimeServices::compose` call).
-//!
-//! A second, separate `Server`/`ServerConfig` is required because production
-//! `ComposedHost::open_with_arena` keeps using `ServerConfig::new`'s single
-//! legacy shared-secret token/principal (empty authority) unchanged — this
-//! node does not touch that credential mechanism (`Docs/graph/tasks/
-//! P1-RUNTIME-COMP-001.md` §3/§5). These tests supply their own
-//! `CredentialSet`/principals instead, exactly as that packet's §7
-//! authorizes, over the real host's real composed services.
+//! Every test here drives real, authorized business calls **through the
+//! actual production `ComposedHost::run` wiring** — real named pipe, real
+//! `Client`, real shutdown sequencing — using
+//! `ComposedHost::open_with_test_arena_and_credential_resolver` to install a
+//! test-constructed `CredentialSet` while keeping the real
+//! `RuntimeBusinessService` installed (never a second `Server`/second
+//! database open). This matches the testing approach
+//! `P1-IPC-SHUTDOWN-CORR`'s independent-review re-verification established
+//! (`tests/host_lifecycle.rs`'s `slow_business_call` module): testing only
+//! `loki_ipc::Server::serve` in isolation, or a second, independently-bound
+//! `Server` outside `ComposedHost::run`'s own lifecycle, does not exercise
+//! the real shutdown-drain guarantees a live client actually depends on.
 
 #![cfg(windows)]
 
@@ -34,12 +31,10 @@ use loki_ipc::business::{
 };
 use loki_ipc::client::{CallError, Client, ClientConfig};
 use loki_ipc::protocol::{Method, RpcError};
-use loki_ipc::server::{Server, ServerConfig};
-use loki_runtime::host::business_service::RuntimeBusinessService;
 use loki_runtime::host::compose::{ComposedHost, HostConfig};
 use loki_runtime::host::paths::HostPaths;
-use loki_runtime::services::RuntimeServices;
-use loki_storage::Storage;
+use loki_runtime::runtime::RunOutcome;
+use loki_runtime::shutdown::ShutdownReason;
 use loki_storage::agents::AgentsRepository;
 use loki_storage::devices::{DeviceRepository, NewDevice};
 use loki_storage::ids::{ConnectorId, DeviceId, RuntimeId};
@@ -48,8 +43,11 @@ use loki_storage::states::{DeviceLifecycleState, SupportTier};
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// A bound for assertions that must not hang the suite if the implementation
 /// regresses into a real deadlock — not a normal-operation timing
-/// assumption.
-const HANG_GUARD: Duration = Duration::from_secs(10);
+/// assumption. Comfortably above `loki_ipc::server`'s own internal shutdown-
+/// drain grace periods (`CONNECTION_DRAIN_GRACE` = 20s), matching
+/// `tests/host_lifecycle.rs`'s own established convention for a real
+/// `ComposedHost::run` round trip.
+const HANG_GUARD: Duration = Duration::from_secs(30);
 
 const FIXTURE_DEVICE_ID: &str = "dev:business-service-fixture-1";
 /// The real, persisted `agent_connections.connection_id` this suite seeds.
@@ -102,12 +100,14 @@ fn sample_device(device_id: &str) -> NewDevice {
 /// Seeds the fixture device and the fixture agent connection (real,
 /// currently-registered, `generation == 1`) directly through
 /// `loki_storage`, mirroring `crates/loki-ipc/tests/support/business.rs`'s
-/// established seeding convention.
-fn seed_fixtures(storage: &Storage) {
-    storage
+/// established seeding convention. Called on the still-owned `ComposedHost`
+/// before it is moved into `spawn_run`, via its existing `storage()`
+/// accessor.
+fn seed_fixtures(host: &ComposedHost) {
+    host.storage()
         .insert_device(&sample_device(FIXTURE_DEVICE_ID))
         .expect("insert fixture device");
-    storage
+    host.storage()
         .insert_agent_connection(
             AGENT_CONNECTION_ID,
             "test-agent",
@@ -212,42 +212,123 @@ const COLLIDING_DESKTOP_TOKEN: &str = "colliding-desktop-fixture-token";
 const UNREGISTERED_AGENT_TOKEN: &str = "unregistered-agent-fixture-token";
 const UNAUTHORIZED_TOKEN: &str = "unauthorized-fixture-token";
 
-fn credential_set() -> CredentialSet {
-    CredentialSet::new(vec![
+/// Builds a `CredentialSet`-backed resolver from exactly the records a given
+/// test needs. Deliberately **not** one single shared resolver holding every
+/// fixture principal at once: `crate::server::SessionAuthority` revalidates
+/// every call by `principal_id` alone (never the raw token — see
+/// `crates/loki-ipc/src/server.rs`'s own top doc comment on dynamic session
+/// revalidation), so `CredentialResolver::revalidate`/`CredentialSet`'s
+/// lookup is only well-defined when `principal_id` is unique *within one
+/// resolver*. [`colliding_desktop_principal`] deliberately shares its
+/// `principal_id` with [`agent_principal`]'s (`AGENT_CONNECTION_ID` — the
+/// real seeded `connection_id` under test) as the whole point of the
+/// adversarial test below; putting both principals in the *same* resolver
+/// would make `revalidate` itself ambiguous (a `CredentialSet` test-fixture
+/// hazard, not anything `RuntimeBusinessService`/`crate::server` gets wrong)
+/// and silently resolve to the wrong principal instead of exercising the
+/// kind-check gate at all. Each test therefore builds its own minimal
+/// resolver containing only the principal(s) it actually needs.
+fn resolver(records: Vec<CredentialRecord>) -> Arc<dyn CredentialResolver> {
+    Arc::new(CredentialSet::new(records))
+}
+
+fn startup_resolver() -> Arc<dyn CredentialResolver> {
+    resolver(vec![
         CredentialRecord::active(AuthToken::new(AGENT_TOKEN), agent_principal()),
         CredentialRecord::active(AuthToken::new(DESKTOP_TOKEN), desktop_principal()),
-        CredentialRecord::active(
-            AuthToken::new(COLLIDING_DESKTOP_TOKEN),
-            colliding_desktop_principal(),
-        ),
         CredentialRecord::active(
             AuthToken::new(UNREGISTERED_AGENT_TOKEN),
             unregistered_agent_principal(),
         ),
-        CredentialRecord::active(AuthToken::new(UNAUTHORIZED_TOKEN), unauthorized_principal()),
     ])
 }
 
-/// Binds a real second `Server`, wired to the real `RuntimeBusinessService`
-/// over `services`/`storage` (the exact `Arc`s a real `ComposedHost` already
-/// composed — see this file's top doc comment), with this suite's own
-/// `CredentialSet`. Spawns the accept loop for exactly one connection (every
-/// test here uses exactly one client per bound server).
-fn start_business_server(
-    pipe_name: &str,
-    services: Arc<RuntimeServices>,
-    storage: Arc<Storage>,
-) -> tokio::task::JoinHandle<()> {
-    let resolver: Arc<dyn CredentialResolver> = Arc::new(credential_set());
-    let config = ServerConfig::new(pipe_name.to_string(), AuthToken::new("unused-legacy-token"))
-        .with_credential_resolver(resolver)
-        .with_business_service(Arc::new(RuntimeBusinessService::new(services, storage)));
-    let mut server = Server::bind(config).expect("bind business server");
-    tokio::spawn(async move {
-        if let Ok(connection) = server.accept().await {
-            let _ = connection.handle().await;
-        }
-    })
+fn collision_resolver() -> Arc<dyn CredentialResolver> {
+    resolver(vec![CredentialRecord::active(
+        AuthToken::new(COLLIDING_DESKTOP_TOKEN),
+        colliding_desktop_principal(),
+    )])
+}
+
+fn deferred_methods_resolver() -> Arc<dyn CredentialResolver> {
+    resolver(vec![CredentialRecord::active(
+        AuthToken::new(DESKTOP_TOKEN),
+        desktop_principal(),
+    )])
+}
+
+fn unauthorized_resolver() -> Arc<dyn CredentialResolver> {
+    resolver(vec![CredentialRecord::active(
+        AuthToken::new(UNAUTHORIZED_TOKEN),
+        unauthorized_principal(),
+    )])
+}
+
+/// Both `agent_principal`/`desktop_principal` at once — safe to combine (no
+/// shared `principal_id`, unlike [`colliding_desktop_principal`]) — used by
+/// the restart/reconcile test, which needs a real agent-mutation caller and
+/// a real `Authority::ReadDevices`-holding caller (the agent principal
+/// deliberately does not hold `ReadDevices`, matching production's expected
+/// authority separation).
+fn restart_reconcile_resolver() -> Arc<dyn CredentialResolver> {
+    resolver(vec![
+        CredentialRecord::active(AuthToken::new(AGENT_TOKEN), agent_principal()),
+        CredentialRecord::active(AuthToken::new(DESKTOP_TOKEN), desktop_principal()),
+    ])
+}
+
+/// Opens a real host with the real `RuntimeBusinessService` and
+/// `credential_resolver` installed, through
+/// `ComposedHost::open_with_test_arena_and_credential_resolver` — never a
+/// second database open, never a second `Server`.
+fn open_host(
+    config: &HostConfig,
+    credential_resolver: Arc<dyn CredentialResolver>,
+) -> ComposedHost {
+    ComposedHost::open_with_test_arena_and_credential_resolver(config, credential_resolver)
+        .expect("host must start with the test credential resolver installed")
+}
+
+/// Spawns `host.run(...)`, returning the task handle and a sender that
+/// triggers a real, clean shutdown when signalled.
+fn spawn_run(
+    host: ComposedHost,
+) -> (
+    tokio::task::JoinHandle<RunOutcome>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let run_task = tokio::spawn(async move {
+        host.run(
+            async {
+                let _ = shutdown_rx.await;
+                ShutdownReason::CtrlC
+            },
+            std::future::pending::<()>(),
+        )
+        .await
+    });
+    (run_task, shutdown_tx)
+}
+
+/// Signals a clean shutdown and awaits `ComposedHost::run`'s task to
+/// completion — the real teardown path `P1-IPC-SHUTDOWN-CORR` fixed. Every
+/// test in this file calls this before its own function returns, so no
+/// spawned connection/call task or `RuntimeBusinessService`
+/// `Storage`/`RuntimeServices` clone ever outlives the test.
+async fn stop_host(
+    run_task: tokio::task::JoinHandle<RunOutcome>,
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+) {
+    let _ = shutdown_tx.send(());
+    let outcome = tokio::time::timeout(HANG_GUARD, run_task)
+        .await
+        .expect("host run task must not hang")
+        .expect("host run task must not panic");
+    assert!(
+        matches!(outcome, RunOutcome::Shutdown(_)),
+        "expected a clean shutdown outcome, got {outcome:?}"
+    );
 }
 
 async fn connect_as(pipe_name: &str, token: &str) -> Client {
@@ -341,16 +422,16 @@ fn build_request() -> Method {
 /// Startup: a real client Hello, `Ping`, each of the 4 real reads, and each
 /// of the 3 agent-mutation methods (including one real rejection case: an
 /// unregistered connection) round-trip over a real named pipe against a real
-/// `ComposedHost::open_with_test_arena`.
+/// `ComposedHost::run`.
 #[tokio::test]
 async fn startup_serves_ping_all_four_reads_and_all_three_agent_mutations_over_a_real_pipe() {
     let dir = tempfile::tempdir().unwrap();
     let config = test_host_config(dir.path(), "startup");
-    let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
-    seed_fixtures(host.storage());
+    let pipe_name = config.pipe_name.clone();
 
-    let pipe_name = unique_pipe_name("startup-business");
-    let _server = start_business_server(&pipe_name, host.services_handle(), host.storage_handle());
+    let host = open_host(&config, startup_resolver());
+    seed_fixtures(&host);
+    let (run_task, shutdown_tx) = spawn_run(host);
 
     let agent_client = connect_as(&pipe_name, AGENT_TOKEN).await;
 
@@ -449,8 +530,7 @@ async fn startup_serves_ping_all_four_reads_and_all_three_agent_mutations_over_a
     };
 
     // The real rejection case: an unregistered connection is denied honestly
-    // before the client ever connects with it here (a fresh connection using
-    // the unregistered-agent fixture principal).
+    // — a fresh connection using the unregistered-agent fixture principal.
     let unregistered_client = connect_as(&pipe_name, UNREGISTERED_AGENT_TOKEN).await;
     let denied = call(
         &unregistered_client,
@@ -461,6 +541,11 @@ async fn startup_serves_ping_all_four_reads_and_all_three_agent_mutations_over_a
         matches!(denied, Err(CallError::Rpc(RpcError::PermissionDenied))),
         "expected PermissionDenied for an unregistered connection, got {denied:?}"
     );
+
+    drop(agent_client);
+    drop(desktop_client);
+    drop(unregistered_client);
+    stop_host(run_task, shutdown_tx).await;
 }
 
 /// Deliverable-3 security regression: a `DesktopInstallation`-kind principal
@@ -475,11 +560,12 @@ async fn startup_serves_ping_all_four_reads_and_all_three_agent_mutations_over_a
 async fn desktop_principal_colliding_with_a_real_connection_id_is_denied_not_served() {
     let dir = tempfile::tempdir().unwrap();
     let config = test_host_config(dir.path(), "collision");
-    let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
-    seed_fixtures(host.storage());
+    let pipe_name = config.pipe_name.clone();
 
-    let pipe_name = unique_pipe_name("collision-business");
-    let _server = start_business_server(&pipe_name, host.services_handle(), host.storage_handle());
+    let host = open_host(&config, collision_resolver());
+    seed_fixtures(&host);
+    let (run_task, shutdown_tx) = spawn_run(host);
+
     let client = connect_as(&pipe_name, COLLIDING_DESKTOP_TOKEN).await;
 
     for method in [
@@ -494,6 +580,9 @@ async fn desktop_principal_colliding_with_a_real_connection_id_is_denied_not_ser
              {method:?}, got {result:?}"
         );
     }
+
+    drop(client);
+    stop_host(run_task, shutdown_tx).await;
 }
 
 /// Failure case 1 (Deliverable 4): `RestartRequest`/`FlashRequest`/
@@ -505,11 +594,12 @@ async fn desktop_principal_colliding_with_a_real_connection_id_is_denied_not_ser
 async fn desktop_mutation_methods_remain_unsupported_even_for_a_fully_authorized_principal() {
     let dir = tempfile::tempdir().unwrap();
     let config = test_host_config(dir.path(), "deferred");
-    let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
-    seed_fixtures(host.storage());
+    let pipe_name = config.pipe_name.clone();
 
-    let pipe_name = unique_pipe_name("deferred-business");
-    let _server = start_business_server(&pipe_name, host.services_handle(), host.storage_handle());
+    let host = open_host(&config, deferred_methods_resolver());
+    seed_fixtures(&host);
+    let (run_task, shutdown_tx) = spawn_run(host);
+
     let client = connect_as(&pipe_name, DESKTOP_TOKEN).await;
 
     for method in [restart_request(), flash_request(), build_request()] {
@@ -522,6 +612,9 @@ async fn desktop_mutation_methods_remain_unsupported_even_for_a_fully_authorized
             "expected UnsupportedMethod for deferred method {method:?}, got {result:?}"
         );
     }
+
+    drop(client);
+    stop_host(run_task, shutdown_tx).await;
 }
 
 /// Failure case 2: a call with a principal lacking the relevant `Authority`
@@ -532,11 +625,12 @@ async fn desktop_mutation_methods_remain_unsupported_even_for_a_fully_authorized
 async fn unauthorized_principal_is_denied_before_reaching_the_real_service() {
     let dir = tempfile::tempdir().unwrap();
     let config = test_host_config(dir.path(), "unauthorized");
-    let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
-    seed_fixtures(host.storage());
+    let pipe_name = config.pipe_name.clone();
 
-    let pipe_name = unique_pipe_name("unauthorized-business");
-    let _server = start_business_server(&pipe_name, host.services_handle(), host.storage_handle());
+    let host = open_host(&config, unauthorized_resolver());
+    seed_fixtures(&host);
+    let (run_task, shutdown_tx) = spawn_run(host);
+
     let client = connect_as(&pipe_name, UNAUTHORIZED_TOKEN).await;
 
     let result = call(&client, Method::RuntimeGetStatus(EmptyParams {})).await;
@@ -544,88 +638,95 @@ async fn unauthorized_principal_is_denied_before_reaching_the_real_service() {
         result,
         Err(CallError::Rpc(RpcError::PermissionDenied))
     ));
+
+    drop(client);
+    stop_host(run_task, shutdown_tx).await;
 }
 
-/// Restart/reconcile: open -> run real business RPC -> clean drop (simulated
-/// restart) -> reopen `ComposedHost::open_with_test_arena` against the exact
-/// same on-disk `HostConfig`/paths -> run again over the real, reopened
-/// storage -> prove a device, an agent connection, and a mutation result
-/// persisted before the "restart" are all still readable/replayable
-/// afterward, and a fresh mutation submitted after the "restart" succeeds —
-/// the same property `tests/host_lifecycle.rs`'s
-/// `simulated_crash_and_restart_preserves_persisted_device_state` proves for
-/// storage alone, now proven through the real business-RPC path.
+/// Restart/reconcile: open -> run -> real agent mutation -> clean shutdown
+/// -> reopen `ComposedHost::open_with_test_arena_and_credential_resolver`
+/// against the exact same on-disk `HostConfig`/paths -> run again -> prove
+/// the device and the mutation result persisted before the clean shutdown
+/// are both still readable/replayable afterward, and a fresh mutation
+/// submitted after the restart succeeds — the same property
+/// `tests/host_lifecycle.rs`'s `simulated_crash_and_restart_preserves_persisted_device_state`
+/// proves for storage alone, now proven through the real business-RPC path,
+/// exercised through the real, now-fixed `ComposedHost::run` shutdown/drain
+/// sequence on both sides of the restart (`P1-IPC-SHUTDOWN-CORR`).
 #[tokio::test]
 async fn restart_reconcile_preserves_state_and_serves_a_fresh_mutation_through_the_real_business_rpc_path()
  {
     let dir = tempfile::tempdir().unwrap();
     let config = test_host_config(dir.path(), "restart-before");
+    let pipe_name = config.pipe_name.clone();
 
     let first_job_id;
     {
-        let host = ComposedHost::open_with_test_arena(&config).expect("host must start");
-        seed_fixtures(host.storage());
+        let host = open_host(&config, restart_reconcile_resolver());
+        seed_fixtures(&host);
+        let (run_task, shutdown_tx) = spawn_run(host);
 
-        let pipe_name = unique_pipe_name("restart-before-business");
-        let _server =
-            start_business_server(&pipe_name, host.services_handle(), host.storage_handle());
         let client = connect_as(&pipe_name, AGENT_TOKEN).await;
 
         let result = call(&client, agent_run_register("idem-restart-persisted"))
             .await
-            .expect("agent_run_register before the simulated restart must succeed");
+            .expect("agent_run_register before the restart must succeed");
         let BusinessRpcResult::Mutation {
             outcome: WireMutationOutcome::Accepted { job_id, .. },
             ..
         } = result
         else {
-            panic!("expected Accepted before the simulated restart, got {result:?}");
+            panic!("expected Accepted before the restart, got {result:?}");
         };
         first_job_id = job_id;
 
-        // `host`, `_server`, and `client` are all dropped here without a
-        // clean `ComposedHost::run` shutdown — modeling an unclean process
-        // death, exactly like `tests/host_lifecycle.rs`'s
-        // `simulated_crash_and_restart_preserves_persisted_device_state`.
+        // A real, clean shutdown — `ComposedHost::run`'s task is fully
+        // awaited to completion before this block ends, so every
+        // connection/call task and every `RuntimeBusinessService`
+        // `Storage`/`RuntimeServices` clone is provably gone before the
+        // "restart" below reopens the same on-disk paths.
+        drop(client);
+        stop_host(run_task, shutdown_tx).await;
     }
 
-    // A fresh pipe name for the "restarted" instance — a real restart binds
-    // a brand new `Server`, never reuses the crashed process's OS handle.
+    // A fresh pipe name for the restarted instance — a real restart binds a
+    // brand new `Server`, never reuses the previous instance's OS handle.
     let restarted_config = HostConfig {
         paths: config.paths.clone(),
         pipe_name: unique_pipe_name("restart-after"),
     };
-    let restarted_host = ComposedHost::open_with_test_arena(&restarted_config)
-        .expect("host must restart against the exact same on-disk paths");
+    let restarted_pipe_name = restarted_config.pipe_name.clone();
 
-    // The fixture device inserted before the simulated restart is still
-    // present, read directly through storage — the same proof
-    // `host_lifecycle.rs` already makes for storage alone.
+    let restarted_host = open_host(&restarted_config, restart_reconcile_resolver());
+
+    // The fixture device inserted before the restart is still present, read
+    // directly through storage — the same proof `host_lifecycle.rs` already
+    // makes for storage alone.
     let restarted_device = restarted_host
         .storage()
         .get_device(&DeviceId::new(FIXTURE_DEVICE_ID).unwrap())
-        .expect("device lookup must succeed after the simulated restart")
-        .expect("the device inserted before the simulated restart must still be present");
+        .expect("device lookup must succeed after the restart")
+        .expect("the device inserted before the restart must still be present");
     assert_eq!(restarted_device.device_id.as_str(), FIXTURE_DEVICE_ID);
 
-    let pipe_name = unique_pipe_name("restart-after-business");
-    let _server = start_business_server(
-        &pipe_name,
-        restarted_host.services_handle(),
-        restarted_host.storage_handle(),
-    );
-    let client = connect_as(&pipe_name, AGENT_TOKEN).await;
+    let (run_task, shutdown_tx) = spawn_run(restarted_host);
+    let agent_client = connect_as(&restarted_pipe_name, AGENT_TOKEN).await;
+    // A separate desktop-principal connection for the `DeviceGet` read below
+    // — the agent principal deliberately does not hold `Authority::ReadDevices`
+    // (matching production's expected authority separation; see
+    // `restart_reconcile_resolver`'s doc comment).
+    let desktop_client = connect_as(&restarted_pipe_name, DESKTOP_TOKEN).await;
 
-    // The device persisted before the "restart" is still readable through
-    // the real business-RPC path, not only through direct storage access.
+    // The device persisted before the restart is still readable through the
+    // real business-RPC path, not only through direct storage access.
     let device = call(
-        &client,
+        &desktop_client,
         Method::DeviceGet(DeviceParams {
             device_id: FIXTURE_DEVICE_ID.to_string(),
         }),
     )
     .await
-    .expect("device_get after the simulated restart must succeed");
+    .expect("device_get after the restart must succeed");
     match device {
         BusinessRpcResult::DeviceGet { device, .. } => {
             assert!(device.is_some(), "device must still be found after restart");
@@ -633,10 +734,10 @@ async fn restart_reconcile_preserves_state_and_serves_a_fresh_mutation_through_t
         other => panic!("expected DeviceGet, got {other:?}"),
     }
 
-    // The mutation result persisted before the "restart" replays identically
+    // The mutation result persisted before the restart replays identically
     // through the real business-RPC path — proving business-RPC continuity,
     // not merely storage continuity.
-    let replayed = call(&client, agent_run_register("idem-restart-persisted"))
+    let replayed = call(&agent_client, agent_run_register("idem-restart-persisted"))
         .await
         .expect("replaying the pre-restart idempotency key must succeed");
     match replayed {
@@ -647,10 +748,10 @@ async fn restart_reconcile_preserves_state_and_serves_a_fresh_mutation_through_t
         other => panic!("expected ReplayedIdenticalAccepted, got {other:?}"),
     }
 
-    // A fresh mutation submitted after the "restart" succeeds.
-    let fresh = call(&client, agent_run_register("idem-restart-fresh"))
+    // A fresh mutation submitted after the restart succeeds.
+    let fresh = call(&agent_client, agent_run_register("idem-restart-fresh"))
         .await
-        .expect("a fresh mutation after the simulated restart must succeed");
+        .expect("a fresh mutation after the restart must succeed");
     let BusinessRpcResult::Mutation {
         outcome:
             WireMutationOutcome::Accepted {
@@ -666,4 +767,8 @@ async fn restart_reconcile_preserves_state_and_serves_a_fresh_mutation_through_t
         fresh_job_id, first_job_id,
         "a fresh mutation must not be conflated with the replayed pre-restart one"
     );
+
+    drop(agent_client);
+    drop(desktop_client);
+    stop_host(run_task, shutdown_tx).await;
 }
