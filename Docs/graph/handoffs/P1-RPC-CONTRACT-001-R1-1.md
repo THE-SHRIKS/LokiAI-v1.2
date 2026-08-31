@@ -6,8 +6,10 @@ Worker: `loki-implementer`
 Started from: `LokiAI-v1.2`@`80bff05`, continuing a prior implementer session's
 substantial uncommitted progress on branch `node/P1-RPC-CONTRACT-001-R1` in
 worktree `L:\LokiAI-v1.2-wt\P1-RPC-CONTRACT-001-R1`
-Result revision/patch: `2181a9b` on `node/P1-RPC-CONTRACT-001-R1`
+Result revision/patch: `2181a9b`, `7a37ec1` on `node/P1-RPC-CONTRACT-001-R1`
 Completed at: `2026-08-31T06:44:00Z`
+Addendum (test-review follow-up, mid-subscription-revocation coverage): see
+§10 below. New commit on top of `7a37ec1`, same branch/worktree.
 
 ## 1. Outcome
 
@@ -216,5 +218,90 @@ human gate) is intentionally not performed by this implementer session.
   the next node that installs a real `BusinessService` backed by a live
   `RuntimeServices` through the preserved seam in
   `crates/loki-ipc/src/server.rs`.
+
+## 10. Addendum — mid-subscription-revocation test coverage (follow-up)
+
+Independent test review found every criterion clean except one real gap: the
+packet's "a privileged session's authority is re-checked after
+revocation/expiry for both a new call AND an existing subscription" was only
+proven for the call path (`revoked_credential_denies_the_very_next_call_not_
+only_a_future_hello`). No test opened a real, live `BusinessEvents`
+subscription, confirmed a real event was actually delivered, revoked
+mid-subscription, and confirmed the very next forwarded item was denied.
+
+**Root-cause read before writing anything**: I read
+`crates/loki-ipc/src/server.rs::execute_stream_method` (the `BusinessEvents`
+arm, ~lines 745–812) and confirmed `session_authority.revalidate()` is called
+inside the streaming `select!` loop on both arms (~lines 775 and 791) —
+before every forwarded event, not once at stream setup. This matches the
+reviewer's claim; the production code needed no change.
+
+**Why a test couldn't be written against the existing test double as-is**:
+`tests/support/business.rs::TestBusinessService::stream` was, before this
+change, unconditionally fail-closed for all 10 streams — its own doc comment
+stated "No real event producer exists anywhere in this workspace yet...this
+test double stays fail-closed." That is correct and intentional for
+production parity (`P1-RUNTIME-COMP-001` installs the real producer later),
+but it meant no existing fixture could deliver even one real, live event over
+the wire to prove "delivering live events" before revocation. This was a
+genuine gap in the *test double*, not the production code.
+
+**Fix (test-support only, no production code changed)**:
+- `TestBusinessService::new_with_live_stream_gate(storage)` — a new
+  constructor (default `new()` unchanged, still fail-closed) that returns a
+  `TestBusinessService` wired with a `tokio::sync::Notify` gate, plus the
+  gate handle. When present, `stream()` sends one real, contract-valid
+  `BusinessEvent` immediately (proving live delivery), then awaits the
+  gate's `notified()` before sending a second event. All other test call
+  sites construct the plain `new()` double and are byte-for-byte unaffected
+  (verified: the 3 pre-existing stream tests —
+  `every_one_of_the_ten_business_streams_is_denied_without_its_specific_domain_authority`,
+  `an_authorized_stream_reaches_the_fail_closed_producer_not_a_permission_error`,
+  and `echo_stream_*` — still pass unchanged).
+- `tests/support/mod.rs::business_server_config_with_live_stream` — a sibling
+  of `business_server_config` that wires the gated double instead, returning
+  the `ServerConfig`, the `SharedCredentialSet` (for revocation, same
+  mechanism as the existing call-path test), and the gate.
+- `tests/business_rpc.rs::mid_subscription_revocation_denies_the_very_next_forwarded_event_not_the_prior_one`
+  — new test. Opens a real pipe, completes a Hello handshake as
+  `desktop_full_token` (authorized for `RuntimeStatus` + `FIXTURE_RUN_ID`),
+  subscribes, asserts the first real `BusinessEvent` (`sequence: 1`) is
+  actually delivered over the pipe, revokes `DESKTOP_PRINCIPAL_ID` via
+  `SharedCredentialSet::revoke` (the exact mechanism
+  `revoked_credential_denies_the_very_next_call_not_only_a_future_hello`
+  uses), releases the producer's second, already-queued event via the gate,
+  and asserts that very next forwarded item terminates the stream with
+  `RpcError::CredentialRevalidationFailed` — not the first, already-delivered
+  one.
+
+**Finding**: none requiring a production fix — the production revalidation
+logic behaved exactly as the reviewer and the doc comment claimed. The gap
+was purely in test coverage/fixture capability, now closed.
+
+### 10.1 Changed files (this addendum)
+
+| Path | Change and reason | Ownership compliant? |
+|---|---|---|
+| `crates/loki-ipc/tests/business_rpc.rs` | New test `mid_subscription_revocation_denies_the_very_next_forwarded_event_not_the_prior_one` + `start_business_server_with_live_stream` helper | yes |
+| `crates/loki-ipc/tests/support/business.rs` | New `TestBusinessService::new_with_live_stream_gate` constructor and gated real-event `stream()` branch; default `new()`/existing fail-closed behavior unchanged | yes |
+| `crates/loki-ipc/tests/support/mod.rs` | New `business_server_config_with_live_stream` helper | yes |
+
+No production (`crates/loki-ipc/src/*`) file changed.
+
+### 10.2 Verification performed (this addendum)
+
+| Command | Result | Evidence |
+|---|---|---|
+| `cargo fmt --all -- --check` | pass | exit 0, no diff |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass | exit 0, "Finished `dev` profile" |
+| `cargo test -p loki-ipc --test business_rpc mid_subscription_revocation -- --test-threads=1` | pass | 1/1 `ok` |
+| `cargo test -p loki-ipc -- --test-threads=1` | pass | 106 tests total `ok`, 0 failed (67 lib + 4 acl + 3 business_fixtures + 15 business_rpc [was 14, +1 new] + 4 deadline + 4 handshake + 6 malformed_frames + 3 streaming) |
+
+### 10.3 Outcome
+
+`ACCEPTED-pending-review` — the two independent reviewers (test-reviewer,
+security-reviewer) already found everything else clean; this addendum closes
+the one identified gap with a real, live-delivery-then-revocation test and
+requires only a final confirmation pass on this new test specifically.
 
 Only the orchestrator updates the task graph.

@@ -245,11 +245,39 @@ pub fn seeded_storage() -> Arc<Storage> {
 /// The Deliverable-8 test double.
 pub struct TestBusinessService {
     storage: Arc<Storage>,
+    /// Only set by [`TestBusinessService::new_with_live_stream_gate`] — a
+    /// real, ordered two-event `BusinessEvents` producer used by the
+    /// mid-subscription-revocation coverage test. Every other test double
+    /// instance leaves this `None` and stays fail-closed for all 10
+    /// streams, exactly like production `UnsupportedBusinessService` (see
+    /// the doc comment on `stream()` below).
+    live_stream_gate: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl TestBusinessService {
     pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            live_stream_gate: None,
+        }
+    }
+
+    /// A test double that, for exactly one live `BusinessEvents`
+    /// subscription, emits one real event immediately (proving live
+    /// delivery), then waits for the returned [`tokio::sync::Notify`] to be
+    /// notified before emitting a second real event — giving the calling
+    /// test a deterministic window to revoke the credential between the
+    /// first delivered event and the second forwarded one. Used only by
+    /// `mid_subscription_revocation_denies_the_very_next_forwarded_event`.
+    pub fn new_with_live_stream_gate(storage: Arc<Storage>) -> (Self, Arc<tokio::sync::Notify>) {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        (
+            Self {
+                storage,
+                live_stream_gate: Some(Arc::clone(&gate)),
+            },
+            gate,
+        )
     }
 
     /// Resolves the real `(principal_sid, grant_generation)` this test
@@ -383,7 +411,10 @@ impl BusinessService for TestBusinessService {
     fn call(&self, method: Method, context: BusinessRequestContext) -> BusinessCallFuture {
         let storage = Arc::clone(&self.storage);
         Box::pin(async move {
-            let service = TestBusinessService { storage };
+            let service = TestBusinessService {
+                storage,
+                live_stream_gate: None,
+            };
             let correlation_id = context.correlation_id.to_string();
             match method {
                 Method::RuntimeGetStatus(_) => {
@@ -589,15 +620,43 @@ impl BusinessService for TestBusinessService {
 
     fn stream(
         &self,
-        _params: loki_ipc::business::BusinessStreamParams,
-        _context: BusinessRequestContext,
-        _emitter: BusinessEventEmitter,
+        params: loki_ipc::business::BusinessStreamParams,
+        context: BusinessRequestContext,
+        emitter: BusinessEventEmitter,
     ) -> BusinessStreamFuture {
         // No real event producer exists anywhere in this workspace yet
         // (see `crate::business`'s top doc comment) — authorization is
         // fully provable without one; this test double stays fail-closed
         // for all 10 streams, exactly like production
-        // `UnsupportedBusinessService`.
+        // `UnsupportedBusinessService`, EXCEPT when constructed via
+        // `new_with_live_stream_gate`, which installs a real, deterministic
+        // two-event producer used only by the mid-subscription-revocation
+        // coverage test.
+        if let Some(gate) = self.live_stream_gate.clone() {
+            let correlation_id = context.correlation_id.to_string();
+            let source_runtime_id = "runtime:business-test".to_string();
+            return Box::pin(async move {
+                let make_event = |sequence: u64, state: &str| loki_ipc::business::BusinessEvent {
+                    stream: params.stream,
+                    sequence,
+                    correlation_id: correlation_id.clone(),
+                    occurred_at: "2026-08-30T00:00:00.000Z".to_string(),
+                    entity_id: params.entity_id.clone(),
+                    state: state.to_string(),
+                    source_runtime_id: source_runtime_id.clone(),
+                };
+                emitter.send(make_event(1, "heartbeat-1")).await?;
+                // Give the calling test a deterministic window to revoke
+                // the credential after observing the first, real, delivered
+                // event and before this second event is forwarded.
+                gate.notified().await;
+                emitter.send(make_event(2, "heartbeat-2")).await?;
+                Ok(loki_ipc::business::BusinessStreamSummary {
+                    items_sent: 2,
+                    last_sequence: Some(2),
+                })
+            });
+        }
         Box::pin(async {
             Err(RpcError::UnsupportedMethod {
                 method: "business_events".to_string(),

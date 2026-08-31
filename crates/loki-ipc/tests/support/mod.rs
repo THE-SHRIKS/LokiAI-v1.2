@@ -60,6 +60,29 @@ pub fn business_server_config(
     (config, resolver, storage)
 }
 
+/// Like [`business_server_config`], but wires
+/// [`business::TestBusinessService::new_with_live_stream_gate`] instead —
+/// used only by the mid-subscription-revocation coverage test, which needs
+/// a real, live `BusinessEvents` producer to revoke a credential against
+/// mid-delivery rather than only around a unary call. Returns the config,
+/// the `SharedCredentialSet` handle, and the producer's gate (notify it to
+/// release the second of the two real events the producer emits).
+pub fn business_server_config_with_live_stream(
+    pipe_name: &str,
+) -> (
+    ServerConfig,
+    business::SharedCredentialSet,
+    Arc<tokio::sync::Notify>,
+) {
+    let storage = business::seeded_storage();
+    let resolver = business::business_credential_set();
+    let (service, gate) = business::TestBusinessService::new_with_live_stream_gate(storage);
+    let config = ServerConfig::new(pipe_name.to_string(), shared_test_token())
+        .with_credential_resolver(Arc::new(resolver.clone()))
+        .with_business_service(Arc::new(service));
+    (config, resolver, gate)
+}
+
 /// A client config that authenticates with `token` instead of
 /// [`shared_test_token`] — used to select which fixture principal
 /// (`business::business_credential_set`) a business test connects as.

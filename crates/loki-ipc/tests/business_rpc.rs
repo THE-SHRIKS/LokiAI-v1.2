@@ -45,6 +45,23 @@ async fn start_business_server(
     (handle, resolver, storage)
 }
 
+async fn start_business_server_with_live_stream(
+    pipe_name: &str,
+) -> (
+    tokio::task::JoinHandle<()>,
+    support::business::SharedCredentialSet,
+    std::sync::Arc<tokio::sync::Notify>,
+) {
+    let (config, resolver, gate) = support::business_server_config_with_live_stream(pipe_name);
+    let mut server = Server::bind(config).expect("bind business server");
+    let handle = tokio::spawn(async move {
+        if let Ok(connection) = server.accept().await {
+            let _ = connection.handle().await;
+        }
+    });
+    (handle, resolver, gate)
+}
+
 async fn connect_as(pipe_name: &str, token: &str) -> Client {
     Client::connect(support::client_config_with_token(pipe_name, token))
         .await
@@ -564,6 +581,70 @@ async fn an_authorized_stream_reaches_the_fail_closed_producer_not_a_permission_
             loki_ipc::client::BusinessStreamEvent::Ended(Err(RpcError::UnsupportedMethod { .. }))
         ),
         "expected authorization to pass and then fail closed at the (absent) producer, got {event:?}"
+    );
+}
+
+/// Opens a real, live `BusinessEvents` subscription (`RuntimeStatus`),
+/// confirms the first real forwarded event is actually delivered over the
+/// pipe, revokes the credential mid-subscription (the same
+/// `SharedCredentialSet::revoke` mechanism
+/// `revoked_credential_denies_the_very_next_call_not_only_a_future_hello`
+/// uses), then releases the producer's second, already-queued event and
+/// confirms that very next forwarded item — not the first, already-
+/// delivered one — is denied with `CredentialRevalidationFailed`. Proves
+/// `execute_stream_method`'s `session_authority.revalidate()` inside the
+/// streaming `select!` loop (`crates/loki-ipc/src/server.rs`) actually
+/// re-checks authority against a live, already-open subscription, not only
+/// against a fresh call.
+#[tokio::test]
+async fn mid_subscription_revocation_denies_the_very_next_forwarded_event_not_the_prior_one() {
+    let pipe_name = support::unique_pipe_name("business-stream-mid-revoke");
+    let (_server, resolver, gate) = start_business_server_with_live_stream(&pipe_name).await;
+    let client = connect_as(&pipe_name, "desktop_full_token").await;
+
+    let params = BusinessStreamParams {
+        stream: BusinessStreamName::RuntimeStatus,
+        entity_id: FIXTURE_RUN_ID.to_string(),
+        after_sequence: None,
+        max_items: 10,
+    };
+    let mut handle = client
+        .business_stream(params, CALL_TIMEOUT)
+        .await
+        .expect("stream call sent");
+
+    // 1. The first real event is actually delivered over the pipe while
+    //    the credential is still valid.
+    let first = handle.recv().await.expect("stream ended, not dropped");
+    match first {
+        loki_ipc::client::BusinessStreamEvent::Item(event) => {
+            assert_eq!(event.stream, BusinessStreamName::RuntimeStatus);
+            assert_eq!(event.entity_id, FIXTURE_RUN_ID);
+            assert_eq!(event.sequence, 1);
+        }
+        other => panic!("expected the first live event to be delivered, got {other:?}"),
+    }
+
+    // 2. Revoke mid-subscription, using the exact same mechanism the
+    //    call-path revocation test uses.
+    resolver.revoke(DESKTOP_PRINCIPAL_ID);
+
+    // 3. Release the producer's second, already-queued event now that the
+    //    credential is revoked.
+    gate.notify_one();
+
+    // 4. The very next forwarded item must be denied, not silently
+    //    delivered and not silently dropped.
+    let second = handle.recv().await.expect("stream ended, not dropped");
+    assert!(
+        matches!(
+            second,
+            loki_ipc::client::BusinessStreamEvent::Ended(Err(
+                RpcError::CredentialRevalidationFailed
+            ))
+        ),
+        "expected the second forwarded item to be denied with \
+         CredentialRevalidationFailed after mid-subscription revocation, got {second:?}"
     );
 }
 
