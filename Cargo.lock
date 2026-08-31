@@ -348,6 +348,9 @@ dependencies = [
 name = "loki-ipc"
 version = "1.2.0"
 dependencies = [
+ "loki-acceptance-store",
+ "loki-mutation-contract",
+ "loki-storage",
  "serde",
  "serde_json",
  "tokio",

@@ -144,3 +144,43 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_Security_Authorization",
     "Win32_System_Threading",
 ] }
+
+# `P1-RPC-CONTRACT-001-R1` — read-only production dependency on the pure,
+# I/O-free mutation-contract crate, used only for `AcceptanceResult`/
+# `MutationRejection` structural mirroring in `src/business.rs`'s wire
+# types and the sole mapping module `src/mutation_mapping.rs`. This is
+# exactly the one new dependency edge that packet's §5 ownership section
+# authorizes — no other new dependency. Deliberately NOT a dependency on
+# `loki-runtime` or `loki-acceptance-store`: composing this transport
+# against a live `RuntimeServices` is `P1-RUNTIME-COMP-001`'s job (a
+# separate `INTEGRATION` node), not this crate's. `publish = false`
+# (inherited from the workspace default) since this crate is never
+# published independently. License: internal, same workspace, no external
+# license/maintenance/removal-cost concern (matches this crate's other
+# in-workspace path dependencies' convention, e.g.
+# `crates/loki-acceptance-store`'s own dependency on `loki-storage`).
+loki-mutation-contract = { path = "../loki-mutation-contract" }
+
+[dev-dependencies]
+# Test-only: builds this node's Deliverable 8 test double
+# (`tests/support`), which constructs `WireMutationOutcome` values via
+# `crate::mutation_mapping::map_acceptance_result` applied to a REAL
+# `loki_mutation_contract::AcceptanceResult` produced by calling
+# `loki_acceptance_store::accept_mutation` against a real in-memory
+# `loki_storage::Storage` — proving the wire-mapping tests exercise the
+# actual acceptance-transaction construction path, not a hand-rolled
+# fixture that could drift from real shapes. Dev-dependency only, per
+# `Docs/graph/tasks/P1-RPC-CONTRACT-001-R1.md` §5: "only from this node's
+# own test crate if genuinely needed, and only as a dev-dependency, never a
+# production dependency." `loki-runtime` already depends on `loki-ipc`
+# (`ComposedHost`, `crates/loki-runtime/src/host/compose.rs`) — a
+# `loki-runtime` dev-dependency here would create a build-graph cycle, so
+# this deliberately dev-depends on the narrower `loki-acceptance-store`/
+# `loki-storage` leaf crates instead, neither of which depends on
+# `loki-ipc`.
+loki-acceptance-store = { path = "../loki-acceptance-store" }
+# `test-support` enables `loki_storage::secure_memory::test_support`'s
+# disposable in-memory secure-arena bootstrap this crate's test fixtures
+# need to call `Storage::open_in_memory`, matching
+# `crates/loki-acceptance-store`'s own dev-dependency convention.
+loki-storage = { path = "../loki-storage", features = ["test-support"] }

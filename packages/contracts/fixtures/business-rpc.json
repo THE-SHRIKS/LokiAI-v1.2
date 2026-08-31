@@ -1,0 +1,524 @@
+{
+  "requests": [
+    {
+      "method": "runtime_get_status",
+      "params": {}
+    },
+    {
+      "method": "devices_list",
+      "params": {
+        "limit": 20,
+        "after_device_id": null
+      }
+    },
+    {
+      "method": "device_get",
+      "params": {
+        "device_id": "dev:fixture-1"
+      }
+    },
+    {
+      "method": "device_get_health",
+      "params": {
+        "device_id": "dev:fixture-1"
+      }
+    },
+    {
+      "method": "device_read_logs",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "limit": 20,
+        "cursor": null
+      }
+    },
+    {
+      "method": "device_query_telemetry",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "limit": 20,
+        "cursor": null,
+        "signal_ids": ["temp_c", "rssi_dbm"]
+      }
+    },
+    {
+      "method": "incidents_list",
+      "params": {
+        "limit": 20,
+        "cursor": null
+      }
+    },
+    {
+      "method": "incident_get",
+      "params": {
+        "incident_id": "incident-1"
+      }
+    },
+    {
+      "method": "job_get",
+      "params": {
+        "job_id": "job-1"
+      }
+    },
+    {
+      "method": "agent_run_register",
+      "params": {
+        "parent_run_id": null,
+        "parameters_digest": "params-digest-fixture-01",
+        "idempotency_key": "idem-agent-register-1"
+      }
+    },
+    {
+      "method": "agent_run_update",
+      "params": {
+        "run_id": "run-1",
+        "phase": "working",
+        "summary": "still going",
+        "parameters_digest": "params-digest-fixture-02",
+        "idempotency_key": "idem-agent-update-1"
+      }
+    },
+    {
+      "method": "work_intent_acknowledge",
+      "params": {
+        "work_intent_id": "wi-1",
+        "run_id": "run-1",
+        "parameters_digest": "params-digest-fixture-03",
+        "idempotency_key": "idem-wi-ack-1"
+      }
+    },
+    {
+      "method": "health_check_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "idempotency_key": "idem-health-1"
+      }
+    },
+    {
+      "method": "preflight_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "idempotency_key": "idem-preflight-1"
+      }
+    },
+    {
+      "method": "job_cancel",
+      "params": {
+        "job_id": "job-1",
+        "idempotency_key": "idem-cancel-1"
+      }
+    },
+    {
+      "method": "build_request",
+      "params": {
+        "source_snapshot_id": "snap-1",
+        "target_id": "target-1",
+        "recipe_id": "recipe-1",
+        "parameters_digest": "params-digest-fixture-04",
+        "idempotency_key": "idem-build-1",
+        "approval_reference": {
+          "approval_id": "apr-fixture-2",
+          "bound_request_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "expires_at_ms": 4102444800000
+        }
+      }
+    },
+    {
+      "method": "restart_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "parameters_digest": "params-digest-fixture-05",
+        "idempotency_key": "idem-restart-1",
+        "approval_reference": {
+          "approval_id": "apr-fixture-1",
+          "bound_request_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "expires_at_ms": 4102444800000
+        }
+      }
+    },
+    {
+      "method": "flash_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "artifact_id": "artifact-1",
+        "artifact_digest": "0123456789abcdef0123456789abcdef",
+        "parameters_digest": "params-digest-fixture-06",
+        "idempotency_key": "idem-flash-1",
+        "approval_reference": {
+          "approval_id": "apr-fixture-3",
+          "bound_request_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "expires_at_ms": 4102444800000
+        }
+      }
+    },
+    {
+      "method": "test_on_device_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "test_suite_id": "suite-1",
+        "idempotency_key": "idem-test-1"
+      }
+    },
+    {
+      "method": "deployment_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "artifact_id": "artifact-1",
+        "artifact_digest": "0123456789abcdef0123456789abcdef",
+        "verification_plan_id": "plan-1",
+        "rollback_plan_id": "rollback-1",
+        "idempotency_key": "idem-deploy-1"
+      }
+    },
+    {
+      "method": "rollback_request",
+      "params": {
+        "device_id": "dev:fixture-1",
+        "deployment_id": "deploy-1",
+        "recovery_policy_id": "policy-1",
+        "idempotency_key": "idem-rollback-1"
+      }
+    },
+    {
+      "method": "approval_grant",
+      "params": {
+        "approval_id": "apr-fixture-1",
+        "bound_request_digest": "0123456789abcdef0123456789abcdef",
+        "idempotency_key": "idem-grant-1"
+      }
+    },
+    {
+      "method": "approval_deny",
+      "params": {
+        "approval_id": "apr-fixture-1",
+        "bound_request_digest": "0123456789abcdef0123456789abcdef",
+        "reason": "not required",
+        "idempotency_key": "idem-deny-1"
+      }
+    }
+  ],
+  "results": [
+    {
+      "kind": "runtime_status",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-30T00:00:00.000Z",
+        "correlation_id": "00000000-0000-0000-0000-000000000001"
+      },
+      "storage": {
+        "kind": "ready"
+      },
+      "registered_device_count": 3,
+      "mutations": "available"
+    },
+    {
+      "kind": "devices_list",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-30T00:00:00.000Z",
+        "correlation_id": "00000000-0000-0000-0000-000000000002"
+      },
+      "devices": [
+        {
+          "device_id": "dev:fixture-1",
+          "connector_id": "connector:fixture",
+          "connector_version": "1.0.0",
+          "family": "test-family",
+          "board_identity": "board-rev-a",
+          "runtime_id": "runtime-1",
+          "support_tier": "custom",
+          "lifecycle_state": "ready",
+          "last_seen_at": "2026-08-30T00:00:00.000Z"
+        }
+      ],
+      "next_after_device_id": null,
+      "total_registered_count": 1
+    },
+    {
+      "kind": "device_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-30T00:00:00.000Z",
+        "correlation_id": "00000000-0000-0000-0000-000000000003"
+      },
+      "device": null
+    },
+    {
+      "kind": "device_health",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-30T00:00:00.000Z",
+        "correlation_id": "00000000-0000-0000-0000-000000000004"
+      },
+      "device_id": "dev:fixture-1",
+      "lifecycle_state": "ready",
+      "health": {
+        "kind": "not_observed"
+      }
+    },
+    {
+      "kind": "mutation",
+      "method": "restart",
+      "correlation_id": "00000000-0000-0000-0000-000000000005",
+      "target_id": "dev:fixture-1",
+      "outcome": {
+        "outcome": "approval_required",
+        "approval_id": "apr-fixture-1",
+        "bound_request_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "expires_at_ms": 4102444800000
+      }
+    },
+    {
+      "kind": "mutation",
+      "method": "agent_run_register",
+      "correlation_id": "00000000-0000-0000-0000-000000000006",
+      "target_id": "agent-run:root",
+      "outcome": {
+        "outcome": "accepted",
+        "job_id": "job-1",
+        "correlation_id": "corr-1",
+        "accepted_at_ms": 1
+      }
+    },
+    {
+      "kind": "mutation",
+      "method": "agent_run_update",
+      "correlation_id": "00000000-0000-0000-0000-000000000007",
+      "target_id": "run-1",
+      "outcome": {
+        "outcome": "replayed_identical_accepted",
+        "job_id": "job-1",
+        "correlation_id": "corr-1",
+        "accepted_at_ms": 1
+      }
+    },
+    {
+      "kind": "mutation",
+      "method": "work_intent_acknowledge",
+      "correlation_id": "00000000-0000-0000-0000-000000000008",
+      "target_id": "wi-1",
+      "outcome": {
+        "outcome": "rejected",
+        "rejection": {
+          "kind": "grant_invalid",
+          "reason": "no matching grant"
+        }
+      }
+    }
+  ],
+  "streams": [
+    {
+      "stream": "runtime_status",
+      "entity_id": "runtime-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "device_projection",
+      "entity_id": "dev:fixture-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "device_health",
+      "entity_id": "dev:fixture-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "telemetry",
+      "entity_id": "dev:fixture-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "logs",
+      "entity_id": "dev:fixture-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "incidents",
+      "entity_id": "incident-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "jobs",
+      "entity_id": "job-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "approvals",
+      "entity_id": "apr-fixture-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "notifications",
+      "entity_id": "notif-1",
+      "after_sequence": null,
+      "max_items": 10
+    },
+    {
+      "stream": "work_intents",
+      "entity_id": "wi-1",
+      "after_sequence": null,
+      "max_items": 10
+    }
+  ],
+  "events": [
+    {
+      "stream": "jobs",
+      "sequence": 1,
+      "correlation_id": "00000000-0000-0000-0000-000000000009",
+      "occurred_at": "2026-08-30T00:00:00.000Z",
+      "entity_id": "job-1",
+      "state": "executing",
+      "source_runtime_id": "runtime-1"
+    }
+  ],
+  "principals": [
+    {
+      "kind": "desktop_installation",
+      "principal_id": "desktop-1",
+      "authorized_entity_ids": ["dev:fixture-1", "job-1"],
+      "authority": ["read_devices", "read_jobs", "subscribe"]
+    },
+    {
+      "kind": "agent_connection",
+      "principal_id": "agent-1",
+      "authorized_entity_ids": [],
+      "authority": ["manage_agent_runs"]
+    }
+  ],
+  "negative": [
+    {
+      "description": "generic invoke method is not a real method",
+      "kind": "request",
+      "value": {
+        "method": "invoke",
+        "params": {
+          "command": "flash"
+        }
+      }
+    },
+    {
+      "description": "extra top-level field on a request's params is rejected (deny_unknown_fields parity)",
+      "kind": "request",
+      "value": {
+        "method": "restart_request",
+        "params": {
+          "device_id": "dev:fixture-1",
+          "parameters_digest": "params-digest-fixture-05",
+          "idempotency_key": "idem-restart-1",
+          "approval_reference": null,
+          "unexpected_extra_field": "should be rejected"
+        }
+      }
+    },
+    {
+      "description": "unsafe device_id characters are rejected",
+      "kind": "request",
+      "value": {
+        "method": "restart_request",
+        "params": {
+          "device_id": "dev/escape",
+          "parameters_digest": "params-digest-fixture-05",
+          "idempotency_key": "idem-restart-1",
+          "approval_reference": null
+        }
+      }
+    },
+    {
+      "description": "malformed artifact digest (not the shared alnum/_/- charset) is rejected",
+      "kind": "request",
+      "value": {
+        "method": "flash_request",
+        "params": {
+          "device_id": "dev:fixture-1",
+          "artifact_id": "artifact-1",
+          "artifact_digest": "not+base64url++++",
+          "parameters_digest": "params-digest-fixture-06",
+          "idempotency_key": "idem-flash-1",
+          "approval_reference": null
+        }
+      }
+    },
+    {
+      "description": "oversized business stream max_items is rejected",
+      "kind": "stream",
+      "value": {
+        "stream": "telemetry",
+        "entity_id": "dev:fixture-1",
+        "after_sequence": null,
+        "max_items": 1025
+      }
+    },
+    {
+      "description": "a workspace_id field must never be accepted on a business stream request (ADR-0006 Amendment 1)",
+      "kind": "stream",
+      "value": {
+        "stream": "telemetry",
+        "workspace_id": "workspace-1",
+        "entity_id": "dev:fixture-1",
+        "after_sequence": null,
+        "max_items": 10
+      }
+    },
+    {
+      "description": "extra top-level field on a mutation result is rejected (deny_unknown_fields parity)",
+      "kind": "result",
+      "value": {
+        "kind": "mutation",
+        "method": "restart",
+        "correlation_id": "00000000-0000-0000-0000-000000000005",
+        "target_id": "dev:fixture-1",
+        "outcome": {
+          "outcome": "accepted",
+          "job_id": "job-1",
+          "correlation_id": "corr-1",
+          "accepted_at_ms": 1
+        },
+        "unexpected_extra_field": "should be rejected"
+      }
+    },
+    {
+      "description": "a non-ISO-UTC observed_at timestamp is rejected",
+      "kind": "event",
+      "value": {
+        "stream": "runtime_status",
+        "sequence": 1,
+        "correlation_id": "00000000-0000-0000-0000-00000000000a",
+        "occurred_at": "2026-08-24T12:00:00+05:30",
+        "entity_id": "runtime-1",
+        "state": "connected",
+        "source_runtime_id": "runtime-1"
+      }
+    },
+    {
+      "description": "oversized business event state text is rejected",
+      "kind": "event",
+      "value": {
+        "stream": "runtime_status",
+        "sequence": 1,
+        "correlation_id": "00000000-0000-0000-0000-00000000000b",
+        "occurred_at": "2026-08-30T00:00:00.000Z",
+        "entity_id": "runtime-1",
+        "state": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "source_runtime_id": "runtime-1"
+      }
+    },
+    {
+      "description": "a workspace_id field must never be accepted on an authenticated principal (ADR-0006 Amendment 1)",
+      "kind": "principal",
+      "value": {
+        "kind": "agent_connection",
+        "principal_id": "agent-1",
+        "workspace_id": "workspace-1",
+        "authorized_entity_ids": ["device-1"],
+        "authority": ["root"]
+      }
+    }
+  ]
+}

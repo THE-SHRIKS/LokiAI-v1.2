@@ -1,5 +1,5 @@
-//! Named-pipe RPC client: connect, handshake, and typed `ping`/`echo_stream`
-//! calls with per-call deadlines and cancellation.
+//! Named-pipe RPC client: connect, handshake, and typed `ping`/`echo_stream`/
+//! business calls and streams with per-call deadlines and cancellation.
 //!
 //! Reads and writes are each owned by one dedicated background task (a
 //! writer task draining an outgoing queue, and a reader task demultiplexing
@@ -18,12 +18,16 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::auth::AuthToken;
+use crate::business::{
+    AuthenticatedPrincipal, BusinessEvent, BusinessRpcResult, BusinessStreamParams,
+    BusinessStreamSummary,
+};
 use crate::frame::{DEFAULT_MAX_FRAME_BYTES, FrameError, read_frame, write_frame};
 use crate::protocol::{
     CallOutcome, EchoStreamItem, EchoStreamParams, EchoStreamSummary, HandshakeRejectReason,
     Method, MethodResult, PROTOCOL_VERSION, PingParams, PongResult, ProtocolVersion, RpcError,
     StreamItemPayload, StreamMethod, StreamOutcome, StreamSummary, WireMessage,
-    baseline_capabilities,
+    baseline_capabilities, business_result_matches_method,
 };
 use crate::time;
 
@@ -132,6 +136,10 @@ pub enum CallError {
     /// The server returned a named RPC failure (including a normal,
     /// server-acknowledged `DeadlineExceeded`/`Cancelled`).
     Rpc(RpcError),
+    /// The server's response did not have the shape this method expects
+    /// (e.g. a `Business` result to a `ping` call, or a result that
+    /// doesn't match the requested method/entity identity).
+    ProtocolMismatch,
 }
 
 impl std::fmt::Display for CallError {
@@ -143,6 +151,7 @@ impl std::fmt::Display for CallError {
                 "no response from server within the deadline grace period"
             ),
             CallError::Rpc(err) => write!(f, "{err}"),
+            CallError::ProtocolMismatch => write!(f, "server returned a mismatched typed result"),
         }
     }
 }
@@ -151,7 +160,13 @@ impl std::error::Error for CallError {}
 
 enum PendingCall {
     Unary(oneshot::Sender<CallOutcome>),
-    Stream(mpsc::Sender<StreamEvent>),
+    EchoStream(mpsc::Sender<StreamEvent>),
+    BusinessStream {
+        sender: mpsc::Sender<BusinessStreamEvent>,
+        expected: BusinessStreamParams,
+        items_seen: u16,
+        last_sequence: Option<u64>,
+    },
 }
 
 type PendingCalls = Arc<StdMutex<HashMap<Uuid, PendingCall>>>;
@@ -163,10 +178,31 @@ pub enum StreamEvent {
     Ended(Result<EchoStreamSummary, RpcError>),
 }
 
+#[derive(Debug)]
+pub enum BusinessStreamEvent {
+    Item(BusinessEvent),
+    Ended(Result<BusinessStreamSummary, RpcError>),
+}
+
 /// A handle to an in-flight streaming call's incoming events.
 pub struct StreamHandle {
     correlation_id: Uuid,
     rx: mpsc::Receiver<StreamEvent>,
+}
+
+pub struct BusinessStreamHandle {
+    correlation_id: Uuid,
+    rx: mpsc::Receiver<BusinessStreamEvent>,
+}
+
+impl BusinessStreamHandle {
+    pub fn correlation_id(&self) -> Uuid {
+        self.correlation_id
+    }
+
+    pub async fn recv(&mut self) -> Option<BusinessStreamEvent> {
+        self.rx.recv().await
+    }
 }
 
 impl StreamHandle {
@@ -192,6 +228,7 @@ pub struct Client {
     reader_task: JoinHandle<()>,
     negotiated_capabilities: std::collections::BTreeSet<String>,
     session_id: Uuid,
+    authenticated_principal: Option<AuthenticatedPrincipal>,
     stream_event_capacity: usize,
 }
 
@@ -205,6 +242,7 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("session_id", &self.session_id)
             .field("negotiated_capabilities", &self.negotiated_capabilities)
+            .field("authenticated_principal", &self.authenticated_principal)
             .finish_non_exhaustive()
     }
 }
@@ -230,6 +268,10 @@ impl Client {
 
     pub fn session_id(&self) -> Uuid {
         self.session_id
+    }
+
+    pub fn authenticated_principal(&self) -> Option<&AuthenticatedPrincipal> {
+        self.authenticated_principal.as_ref()
     }
 
     /// Opens the pipe (retrying `ERROR_PIPE_BUSY` up to
@@ -262,12 +304,13 @@ impl Client {
             .await
             .map_err(ConnectError::Frame)?;
 
-        let (negotiated_capabilities, session_id) =
+        let (negotiated_capabilities, session_id, authenticated_principal) =
             match read_frame(&mut reader, config.max_frame_bytes).await {
                 Ok(Some(WireMessage::HelloAck {
                     negotiated_capabilities,
                     session_id,
-                })) => (negotiated_capabilities, session_id),
+                    principal,
+                })) => (negotiated_capabilities, session_id, principal),
                 Ok(Some(WireMessage::HelloReject {
                     reason,
                     server_protocol_version,
@@ -281,7 +324,13 @@ impl Client {
                 Ok(None) => return Err(ConnectError::ConnectionClosedDuringHandshake),
                 Err(err) => return Err(ConnectError::Frame(err)),
             };
-        let _ = server_protocol_version; // available for future compatibility decisions
+        let legal_capabilities = crate::protocol::capabilities_for_version(config.protocol_version);
+        if !negotiated_capabilities.is_subset(&config.capabilities)
+            || !negotiated_capabilities.is_subset(&legal_capabilities)
+        {
+            return Err(ConnectError::UnexpectedMessage);
+        }
+        let _ = server_protocol_version;
 
         let pending: PendingCalls = Arc::new(StdMutex::new(HashMap::new()));
         let (outgoing_tx, mut outgoing_rx) =
@@ -308,6 +357,7 @@ impl Client {
             reader_task,
             negotiated_capabilities,
             session_id,
+            authenticated_principal,
             stream_event_capacity: config.stream_event_capacity,
         })
     }
@@ -342,6 +392,7 @@ impl Client {
             Ok(Ok(CallOutcome::Ok {
                 result: MethodResult::Ping(pong),
             })) => Ok(pong),
+            Ok(Ok(CallOutcome::Ok { .. })) => Err(CallError::ProtocolMismatch),
             Ok(Ok(CallOutcome::Err { error })) => Err(CallError::Rpc(error)),
             Ok(Err(_recv_error)) => Err(CallError::ConnectionClosed),
             Err(_elapsed) => {
@@ -365,7 +416,7 @@ impl Client {
         self.pending
             .lock()
             .unwrap()
-            .insert(correlation_id, PendingCall::Stream(tx));
+            .insert(correlation_id, PendingCall::EchoStream(tx));
 
         let call = WireMessage::CallStream {
             correlation_id,
@@ -381,6 +432,81 @@ impl Client {
         }
 
         Ok(StreamHandle { correlation_id, rx })
+    }
+
+    /// Calls any business unary [`Method`], validating the response's shape
+    /// against `method` before returning it (never hands a caller a
+    /// mismatched typed result — see `crate::protocol::business_result_matches_method`).
+    pub async fn business_call(
+        &self,
+        method: Method,
+        timeout: Duration,
+    ) -> Result<BusinessRpcResult, CallError> {
+        if matches!(method, Method::Ping(_)) {
+            return Err(CallError::ProtocolMismatch);
+        }
+        let correlation_id = Uuid::new_v4();
+        let (tx, rx) = oneshot::channel();
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(correlation_id, PendingCall::Unary(tx));
+        let call = WireMessage::Call {
+            correlation_id,
+            deadline_unix_millis: time::deadline_from_timeout(timeout),
+            method: method.clone(),
+        };
+        if self.outgoing_tx.send(call).await.is_err() {
+            self.pending.lock().unwrap().remove(&correlation_id);
+            return Err(CallError::ConnectionClosed);
+        }
+        match tokio::time::timeout(timeout + CLIENT_DEADLINE_GRACE, rx).await {
+            Ok(Ok(CallOutcome::Ok {
+                result: MethodResult::Business(result),
+            })) if result.validate_contract()
+                && result.correlation_id() == correlation_id.to_string()
+                && business_result_matches_method(&method, &result) =>
+            {
+                Ok(result)
+            }
+            Ok(Ok(CallOutcome::Ok { .. })) => Err(CallError::ProtocolMismatch),
+            Ok(Ok(CallOutcome::Err { error })) => Err(CallError::Rpc(error)),
+            Ok(Err(_)) => Err(CallError::ConnectionClosed),
+            Err(_) => {
+                self.pending.lock().unwrap().remove(&correlation_id);
+                Err(CallError::ClientTimedOut)
+            }
+        }
+    }
+
+    /// Calls `business_events`, returning a [`BusinessStreamHandle`] to
+    /// consume its events.
+    pub async fn business_stream(
+        &self,
+        params: BusinessStreamParams,
+        timeout: Duration,
+    ) -> Result<BusinessStreamHandle, CallError> {
+        let correlation_id = Uuid::new_v4();
+        let (tx, rx) = mpsc::channel(self.stream_event_capacity);
+        self.pending.lock().unwrap().insert(
+            correlation_id,
+            PendingCall::BusinessStream {
+                sender: tx,
+                expected: params.clone(),
+                items_seen: 0,
+                last_sequence: params.after_sequence,
+            },
+        );
+        let call = WireMessage::CallStream {
+            correlation_id,
+            deadline_unix_millis: time::deadline_from_timeout(timeout),
+            method: StreamMethod::BusinessEvents(params),
+        };
+        if self.outgoing_tx.send(call).await.is_err() {
+            self.pending.lock().unwrap().remove(&correlation_id);
+            return Err(CallError::ConnectionClosed);
+        }
+        Ok(BusinessStreamHandle { correlation_id, rx })
     }
 
     /// Asks the server to stop an in-flight call early. Best-effort and
@@ -430,32 +556,99 @@ where
                 correlation_id,
                 item,
                 ..
-            })) => {
-                let sender = {
-                    let guard = pending.lock().unwrap();
-                    match guard.get(&correlation_id) {
-                        Some(PendingCall::Stream(tx)) => Some(tx.clone()),
-                        _ => None,
+            })) => match item {
+                StreamItemPayload::EchoStream(echo_item) => {
+                    let sender = {
+                        let guard = pending.lock().unwrap();
+                        match guard.get(&correlation_id) {
+                            Some(PendingCall::EchoStream(tx)) => Some(tx.clone()),
+                            _ => None,
+                        }
+                    };
+                    if let Some(tx) = sender {
+                        let _ = tx.send(StreamEvent::Item(echo_item)).await;
                     }
-                };
-                if let Some(tx) = sender {
-                    let StreamItemPayload::EchoStream(echo_item) = item;
-                    let _ = tx.send(StreamEvent::Item(echo_item)).await;
                 }
-            }
+                StreamItemPayload::BusinessEvent(event) => {
+                    let delivery = {
+                        let mut guard = pending.lock().unwrap();
+                        match guard.get_mut(&correlation_id) {
+                            Some(PendingCall::BusinessStream {
+                                sender,
+                                expected,
+                                items_seen,
+                                last_sequence,
+                            }) => {
+                                let valid = event.validate_contract()
+                                    && event.stream == expected.stream
+                                    && event.entity_id == expected.entity_id
+                                    && event.correlation_id == correlation_id.to_string()
+                                    && *items_seen < expected.max_items
+                                    && last_sequence
+                                        .as_ref()
+                                        .is_none_or(|previous| event.sequence > *previous);
+                                if valid {
+                                    *items_seen += 1;
+                                    *last_sequence = Some(event.sequence);
+                                }
+                                Some((sender.clone(), valid))
+                            }
+                            _ => None,
+                        }
+                    };
+                    if let Some((sender, true)) = delivery {
+                        let _ = sender.send(BusinessStreamEvent::Item(event)).await;
+                    } else if let Some((sender, false)) = delivery {
+                        pending.lock().unwrap().remove(&correlation_id);
+                        let _ = sender
+                            .send(BusinessStreamEvent::Ended(Err(RpcError::Internal {
+                                message: "server emitted a mismatched business event".to_string(),
+                            })))
+                            .await;
+                    }
+                }
+            },
             Ok(Some(WireMessage::StreamEnd {
                 correlation_id,
                 outcome,
             })) => {
                 let waiter = pending.lock().unwrap().remove(&correlation_id);
-                if let Some(PendingCall::Stream(tx)) = waiter {
-                    let result = match outcome {
-                        StreamOutcome::Ok {
-                            summary: StreamSummary::EchoStream(summary),
-                        } => Ok(summary),
-                        StreamOutcome::Err { error } => Err(error),
-                    };
-                    let _ = tx.send(StreamEvent::Ended(result)).await;
+                match waiter {
+                    Some(PendingCall::EchoStream(tx)) => {
+                        let result = match outcome {
+                            StreamOutcome::Ok {
+                                summary: StreamSummary::EchoStream(summary),
+                            } => Ok(summary),
+                            StreamOutcome::Ok { .. } => Err(RpcError::Internal {
+                                message: "server returned a mismatched stream summary".to_string(),
+                            }),
+                            StreamOutcome::Err { error } => Err(error),
+                        };
+                        let _ = tx.send(StreamEvent::Ended(result)).await;
+                    }
+                    Some(PendingCall::BusinessStream {
+                        sender,
+                        expected,
+                        items_seen,
+                        last_sequence,
+                    }) => {
+                        let result = match outcome {
+                            StreamOutcome::Ok {
+                                summary: StreamSummary::BusinessEvents(summary),
+                            } if summary.validate_contract(expected.max_items)
+                                && summary.items_sent == items_seen
+                                && summary.last_sequence == last_sequence =>
+                            {
+                                Ok(summary)
+                            }
+                            StreamOutcome::Ok { .. } => Err(RpcError::Internal {
+                                message: "server returned a mismatched stream summary".to_string(),
+                            }),
+                            StreamOutcome::Err { error } => Err(error),
+                        };
+                        let _ = sender.send(BusinessStreamEvent::Ended(result)).await;
+                    }
+                    _ => {}
                 }
             }
             Ok(Some(_other)) => {
