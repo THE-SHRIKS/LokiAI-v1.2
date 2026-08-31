@@ -1,21 +1,30 @@
-//! LokiAI Main v1.2 — authenticated local IPC transport (`RUN-002`).
+//! LokiAI Main v1.2 — authenticated local IPC transport (`RUN-002`,
+//! extended by `P1-RPC-CONTRACT-001-R1`).
 //!
 //! An authenticated Windows named-pipe RPC transport: a version/capability
-//! handshake, per-call deadlines and cancellation, and server-to-client
-//! streaming with real backpressure. This crate is **pure transport** — see
-//! `Docs/graph/tasks/RUN-002.md` §1: "No business logic — pure transport +
-//! handshake + framing." It ships exactly one proof-of-life RPC method
-//! (`ping`) and one proof-of-life streaming method (`echo_stream`) so the
-//! pipe is demonstrably exercised end-to-end; real business methods are a
-//! later node's job (see [`protocol::Method`]/[`protocol::StreamMethod`]'s
-//! docs for where those land).
+//! handshake, per-call deadlines and cancellation, server-to-client
+//! streaming with real backpressure ([`RUN-002`]'s `ping`/`echo_stream`
+//! proof-of-life pair), and a closed, typed, authenticated business RPC
+//! vocabulary ([`business`]/[`protocol::Method`]/[`protocol::StreamMethod`]
+//! — `P1-RPC-CONTRACT-001-R1`). This crate remains **transport, not
+//! mutation authority**: every business mutation result this crate's wire
+//! types can represent is a 1:1 mapping (via [`mutation_mapping`]) of a
+//! value `loki-mutation-contract`'s closed, private-constructor
+//! `AcceptanceResult`/`MutationRejection` types already produced elsewhere
+//! (`ADR-0006`/REV-004 — "IPC cannot be the mutation-acceptance boundary,
+//! only a transport in front of one"). No re-implementation of atomic
+//! mutation acceptance, approval consumption, idempotency, or replay logic
+//! exists anywhere in this crate.
 //!
 //! ## Scope boundary
 //!
-//! This crate depends on `loki-runtime` for nothing (it has no IPC surface
-//! of its own yet — `RUN-001` deliberately excluded that). `loki-runtime`
-//! does not depend on this crate either; wiring loki-ipc into the runtime's
-//! actual process is `RUN-003`'s job, per the task packet.
+//! This crate has a read-only production dependency on
+//! `loki-mutation-contract` (a pure, I/O-free contract crate) for its
+//! result-vocabulary structural fidelity — see [`business`]'s and
+//! [`mutation_mapping`]'s doc comments. It has **no** production dependency
+//! on `loki-runtime` or `loki-acceptance-store`: composing this transport
+//! against a live `RuntimeServices`-backed [`server::BusinessService`] is
+//! `P1-RUNTIME-COMP-001`'s job, a separate `INTEGRATION` node.
 //!
 //! ## Connection-level authentication
 //!
@@ -42,16 +51,22 @@
 //!
 //! - [`protocol`]: wire message types, protocol version/capabilities, RPC
 //!   method/result types.
+//! - [`business`]: the closed business-RPC vocabulary (params, principals,
+//!   authorities, read/mutation result wire types).
+//! - [`mutation_mapping`]: the sole place this crate constructs a mutation
+//!   wire result, from a real `loki_mutation_contract::AcceptanceResult`.
 //! - [`time`]: UTC-millisecond deadline helpers (no new date/time crate).
 //! - [`frame`]: length-prefixed frame codec (bounded size, malformed/
 //!   truncated handling).
 //! - [`acl`]: Windows named-pipe security-descriptor construction.
-//! - [`auth`]: shared-secret token type and handshake accept/reject
-//!   decision logic (pure — no I/O).
+//! - [`auth`]: shared-secret token type, handshake accept/reject decision
+//!   logic, and dynamic per-credential principal resolution/revalidation
+//!   (pure — no I/O).
 //! - [`server`]: named-pipe server, per-connection handshake + dispatch,
-//!   deadlines/cancellation, streaming with backpressure.
-//! - [`client`]: named-pipe client, handshake, typed `ping`/`echo_stream`
-//!   calls.
+//!   deadlines/cancellation, streaming with backpressure, authorization,
+//!   and entity-identity coupling.
+//! - [`client`]: named-pipe client, handshake, typed `ping`/`echo_stream`/
+//!   business calls and streams.
 
 #[cfg(not(windows))]
 compile_error!(
@@ -63,16 +78,19 @@ compile_error!(
      dependency-graph edge and a code path that is not this node's job."
 );
 
-// `protocol`/`frame`/`time`/`auth` hold no Windows-specific code (pure data
-// types and generic-over-`AsyncRead`/`AsyncWrite` logic) and are left
-// ungated. `acl`/`server`/`client` use `tokio::net::windows::named_pipe`
-// and `windows-sys` directly, so they are gated to `cfg(windows)`
-// explicitly — belt-and-suspenders with this file's top-level
-// `compile_error!`, so a non-Windows build fails with exactly that one
-// clear message instead of a cascade of "module not found"/unresolved-
-// import errors from code that could never have compiled there anyway.
+// `protocol`/`frame`/`time`/`auth`/`business`/`mutation_mapping` hold no
+// Windows-specific code (pure data types and generic-over-`AsyncRead`/
+// `AsyncWrite` logic) and are left ungated. `acl`/`server`/`client` use
+// `tokio::net::windows::named_pipe` and `windows-sys` directly, so they are
+// gated to `cfg(windows)` explicitly — belt-and-suspenders with this file's
+// top-level `compile_error!`, so a non-Windows build fails with exactly
+// that one clear message instead of a cascade of "module not found"/
+// unresolved-import errors from code that could never have compiled there
+// anyway.
 pub mod auth;
+pub mod business;
 pub mod frame;
+pub mod mutation_mapping;
 pub mod protocol;
 pub mod time;
 
@@ -84,7 +102,12 @@ pub mod client;
 pub mod server;
 
 #[cfg(windows)]
-pub use client::{CallError, Client, ClientConfig, ConnectError, StreamHandle};
+pub use client::{
+    BusinessStreamEvent, BusinessStreamHandle, CallError, Client, ClientConfig, ConnectError,
+    StreamHandle,
+};
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 #[cfg(windows)]
-pub use server::{Server, ServerConfig};
+pub use server::{
+    BusinessEventEmitter, BusinessRequestContext, BusinessService, Server, ServerConfig,
+};

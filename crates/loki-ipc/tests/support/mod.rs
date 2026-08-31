@@ -5,6 +5,9 @@
 
 #![allow(dead_code)] // not every helper is used by every test file
 
+pub mod business;
+
+use std::sync::Arc;
 use std::time::Duration;
 
 use loki_ipc::auth::AuthToken;
@@ -30,6 +33,40 @@ pub fn client_config(pipe_name: &str) -> ClientConfig {
     ClientConfig::new(
         pipe_name.to_string(),
         shared_test_token(),
+        "loki-ipc-test-client",
+    )
+}
+
+/// A server config wired to [`business::TestBusinessService`] and the
+/// standard business credential set, over a real seeded `Storage`. Returns
+/// the config, the `SharedCredentialSet` handle (for post-handshake revoke
+/// tests), and the same `Arc<Storage>` the service uses (so a test can seed
+/// a real, granted `local_approvals` row before exercising the accepted
+/// approval-gated path).
+pub fn business_server_config(
+    pipe_name: &str,
+) -> (
+    ServerConfig,
+    business::SharedCredentialSet,
+    Arc<loki_storage::Storage>,
+) {
+    let storage = business::seeded_storage();
+    let resolver = business::business_credential_set();
+    let config = ServerConfig::new(pipe_name.to_string(), shared_test_token())
+        .with_credential_resolver(Arc::new(resolver.clone()))
+        .with_business_service(Arc::new(business::TestBusinessService::new(Arc::clone(
+            &storage,
+        ))));
+    (config, resolver, storage)
+}
+
+/// A client config that authenticates with `token` instead of
+/// [`shared_test_token`] — used to select which fixture principal
+/// (`business::business_credential_set`) a business test connects as.
+pub fn client_config_with_token(pipe_name: &str, token: &str) -> ClientConfig {
+    ClientConfig::new(
+        pipe_name.to_string(),
+        AuthToken::new(token),
         "loki-ipc-test-client",
     )
 }
