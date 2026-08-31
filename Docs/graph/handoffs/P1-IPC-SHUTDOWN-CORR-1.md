@@ -259,3 +259,306 @@ Mandatory verification not run:
   for the orchestrator's own risk judgment.
 - Only the orchestrator updates the task graph; this section records
   proposals only.
+
+## 10. Follow-up correction — independent-review findings closed
+
+Result: `ACCEPTED-pending-review` (both findings below are fixed, re-verified
+through the real `ComposedHost::run` path, and all required verification
+passes; still pending human/orchestrator integration review, same as §"Result"
+above).
+Started from: `node/P1-IPC-SHUTDOWN-CORR`@`0cc6fde` (this handoff's own tip).
+New commit(s): see this file's own commit and the accompanying code commit on
+`node/P1-IPC-SHUTDOWN-CORR`.
+Completed at: `2026-08-31T23:59:00Z` (approximate).
+
+An independent security review found that §1-§9 above did **not** actually
+close the reported crash end-to-end. Both findings are addressed below.
+
+### 10.1 Critical finding — timeout mismatch between `loki-ipc` and its real caller
+
+**The defect.** `crates/loki-runtime/src/host/compose.rs::ComposedHost::run`
+wrapped `server.serve()` in `tokio::time::timeout(IPC_SHUTDOWN_GRACE, ipc_task)`
+with `IPC_SHUTDOWN_GRACE = 5s` — **shorter** than `loki-ipc`'s own internal
+`CONNECTION_DRAIN_GRACE = 8s`. When the outer timeout fired, it did **not**
+cancel or abort `ipc_task`; it only stopped *waiting* and fell through to
+`drop(storage); secure_memory.shutdown()` regardless, while the detached
+`serve()` task (and everything inside it) kept running. Any connection whose
+drain took 5-8+ seconds reintroduced the exact use-after-free-class crash
+this whole node exists to close.
+
+**The fix.** `ComposedHost::run` no longer races `ipc_task` against any
+independent outer timeout at all — it `.await`s it directly:
+
+```rust
+let _ = ipc_stop_tx.send(());
+if let Err(err) = ipc_task.await {
+    tracing::error!(error = %err, "ipc accept loop task ended abnormally ...");
+}
+```
+
+This is option (a) from the dispatching message, chosen over (b) for two
+reasons specific to this codebase:
+
+1. After §10.2's fix, `server.serve()` (what `ipc_task` runs) is **itself**
+   a genuine, enforced upper bound: every still-open connection is asked to
+   close, every per-call task it spawned is drained-or-aborted
+   (`CALL_TASK_DRAIN_GRACE`), the writer task is drained-or-aborted
+   (`WRITER_SHUTDOWN_GRACE`), and if a connection still somehow does not
+   finish, the whole per-connection `JoinSet` is force-aborted
+   (`CONNECTION_DRAIN_GRACE`) — and `tokio::task::JoinSet`'s documented
+   `Drop` behavior (aborts every task it still owns) means that force-abort
+   transitively aborts anything still outstanding, including a connection's
+   own nested per-call `JoinSet`. `ipc_task` is therefore already guaranteed
+   to resolve in bounded time; racing it against a second, shorter,
+   independent timeout adds no safety and, as this exact bug proved, can
+   actively remove it if the two bounds are not perfectly synchronized
+   forever (which the original fix already failed to do once).
+2. This directly follows the pattern this codebase already uses at every
+   other layer of this same shutdown path (`WRITER_SHUTDOWN_GRACE` +
+   `.abort()` inside `run_dispatch_loop`; `CONNECTION_DRAIN_GRACE` +
+   `abort_all()` inside `Server::serve`): bound the wait **at the point
+   that owns the resource being waited on**, then abort-and-confirm, never
+   "give up and continue" from a level that cannot itself cancel anything.
+   `compose.rs` cannot cancel `server.serve()`'s internals; `loki-ipc` can.
+   Moving the one enforced bound into `loki-ipc` (already true before this
+   fix, just miscalibrated against `compose.rs`'s separate, shorter one) and
+   removing `compose.rs`'s redundant, unsynchronized copy is what actually
+   fixes the class of bug, not just this instance of it.
+
+The unused `IPC_SHUTDOWN_GRACE` constant and its now-dangling doc references
+were removed from `compose.rs`.
+
+### 10.2 High finding — per-call dispatch tasks were untracked and unbounded
+
+**The defect.** `spawn_unary_call`/`spawn_stream_call` inside
+`run_dispatch_loop` were still bare-`tokio::spawn`ed, never added to any
+`JoinSet`. The only accidental backstop was `run_dispatch_loop`'s existing
+`writer_task` join (bounded by `WRITER_SHUTDOWN_GRACE`), which only
+indirectly waits for per-call tasks because they each hold a clone of
+`outgoing_tx` — and that backstop breaks the moment `writer_task` is
+force-aborted at its own grace-period boundary: the abort drops the
+*receiver* half, so the still-running call task's next `outgoing_tx.send()`
+errors out and it unwinds quickly in the common case, but there was still no
+actual guarantee this always happens promptly, and — critically — nothing
+server-side bounds how long a call can run before that point, since
+`deadline_unix_millis` is entirely client-supplied with no server-side
+maximum.
+
+**The fix.** `run_dispatch_loop` now owns a connection-local
+`call_tasks: JoinSet<()>`. `spawn_unary_call`/`spawn_stream_call` were
+changed from `tokio::spawn(...)` to `call_tasks.spawn(...)` (both now take
+`&mut JoinSet<()>` as their first parameter). After the dispatch loop ends
+(client disconnect, protocol error, or server-initiated shutdown) — and
+*before* dropping `outgoing_tx` or touching the writer task — the loop now
+drains `call_tasks`, bounded by a new `CALL_TASK_DRAIN_GRACE` (10s), and
+force-aborts (then confirms via `join_next()`) anything still running past
+that grace. Only after every per-call task this connection ever spawned is
+confirmed finished does the function proceed to the (unchanged) writer-task
+drain.
+
+This closes the gap completely, not just narrows it: once
+`Server::serve`'s outer per-connection `JoinSet` reports a connection task
+"done," every call it ever spawned is now provably also done — either it
+finished on its own, was aborted-and-confirmed by `CALL_TASK_DRAIN_GRACE`,
+or (in the pathological case where the whole connection is force-aborted by
+the outer `CONNECTION_DRAIN_GRACE`) was transitively aborted by
+`JoinSet::drop`, per §10.1 point 1.
+
+### 10.3 Grace-period recalibration
+
+Closing both findings together required recalibrating the grace-period
+nesting so a genuinely slow-but-legitimate in-flight call (the reviewer's
+named 6-9s reproduction window) has room to be observed to actually finish,
+not merely be safely aborted, before its connection's drain gives up:
+
+| Constant | Location | Old | New | Why |
+|---|---|---|---|---|
+| `CALL_TASK_DRAIN_GRACE` | `loki-ipc/src/server.rs` (new) | n/a | 10s | Comfortably above the reviewer's named 6-9s window, so that scenario is observed to finish, not merely get aborted. |
+| `CONNECTION_DRAIN_GRACE` | `loki-ipc/src/server.rs` | 8s | 20s | Must exceed `CALL_TASK_DRAIN_GRACE` (10s) + `WRITER_SHUTDOWN_GRACE` (5s) = 15s with real margin, since those two now run sequentially inside one connection's own teardown before this outer bound would ever need to force-abort it. |
+| `IPC_SHUTDOWN_GRACE` | `loki-runtime/host/compose.rs` | 5s | removed | No longer raced against anything — see §10.1. |
+| `WRITER_SHUTDOWN_GRACE` | `loki-ipc/src/server.rs` | 5s | 5s (unchanged) | Not part of either finding. |
+
+### 10.4 Required re-verification: the actual 5-9s-window reproduction
+
+Both prior verifications (the original §4 and any narrower unit test) were
+insufficient per the review because they exercised `loki_ipc::Server::serve`
+in isolation, never the real `crate::host::compose::ComposedHost::run` path
+where the actual bug lived. This re-verification closes that gap directly.
+
+**New test-support surface** (both additive, `cfg(any(test, feature =
+"test-support"))`-gated, matching the existing `open_with_test_arena`
+pattern — zero reachability from production `open()`):
+
+- `ComposedHost::open_with_test_arena_and_business_service(config,
+  credential_resolver, business_service)` — lets a test install a real,
+  controllable `BusinessService` (and a credential resolver whose principal
+  is actually authorized for it) into the real `Server`/`ServerConfig`
+  `ComposedHost::open`/`run` compose, instead of the crate's permanent
+  fail-closed default (no business method is wired into production
+  `open()` yet — see `compose.rs`'s own top doc comment). This was
+  necessary because there was no other way to drive a real, timed
+  `business_call` through `ComposedHost::run`'s actual wiring.
+
+**New test**:
+`crates/loki-runtime/tests/host_lifecycle.rs::slow_business_call::
+run_does_not_return_until_a_slow_in_flight_business_call_actually_finishes`.
+
+- A `SlowBusinessService` fixture (same shape as
+  `loki-ipc/tests/shutdown_drain.rs`'s own, duplicated rather than shared —
+  this crate has no dev-dependency on `loki-ipc`'s test-support module)
+  notifies a `Notify` the instant its `call()` starts, sleeps a real
+  `Duration::from_secs(7)` (inside the reviewer's named 6-9s window), then
+  flips an `AtomicBool` and returns a real `BusinessRpcResult::RuntimeStatus`.
+- The test starts a real `ComposedHost` via
+  `open_with_test_arena_and_business_service`, spawns `host.run(...)` as a
+  task, connects a real `Client` over the real named pipe, and fires a real
+  `business_call(Method::RuntimeGetStatus, ...)` without awaiting it.
+- Once the fixture confirms the call has actually started (deterministic,
+  not timing-guessed), the test signals `run()`'s shutdown — so the call is
+  genuinely still in flight (about to sleep for ~6.9 more seconds) when the
+  primary shutdown/heartbeat race inside `run()` ends and it moves to tear
+  down the IPC task.
+- The test asserts, in order: (1) the call has *not* completed yet at the
+  moment shutdown is signalled (sanity check on its own timing assumption);
+  (2) by the time `run()`'s returned task actually resolves,
+  `call_completed` **must already be `true`** — the exact property
+  `compose.rs`'s pre-fix outer-timeout race did not guarantee; (3) the
+  outcome is a clean `RunOutcome::Shutdown`; (4) the client's own
+  `business_call` future (awaited separately, after `run()`'s task) either
+  observes the real `RuntimeStatus` result or, acceptably,
+  `CallError::ConnectionClosed` if the transport was torn down immediately
+  after delivery — `call_completed` (set by the service itself, independent
+  of whether the client observed the reply before its transport went away)
+  is the property this test actually needs.
+
+**Before/after reproduction** (exactly what the dispatching message asked
+for — proving the fix through the *real* `ComposedHost::run` path, not
+`server.serve()` in isolation):
+
+1. Built the fix described in §10.1/§10.2/§10.3, confirmed
+   `run_does_not_return_until_a_slow_in_flight_business_call_actually_finishes`
+   passes against it (`cargo test -p loki-runtime --test host_lifecycle
+   slow_business_call -- --test-threads=1`) — pass, `ComposedHost::run`
+   correctly waits ~7s for the slow call before returning.
+2. **Without touching the new test file**, surgically reverted only the two
+   defect-causing code shapes back to their pre-fix behavior *in place* (not
+   via `git stash`, since the new test-support hook the test needs did not
+   exist in the originally-committed `0cc6fde` code and a literal stash
+   would fail to compile):
+   - `compose.rs`: restored the `tokio::time::timeout(5s, ipc_task)` race
+     that proceeds regardless of whether `ipc_task` finished.
+   - `server.rs`: restored `spawn_unary_call`/`spawn_stream_call` to bare,
+     untracked `tokio::spawn(...)` (ignoring the new `call_tasks` parameter).
+   Re-ran the identical, unmodified test:
+   `cargo test -p loki-runtime --test host_lifecycle slow_business_call --
+   --test-threads=1` → **FAILED** in 5.43s:
+   ```
+   thread 'slow_business_call::run_does_not_return_until_a_slow_in_flight_business_call_actually_finishes'
+   panicked at crates\loki-runtime\tests\host_lifecycle.rs:469:9:
+   ComposedHost::run() returned before the in-flight business call actually
+   finished — the exact use-after-free-class hazard this re-verification targets
+   ```
+   This is the reproduced hazard: `ComposedHost::run()`'s task resolved at
+   ~5.4s (matching the old, reintroduced `IPC_SHUTDOWN_GRACE` = 5s) while the
+   business call — and therefore the connection task, and therefore
+   everything it still held — was still genuinely running, 1.5+ seconds
+   before it would naturally finish. Exactly the scenario named: a call in
+   the 5-8s window that the old, shorter outer timeout gave up on first.
+3. Restored both files exactly to their post-fix state (byte-for-byte,
+   verified via `git diff --stat` matching the pre-reversion diff shape).
+   Re-ran the full required verification (below) — all green.
+
+### 10.5 Verification performed (this correction)
+
+| Command/scenario | Result |
+|---|---|
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, zero warnings (full workspace) |
+| `cargo test -p loki-ipc -- --test-threads=1` | **108 passed, 0 failed** (unchanged from §4 — no existing test needed modification) |
+| `cargo test -p loki-runtime -- --test-threads=1` | **72 passed, 0 failed, 2 ignored** (62 lib + 5 `host_lifecycle`, incl. the new test + 4 `process_behavior`, 2 pre-existing ignores unrelated to this node — `DAT-002-MEM-CODE-001`'s fail-closed secure-memory gate — + 1 `secure_memory_arena_runtime`) |
+| `cargo test -p loki-runtime --test host_lifecycle slow_business_call -- --test-threads=1` against the deliberately-reverted pre-fix code shapes (§10.4 step 2) | **FAILED**, as expected — proves the new test actually detects both defects, not just exercises the new code paths |
+| Same command against the restored, fully-fixed code | **passed**, `run()` genuinely waits ~9s total (7s call + connect/handshake/drain overhead) before returning, confirmed via the test's own assertions |
+
+### 10.6 Contracts, migrations, and compatibility (this correction)
+
+- `crates/loki-ipc`: `spawn_unary_call`/`spawn_stream_call` gained a new
+  first parameter (`&mut JoinSet<()>`) — both are module-private (`fn`, not
+  `pub fn`), so this is not a public API change. `Server::serve`'s and
+  `Connection::handle`'s public signatures are unchanged (same claim as §5,
+  still true). Two new `pub` items: `CALL_TASK_DRAIN_GRACE` (const) and
+  `CONNECTION_DRAIN_GRACE`'s value changed (8s → 20s) — both are
+  implementation-detail constants, not part of any wire contract.
+- `crates/loki-runtime`: `ComposedHost::open_with_test_arena` gained no
+  signature change. Two new `pub` methods, both `cfg(any(test, feature =
+  "test-support"))`-gated (zero production reachability, matching the
+  existing `open_with_test_arena` guarantee):
+  `open_with_test_arena_and_business_service`. The private
+  `open_with_arena` helper's signature changed (now takes an
+  `Option<(credential_resolver, business_service)>` instead of nothing) —
+  private, not a public contract.
+- No wire-protocol, persisted-schema, or cross-process contract changed.
+- `IPC_SHUTDOWN_GRACE` (private `compose.rs` constant) removed entirely —
+  not part of any public contract.
+
+### 10.7 Security, privacy, and device safety (this correction)
+
+- This correction closes a real, reproduced (§10.4) use-after-free-class
+  hazard that §1-§9's original fix did not actually close end-to-end,
+  despite believing it had. The new `open_with_test_arena_and_business_service`
+  test-support hook does not weaken any production security control: it is
+  compiled only under `cfg(any(test, feature = "test-support"))`, the same
+  guarantee `open_with_test_arena` already relied on, and production
+  `open()` never calls it.
+- No change to authentication, authorization, ACL, frame validation, or
+  business-method dispatch logic — the diff is additive shutdown-sequencing
+  and task-tracking plumbing only.
+- Grace-period lengthening (§10.3) means a background host's clean shutdown
+  can now legitimately take up to ~20s in the worst case (a genuinely wedged
+  connection) instead of the old, unsafe-but-faster ~8s. This is a
+  deliberate safety-over-speed tradeoff — see §10.1 point 2 — and does not
+  affect any device-changing operation's own safety envelope (business
+  methods that submit device mutations already go through the
+  accept-then-track pattern in `loki_acceptance_store`, not a
+  blocking-for-the-operation's-full-duration RPC call).
+
+### 10.8 Decisions and assumptions (this correction)
+
+1. Chose compose.rs option (a) (`.await` `ipc_task` directly, no outer
+   timeout) over option (b) (keep an outer timeout but abort-and-confirm on
+   it) — see §10.1's two reasons. `loki-ipc` already had to implement the
+   "bound-then-abort-then-confirm" pattern internally regardless (that is
+   what actually terminates a genuinely wedged connection); duplicating it a
+   second time at the `compose.rs` layer, now pointed at a task `compose.rs`
+   itself cannot inspect or partially cancel (only the whole `JoinHandle`),
+   would add complexity without adding safety.
+2. Recalibrated `CONNECTION_DRAIN_GRACE`/added `CALL_TASK_DRAIN_GRACE`
+   generously (10s/20s) rather than tightly, so the specific 6-9s
+   reproduction window is provably a "genuinely finishes" case, not merely
+   a "safely aborted" case — matching the dispatching message's
+   phrasing ("shutdown genuinely waits for the slow call to finish"). A
+   tighter pair of constants (e.g. 5s/8s, unchanged from the original fix)
+   would still have been *safe* (no UAF — abort-then-confirm is unconditionally
+   safe regardless of duration), but would not have satisfied that specific,
+   explicit re-verification requirement for a 6-9s call.
+3. Added test-support-only compose.rs hooks rather than reproducing the
+   call solely via `loki_ipc::Server::serve` again, because the review's
+   central point was that testing `server.serve()` alone previously missed
+   a bug that only existed in `compose.rs`'s own caller-side code. A
+   re-verification that again avoided exercising `compose.rs::run` would not
+   have actually addressed the review's core objection.
+4. Did not attempt to add a server-side maximum on client-supplied
+   `deadline_unix_millis` (the reviewer's parenthetical aside). §10.2's fix
+   makes this unnecessary for the specific UAF-class hazard in scope: any
+   call, however long its client-requested deadline, is now provably
+   drained-or-aborted-and-confirmed before its connection is considered
+   done. A server-side deadline cap would be a distinct, separate
+   design decision (denial-of-service/resource-fairness policy, not a
+   memory-safety fix) and was judged out of this correction's scope.
+
+### 10.9 Follow-up graph changes proposed (this correction)
+
+- No change to §9's proposals; both still stand.
+- New, optional: if a future node wants a stricter server-side maximum
+  business-call deadline (independent of this correction — see §10.8 point
+  4), that is a policy decision for the orchestrator/product, not a
+  safety-fix follow-up this node's scope covers.
