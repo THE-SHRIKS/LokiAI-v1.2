@@ -15,7 +15,6 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use loki_ipc::auth::AuthToken;
 use loki_ipc::{Server, ServerConfig};
@@ -28,13 +27,6 @@ use crate::host::token;
 use crate::runtime::{self, RunOutcome};
 use crate::services::RuntimeServices;
 use crate::shutdown::ShutdownReason;
-
-/// How long [`ComposedHost::run`] waits for the IPC accept loop to drain
-/// after the primary shutdown/heartbeat race ends, before giving up —
-/// matches `crates/loki-ipc/src/server.rs`'s own bounded-shutdown-grace
-/// philosophy (`WRITER_SHUTDOWN_GRACE`) rather than trusting an unbounded
-/// drop to finish promptly.
-const IPC_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// Resolved configuration for one background host instance.
 #[derive(Debug, Clone)]
@@ -122,7 +114,7 @@ impl ComposedHost {
         // invalid, unlocked, or unattested arena therefore touches no base
         // directory, database, key sidecar, token, discovery file, or pipe.
         let secure_memory = SecureMemoryRuntime::bootstrap()?;
-        Self::open_with_arena(config, secure_memory)
+        Self::open_with_arena(config, secure_memory, None)
     }
 
     /// Test-only alternate entrypoint: identical to [`Self::open`] in every
@@ -149,15 +141,59 @@ impl ComposedHost {
     pub fn open_with_test_arena(config: &HostConfig) -> Result<Self, HostStartError> {
         let secure_memory =
             loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena();
-        Self::open_with_arena(config, secure_memory)
+        Self::open_with_arena(config, secure_memory, None)
+    }
+
+    /// Identical to [`Self::open_with_test_arena`], except the real IPC
+    /// server is composed with `credential_resolver`/`business_service`
+    /// instead of the crate's own fail-closed defaults (`loki_ipc::ServerConfig::new`'s
+    /// single legacy-core-client credential with empty authority, and
+    /// `loki_ipc`'s private `UnsupportedBusinessService` — no business method
+    /// is wired into production `open`/`open_with_test_arena` yet, see this
+    /// module's top doc comment). Both must be overridden together: a real
+    /// business call needs a principal actually authorized for it, not just a
+    /// service willing to answer it.
+    ///
+    /// Exists so a test can exercise a real, controllable, slow-or-fast
+    /// business call **through the actual production `Server`/`run` wiring**
+    /// (real named pipe, real `Client`, real `ComposedHost::run` shutdown
+    /// sequencing) instead of only against `loki_ipc::Server::serve` in
+    /// isolation — see `P1-IPC-SHUTDOWN-CORR`'s handoff for why testing only
+    /// the latter previously missed a real gap in this crate's own
+    /// `ComposedHost::run`. Compiled only for this crate's own tests or the
+    /// opt-in `test-support` feature, matching [`Self::open_with_test_arena`]'s
+    /// own reachability guarantee: `open()` (the sole entrypoint real startup
+    /// calls) never reaches this path.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_with_test_arena_and_business_service(
+        config: &HostConfig,
+        credential_resolver: Arc<dyn loki_ipc::auth::CredentialResolver>,
+        business_service: Arc<dyn loki_ipc::BusinessService>,
+    ) -> Result<Self, HostStartError> {
+        let secure_memory =
+            loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena();
+        Self::open_with_arena(
+            config,
+            secure_memory,
+            Some((credential_resolver, business_service)),
+        )
     }
 
     /// Shared startup body once a `secure_memory` arena (production-bootstrapped
     /// or, in test builds only, disposable-test-bootstrapped) is already in
-    /// hand. See [`Self::open`]/[`Self::open_with_test_arena`].
+    /// hand. See [`Self::open`]/[`Self::open_with_test_arena`]/
+    /// [`Self::open_with_test_arena_and_business_service`]. `business_override`
+    /// is `None` for every production and ordinary-test caller (the real IPC
+    /// server then keeps `loki_ipc::ServerConfig::new`'s own fail-closed
+    /// defaults), and `Some` only for
+    /// [`Self::open_with_test_arena_and_business_service`]'s own callers.
     fn open_with_arena(
         config: &HostConfig,
         secure_memory: SecureMemoryRuntime,
+        business_override: Option<(
+            Arc<dyn loki_ipc::auth::CredentialResolver>,
+            Arc<dyn loki_ipc::BusinessService>,
+        )>,
     ) -> Result<Self, HostStartError> {
         config.paths.ensure_base_dir()?;
 
@@ -181,7 +217,13 @@ impl ComposedHost {
             &config.paths.protected_token_file(),
             &config.paths.token_file(),
         )?;
-        let server_config = ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
+        let mut server_config =
+            ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
+        if let Some((credential_resolver, business_service)) = business_override {
+            server_config = server_config
+                .with_credential_resolver(credential_resolver)
+                .with_business_service(business_service);
+        }
         let server = Server::bind(server_config)?;
 
         discovery::write(
@@ -223,11 +265,17 @@ impl ComposedHost {
     /// `heartbeat` ends on its own (treated as a crash) — reusing
     /// `crate::runtime::run` (`RUN-001`, unmodified) for that race exactly
     /// as before. The IPC accept loop runs concurrently and is told to stop
-    /// once that race ends, bounded by [`IPC_SHUTDOWN_GRACE`]. On return,
-    /// the discovery file is updated to `"stopped"` best-effort, so a
-    /// subsequent [`crate::host::discovery::locate`] call reports
-    /// [`crate::host::discovery::HostStatus::NotRunning`] immediately
-    /// without needing a live connect attempt.
+    /// once that race ends, then this method actually `.await`s the task it
+    /// runs in to completion before proceeding to tear down `storage` and
+    /// `secure_memory` — see this method's body for why no independent outer
+    /// timeout is raced against it (`P1-IPC-SHUTDOWN-CORR`'s
+    /// re-verification closed a real crash-reproducible gap here: a shorter
+    /// outer timeout that stops *waiting* without cancelling/confirming the
+    /// still-running task is not a bound at all from a memory-safety
+    /// standpoint). On return, the discovery file is updated to `"stopped"`
+    /// best-effort, so a subsequent [`crate::host::discovery::locate`] call
+    /// reports [`crate::host::discovery::HostStatus::NotRunning`]
+    /// immediately without needing a live connect attempt.
     pub async fn run<S, H>(self, shutdown_signal: S, heartbeat: H) -> RunOutcome
     where
         S: Future<Output = ShutdownReason>,
@@ -254,11 +302,36 @@ impl ComposedHost {
         let outcome = runtime::run(shutdown_signal, heartbeat).await;
 
         let _ = ipc_stop_tx.send(());
-        if tokio::time::timeout(IPC_SHUTDOWN_GRACE, ipc_task)
-            .await
-            .is_err()
-        {
-            tracing::warn!("ipc accept loop did not stop within the shutdown grace period");
+        // Deliberately `.await`ed directly, NOT raced against a second,
+        // shorter, independent outer timeout. `server.serve()` (which
+        // `ipc_task` runs) already enforces its own bounded shutdown
+        // (`loki_ipc::server::CONNECTION_DRAIN_GRACE`, currently 20s: every
+        // still-open connection is asked to close, every per-call task it
+        // spawned is drained (bounded by `loki_ipc::server::CALL_TASK_DRAIN_GRACE`,
+        // 10s) or forcibly aborted, and the whole per-connection `JoinSet` is
+        // itself force-aborted if all of that somehow still isn't enough —
+        // which, by
+        // `tokio::task::JoinSet`'s documented drop behavior, transitively
+        // aborts anything still outstanding — if that grace period elapses).
+        // `ipc_task` is therefore already guaranteed to resolve in bounded
+        // time; a second outer `tokio::time::timeout` here would only ever
+        // *stop waiting* without cancelling or confirming termination of the
+        // still-running task, which is exactly the race
+        // `P1-IPC-SHUTDOWN-CORR`'s independent review found: it let this
+        // function fall through to `drop(storage)`/`secure_memory.shutdown()`
+        // while `ipc_task` (and any `BusinessService`/storage clone a
+        // still-in-flight call held) kept running detached — a real
+        // use-after-free-class hazard for any call taking longer than this
+        // timeout but less than `loki-ipc`'s own internal grace. Awaiting
+        // `ipc_task` directly closes that gap completely: `drop(storage)`
+        // below can now only ever run after every IPC-owned reference to
+        // `storage`/`services` has actually, provably dropped.
+        if let Err(err) = ipc_task.await {
+            tracing::error!(
+                error = %err,
+                "ipc accept loop task ended abnormally (panicked or was cancelled) while \
+                 shutting down; proceeding with teardown since the task is no longer running"
+            );
         }
 
         if let Err(err) = discovery::write(

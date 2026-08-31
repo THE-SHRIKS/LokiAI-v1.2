@@ -99,7 +99,57 @@ const WRITER_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// in bounded time no matter how many connections are open or how a
 /// misbehaving client stalls. See `P1-IPC-SHUTDOWN-CORR`'s handoff for the
 /// use-after-free this constant closes.
-const CONNECTION_DRAIN_GRACE: Duration = Duration::from_secs(8);
+///
+/// This is a genuine, enforced upper bound on how long `serve()` itself can
+/// take to return, because dropping a connection task's future (which
+/// `abort_all` triggers) also drops that task's own local
+/// [`tokio::task::JoinSet`] of per-call tasks (see [`CALL_TASK_DRAIN_GRACE`]),
+/// and `JoinSet`'s documented `Drop` behavior is to abort every task it
+/// still owns. A caller such as `ComposedHost::run` may therefore simply
+/// `.await` the task `serve()` runs in directly instead of racing it against
+/// a second, shorter, non-cancelling outer timeout — see that function's own
+/// doc comment for why a second race would be actively unsafe here.
+///
+/// Set comfortably larger than [`CALL_TASK_DRAIN_GRACE`] + [`WRITER_SHUTDOWN_GRACE`]
+/// (10s + 5s = 15s) so those two *inner*, sequential, per-connection grace
+/// periods normally have room to let a genuinely slow but legitimate
+/// in-flight call (the reproduced scenario is 6-9s) finish and drain on its
+/// own before this *outer* bound would ever force-abort the whole
+/// connection early — this outer bound exists purely as a last-resort
+/// backstop for a connection that does not respond to the inner mechanisms
+/// at all (e.g. is wedged in a way that never even reaches the per-call/
+/// writer drain steps), not as the primary mechanism for ordinary slow
+/// calls.
+const CONNECTION_DRAIN_GRACE: Duration = Duration::from_secs(20);
+
+/// How long a connection's dispatch loop waits, once it has ended (client
+/// disconnect, protocol error, or server-initiated shutdown), for every
+/// per-call task it spawned (`spawn_unary_call`/`spawn_stream_call`) to
+/// actually finish, before forcibly aborting whichever ones have not.
+///
+/// Closes `P1-IPC-SHUTDOWN-CORR`'s independent-review finding: per-call
+/// tasks used to be bare-`tokio::spawn`ed and untracked by any `JoinSet`,
+/// so a connection's dispatch loop (and therefore the outer
+/// [`Server::serve`]'s per-connection [`JoinSet`]) could report "done" while
+/// a business call it spawned — holding its own clone of the
+/// `BusinessService`/`SessionAuthority` — was still running detached,
+/// unbounded by anything but the client-supplied `deadline_unix_millis`
+/// (which the client fully controls and which has no server-side maximum).
+/// Tracking these in a per-connection `JoinSet` and draining it before the
+/// connection's own task is considered finished closes that gap completely:
+/// once the outer `Server::serve`'s per-connection `JoinSet` reports a
+/// connection task done, every call it ever spawned is provably also done
+/// (either it finished on its own, or it was aborted here or via the
+/// `Drop`-aborts-owned-tasks fallback described on [`CONNECTION_DRAIN_GRACE`]).
+///
+/// Set to 10s — comfortably above the 6-9s in-flight-call window the
+/// independent review's required re-verification reproduces (a genuinely
+/// slow but legitimate call, e.g. one gated by real backpressure on a slow
+/// reader) — so that scenario naturally finishes and is observed to finish
+/// (not merely safely aborted) before this grace elapses, while still
+/// bounding the pathological case (a call truly wedged forever) to a
+/// concrete, finite wait.
+const CALL_TASK_DRAIN_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 struct SessionAuthority {
@@ -588,6 +638,13 @@ where
 
     let mut cancel_senders: HashMap<Uuid, oneshot::Sender<()>> = HashMap::new();
     let (completed_tx, mut completed_rx) = mpsc::unbounded_channel::<Uuid>();
+    // Every per-call task (`spawn_unary_call`/`spawn_stream_call`) is spawned
+    // into this connection-local `JoinSet` rather than a bare `tokio::spawn`,
+    // and drained (bounded by `CALL_TASK_DRAIN_GRACE`, see its doc comment)
+    // below before this dispatch loop's own future resolves — see
+    // `CALL_TASK_DRAIN_GRACE`'s doc comment for the use-after-free-class gap
+    // this closes.
+    let mut call_tasks: JoinSet<()> = JoinSet::new();
 
     let outcome = loop {
         tokio::select! {
@@ -597,6 +654,7 @@ where
                         let (cancel_tx, cancel_rx) = oneshot::channel();
                         cancel_senders.insert(correlation_id, cancel_tx);
                         spawn_unary_call(
+                            &mut call_tasks,
                             correlation_id,
                             deadline_unix_millis,
                             method,
@@ -610,6 +668,7 @@ where
                         let (cancel_tx, cancel_rx) = oneshot::channel();
                         cancel_senders.insert(correlation_id, cancel_tx);
                         spawn_stream_call(
+                            &mut call_tasks,
                             correlation_id,
                             deadline_unix_millis,
                             method,
@@ -652,12 +711,39 @@ where
         }
     };
 
+    // Bounded wait for every per-call task spawned during this connection's
+    // life to actually finish — before dropping this function's own
+    // `outgoing_tx` clone or touching the writer task — so a still-running
+    // business call (bounded only by its own client-supplied
+    // `deadline_unix_millis`, not by anything server-side) cannot outlive
+    // this dispatch loop's own future undetected. Any per-call task still
+    // running once `CALL_TASK_DRAIN_GRACE` elapses is forcibly aborted; the
+    // writer task (still running throughout this wait) keeps draining
+    // whatever those calls already sent, same as during normal operation.
+    let call_drain = async { while call_tasks.join_next().await.is_some() {} };
+    tokio::select! {
+        () = call_drain => {}
+        () = tokio::time::sleep(CALL_TASK_DRAIN_GRACE) => {
+            tracing::warn!(
+                "one or more in-flight calls did not finish within the call-task drain grace \
+                 period; aborting the remaining per-call tasks"
+            );
+            call_tasks.abort_all();
+            while call_tasks.join_next().await.is_some() {}
+        }
+    }
+
     drop(outgoing_tx);
     // Bounded wait for the writer task to drain and exit on its own;
     // `.abort()` on the timeout branch (rather than letting the `timeout()`
     // future merely stop *polling* the JoinHandle) guarantees the task is
     // actually stopped and the pipe's write half released, not left running
-    // detached in the background.
+    // detached in the background. Every per-call task's own `outgoing_tx`
+    // clone has already been dropped by the drain above (each task drops
+    // its clone when it finishes, is aborted, or was never given a chance
+    // to run), so this wait is now bounded purely by the writer task's own
+    // drain of whatever is left in the channel — it can never be kept alive
+    // by a still-running call task holding a live sender clone.
     let mut writer_task = writer_task;
     tokio::select! {
         _ = &mut writer_task => {}
@@ -681,7 +767,9 @@ async fn send_message(tx: &mpsc::Sender<WireMessage>, message: WireMessage) -> b
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_unary_call(
+    call_tasks: &mut JoinSet<()>,
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: Method,
@@ -690,7 +778,7 @@ fn spawn_unary_call(
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
 ) {
-    tokio::spawn(async move {
+    call_tasks.spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let outcome = tokio::select! {
             outcome = execute_method(
@@ -772,7 +860,9 @@ async fn execute_method(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_stream_call(
+    call_tasks: &mut JoinSet<()>,
     correlation_id: Uuid,
     deadline_unix_millis: u64,
     method: StreamMethod,
@@ -781,7 +871,7 @@ fn spawn_stream_call(
     mut cancel_rx: oneshot::Receiver<()>,
     completed_tx: mpsc::UnboundedSender<Uuid>,
 ) {
-    tokio::spawn(async move {
+    call_tasks.spawn(async move {
         let deadline = time::duration_until(deadline_unix_millis);
         let result = tokio::select! {
             result = execute_stream_method(
