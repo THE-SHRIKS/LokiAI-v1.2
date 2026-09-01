@@ -224,10 +224,10 @@ describeWindowsOnly(
         expect(result.error).toBeInstanceOf(RpcCallError);
         const rpcError = (result.error as RpcCallError).rpcError;
         expect(rpcError.kind).toBe('credential_revalidation_failed');
-        // Also constructible/matchable as the more specific subclass this
-        // package exports for exactly this terminal-auth-failure case.
-        expect(result.error).toBeInstanceOf(RpcCallError);
-        void CredentialRevalidationFailedError;
+        // The client actually constructs the more specific subclass it
+        // exports for exactly this terminal-auth-failure case — not just
+        // a generic `RpcCallError` carrying that `kind` string.
+        expect(result.error).toBeInstanceOf(CredentialRevalidationFailedError);
       }
 
       client.close();

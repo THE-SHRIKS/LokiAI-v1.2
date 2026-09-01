@@ -146,12 +146,10 @@ fn run_stdin_command_loop(
             }
             break;
         }
-        if let Some(principal_id) = line.strip_prefix("REVOKE ") {
-            if let Some(resolver) = &on_revoke {
-                resolver.revoke(principal_id);
-                println!("REVOKED");
-                std::io::stdout().flush().ok();
-            }
+        if let (Some(principal_id), Some(resolver)) = (line.strip_prefix("REVOKE "), &on_revoke) {
+            resolver.revoke(principal_id);
+            println!("REVOKED");
+            std::io::stdout().flush().ok();
         }
     }
     if let Some(tx) = shutdown_tx.take() {

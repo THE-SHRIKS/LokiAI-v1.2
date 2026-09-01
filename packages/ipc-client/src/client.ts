@@ -22,6 +22,7 @@ import type {
   CorrelationId,
   Method,
   ProtocolVersion,
+  RpcError,
   StreamOutcome,
   WireMessage,
 } from '@lokiai/contracts';
@@ -36,6 +37,7 @@ import {
   ConnectionClosedDuringHandshakeError,
   ConnectionClosedError,
   CredentialLoadError,
+  CredentialRevalidationFailedError,
   HandshakeRejectedError,
   ProtocolMismatchError,
   RpcCallError,
@@ -215,6 +217,20 @@ function resultMatchesMethod(method: BusinessRpcRequest, result: BusinessRpcResu
   }
 }
 
+/** Converts a server-acknowledged `RpcError` into the specific thrown JS
+ * error class it corresponds to — a distinguishable
+ * `CredentialRevalidationFailedError` for `RpcError::CredentialRevalidationFailed`,
+ * the generic `RpcCallError` for every other named RPC failure. Used by
+ * every call site that turns a `CallOutcome`'s `err` variant into a thrown
+ * error, so this distinction is never lost regardless of which method was
+ * called. */
+function toRpcCallError(error: RpcError): RpcCallError {
+  if (error.kind === 'credential_revalidation_failed') {
+    return new CredentialRevalidationFailedError(error);
+  }
+  return new RpcCallError(error);
+}
+
 /** A connected, handshaken IPC client. */
 export class NodeIpcClient {
   private readonly socket: Socket;
@@ -367,7 +383,7 @@ export class NodeIpcClient {
     const method: Method = { method: 'Ping', params: { payload } };
     const outcome = await this.callUnary(correlationId, method, timeoutMs);
     if (outcome.outcome === 'err') {
-      throw new RpcCallError(outcome.error);
+      throw toRpcCallError(outcome.error);
     }
     if (outcome.result.method !== 'Ping') {
       throw new ProtocolMismatchError('expected a Ping result');
@@ -390,7 +406,7 @@ export class NodeIpcClient {
     onCorrelationId?.(correlationId);
     const outcome = await this.callUnary(correlationId, method, timeoutMs);
     if (outcome.outcome === 'err') {
-      throw new RpcCallError(outcome.error);
+      throw toRpcCallError(outcome.error);
     }
     if (outcome.result.method !== 'Business') {
       throw new ProtocolMismatchError('expected a Business result');
