@@ -59,6 +59,23 @@ impl HostPaths {
         self.base_dir.join("ipc.token.protected")
     }
 
+    /// The DPAPI-protected `DesktopInstallation` credential file —
+    /// `P1-NODE-IPC-CLIENT-001`/`ADR-0009`. See `crate::host::credential`
+    /// and `loki_storage::credential` for the minting/loading convention
+    /// and purpose-bound format this path holds.
+    pub fn desktop_installation_credential_file(&self) -> PathBuf {
+        self.base_dir
+            .join("desktop-installation.credential.protected")
+    }
+
+    /// The DPAPI-protected `AgentConnection` credential file —
+    /// `P1-NODE-IPC-CLIENT-001`/`ADR-0009`. Independently rotatable from
+    /// [`Self::desktop_installation_credential_file`] (a distinct file, no
+    /// shared on-disk state between the two credentials).
+    pub fn agent_connection_credential_file(&self) -> PathBuf {
+        self.base_dir.join("agent-connection.credential.protected")
+    }
+
     pub fn database_key_file(&self) -> PathBuf {
         self.base_dir.join("database.key.protected")
     }
@@ -101,6 +118,14 @@ mod tests {
         assert_eq!(
             paths.database_file(),
             PathBuf::from(r"C:\tmp\lokiai-test\loki-runtime.sqlite3")
+        );
+        assert_eq!(
+            paths.desktop_installation_credential_file(),
+            PathBuf::from(r"C:\tmp\lokiai-test\desktop-installation.credential.protected")
+        );
+        assert_eq!(
+            paths.agent_connection_credential_file(),
+            PathBuf::from(r"C:\tmp\lokiai-test\agent-connection.credential.protected")
         );
     }
 

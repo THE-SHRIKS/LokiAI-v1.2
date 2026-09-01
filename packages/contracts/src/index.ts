@@ -25,3 +25,4 @@ export * from './envelope.js';
 export * from './errors.js';
 export * from './mcp.js';
 export * from './businessRpc.js';
+export * from './ipcProtocol.js';

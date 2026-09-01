@@ -1,0 +1,124 @@
+# LokiAI Main v1.2 — loki-credential-native (P1-NODE-IPC-CLIENT-001, ADR-0009).
+#
+# The one shared, narrow native Node addon (napi-rs-bound cdylib) that reads
+# (never mints) the two purpose-bound DPAPI credentials
+# `crates/loki-storage/src/credential.rs` writes. Wraps the *actual*
+# `loki-storage` code — never a reimplementation of the DPAPI call, and never
+# a generic encrypt/decrypt CLI (`ADR-0009` forbids both explicitly). See
+# `Docs/graph/decisions/ADR-0009-node-ipc-credential-distribution.md` and
+# `Docs/graph/tasks/P1-NODE-IPC-CLIENT-001.md` §6 Deliverable 1 for the full
+# "why a native addon" rationale.
+#
+# Dependency policy: every entry below is justified per AGENTS.md rule 11.
+# `napi`/`napi-derive`/`napi-build` (napi-rs project, MIT license, actively
+# maintained, the de facto standard Rust<->Node N-API binding — see this
+# node's handoff for the fuller record) are a genuinely new dependency class
+# this node introduces, exactly as `Docs/graph/tasks/P1-NODE-IPC-CLIENT-001.md`
+# §3 anticipates ("no napi/neon ... build tooling exists anywhere ... yet").
+[package]
+name = "loki-credential-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LokiAI Main v1.2 shared native Node addon: read-only, purpose-bound Windows-DPAPI credential decryption for the Node IPC client (P1-NODE-IPC-CLIENT-001, ADR-0009)."
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+# Test-only helper, never shipped: mints (or loads) one purpose-bound
+# credential to a real, temporary, protected file, then writes its plaintext
+# to a second, transient, local file the test deletes immediately after
+# reading it once — the hand-off mechanism `packages/native-credential-store`'s
+# own cross-language round-trip test (`P1-NODE-IPC-CLIENT-001` §6
+# Deliverable 6) uses to drive the real Rust minting call from a real Node
+# test process without ever putting plaintext on argv/env/stdout (this
+# binary's own argv is paths only, never secret material). Gated behind the
+# opt-in `test-support` feature so a production `cargo build --release -p
+# loki-credential-native` (no `--features test-support`) never compiles or
+# ships it.
+name = "mint_test_credential"
+path = "src/bin/mint_test_credential.rs"
+required-features = ["test-support"]
+
+[[bin]]
+# Test-only real-server harness for `packages/ipc-client`'s own integration
+# tests (`P1-NODE-IPC-CLIENT-001` §6 Deliverable 7) — never shipped. The
+# packet's own §3 names `ComposedHost::open_with_test_arena_and_credential_
+# resolver`/`open_with_test_arena_and_business_service` (both `loki-runtime`,
+# `cfg(any(test, feature = "test-support"))`-gated) as a "hard practical
+# dependency" for this node's own integration tests, but does not otherwise
+# name a file location for the Rust-side driver a real Node test process
+# needs to start/control a real server. Rather than adding a new file
+# outside this node's §5 writable-path list (`crates/loki-runtime/tests/**`
+# is not among them), this binary lives entirely inside this
+# already-fully-owned, brand-new crate, gated behind the opt-in
+# `node-client-harness` feature (itself pulling in `loki-runtime`/`loki-ipc`
+# as *optional* dependencies below) so a production, no-extra-features
+# `cargo build --release -p loki-credential-native` — the one command that
+# actually produces the shipped addon — never compiles or links this binary,
+# `loki-runtime`, or `loki-ipc` at all. Documented explicitly in this node's
+# handoff as a deliberate, minimal-footprint resolution of a real ownership
+# gap, not a silent scope expansion.
+name = "node_ipc_client_harness"
+path = "src/bin/node_ipc_client_harness.rs"
+required-features = ["node-client-harness"]
+
+[features]
+test-support = []
+# `loki-storage/test-support` is required transitively: `loki-runtime`'s own
+# `open_with_test_arena_and_credential_resolver`/
+# `open_with_test_arena_and_business_service` call
+# `loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena`,
+# which only exists when `loki-storage` itself has that feature turned on —
+# normally activated only via `loki-runtime`'s own self-referential
+# `[dev-dependencies]` entry (irrelevant to an external consumer like this
+# crate), so this feature enables it directly here instead.
+node-client-harness = [
+  "test-support",
+  "dep:loki-runtime",
+  "dep:loki-ipc",
+  "dep:tokio",
+  "dep:uuid",
+  "loki-storage/test-support",
+]
+
+[dependencies]
+# N-API bindings — Rust<->Node native addon boundary. ABI-stable (N-API,
+# not the unstable V8 API), so one compiled artifact loads unmodified into
+# both plain Node.js and Electron's embedded Node (verified end-to-end by
+# this node's own tests, not merely assumed from napi-rs's documentation —
+# see the handoff). MIT license, napi-rs project (actively maintained,
+# widely used — e.g. by `@parcel/watcher`, Prisma's engine bindings).
+# `napi4` is the minimum feature set covering everything this crate needs
+# (synchronous functions returning `Buffer`/typed errors); no threadsafe
+# functions, no async runtime bridging, no N-API version beyond what a
+# current Node/Electron pin already provides.
+napi = { version = "=3.12.2", default-features = false, features = ["napi4"] }
+napi-derive = "=3.6.3"
+
+# The actual DPAPI credential code this addon wraps — never reimplemented
+# here. Same workspace, path dependency, no version pin needed
+# (`publish = false`).
+loki-storage = { path = "../loki-storage" }
+
+# Test-harness-only, optional (never linked into the shipped `--release`
+# cdylib — see `node-client-harness`'s own comment above): the real,
+# already-accepted `loki-runtime`/`loki-ipc` crates the
+# `node_ipc_client_harness` test binary drives. Versions/features match
+# `crates/loki-runtime/Cargo.toml`'s own pins exactly (one resolved copy,
+# not a second divergent one).
+loki-runtime = { path = "../loki-runtime", optional = true, features = ["test-support"] }
+loki-ipc = { path = "../loki-ipc", optional = true }
+tokio = { version = "=1.53.1", optional = true, features = ["rt-multi-thread", "macros", "time", "sync", "io-std", "io-util"] }
+uuid = { version = "=1.24.1", optional = true, features = ["v4"] }
+
+[build-dependencies]
+# Emits the `cargo:` directives Node's native-addon linking convention
+# requires (delay-loads `node.exe`/`electron.exe`'s exported symbols rather
+# than linking against a specific one at build time) — the standard,
+# required companion build script for any napi-rs cdylib. Same license/
+# maintainer as `napi`/`napi-derive` above.
+napi-build = "=2.4.1"

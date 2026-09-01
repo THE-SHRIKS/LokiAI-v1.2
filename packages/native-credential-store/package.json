@@ -1,0 +1,29 @@
+{
+  "name": "@lokiai/native-credential-store",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LokiAI Main v1.2 shared native Node addon wrapper (P1-NODE-IPC-CLIENT-001, ADR-0009): read-only, purpose-bound Windows-DPAPI credential decryption for the Node IPC client. Wraps the compiled crates/loki-credential-native cdylib; never mints a credential, never exposes plaintext outside an in-process Buffer.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "engines": {
+    "node": ">=24.19.0 <25.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.ts release",
+    "pretest": "node scripts/build.ts test-support",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

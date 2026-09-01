@@ -1,0 +1,4 @@
+# The compiled native addon artifact — produced by `npm run build`/`pretest`
+# (see `scripts/build.ts`) from `crates/loki-credential-native`, never
+# committed source. Rebuilt locally by every consumer/CI run.
+native/*.node

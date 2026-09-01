@@ -22,6 +22,7 @@ use loki_storage::{SecureMemoryError, SecureMemoryRuntime, Storage};
 
 use crate::host::business_service::RuntimeBusinessService;
 use crate::host::clock::{now_utc_iso8601, unix_millis_now};
+use crate::host::credential;
 use crate::host::discovery::{self, RecordedState};
 use crate::host::paths::HostPaths;
 use crate::host::token;
@@ -52,6 +53,10 @@ pub enum HostStartError {
     Io(std::io::Error),
     SecureMemory(SecureMemoryError),
     Storage(loki_storage::StorageError),
+    /// `P1-NODE-IPC-CLIENT-001`/`ADR-0009`: minting/loading either the
+    /// `DesktopInstallation` or `AgentConnection` DPAPI credential failed.
+    /// See `crate::host::credential::HostCredentialError` for which kind.
+    Credential(credential::HostCredentialError),
 }
 
 impl std::fmt::Display for HostStartError {
@@ -63,6 +68,9 @@ impl std::fmt::Display for HostStartError {
             }
             HostStartError::Storage(err) => {
                 write!(f, "storage error starting background host: {err}")
+            }
+            HostStartError::Credential(err) => {
+                write!(f, "credential error starting background host: {err}")
             }
         }
     }
@@ -85,6 +93,12 @@ impl From<loki_storage::StorageError> for HostStartError {
 impl From<SecureMemoryError> for HostStartError {
     fn from(err: SecureMemoryError) -> Self {
         HostStartError::SecureMemory(err)
+    }
+}
+
+impl From<credential::HostCredentialError> for HostStartError {
+    fn from(err: credential::HostCredentialError) -> Self {
+        HostStartError::Credential(err)
     }
 }
 
@@ -277,6 +291,15 @@ impl ComposedHost {
             &config.paths.protected_token_file(),
             &config.paths.token_file(),
         )?;
+
+        // `P1-NODE-IPC-CLIENT-001`/`ADR-0009`: mints (idempotent) or loads
+        // both new purpose-bound DPAPI credentials alongside the legacy
+        // token above. Persisted to disk only — deliberately **not**
+        // forwarded into `server_config` below; see this module's own top
+        // doc comment and `Docs/graph/tasks/P1-NODE-IPC-CLIENT-001.md` §1/§9
+        // for why production wiring is out of this node's scope.
+        credential::mint_or_load_both(&config.paths)?;
+
         let mut server_config =
             ServerConfig::new(config.pipe_name.clone(), AuthToken::new(raw_token));
         match business_override {
