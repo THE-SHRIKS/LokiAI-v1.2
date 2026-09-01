@@ -315,7 +315,8 @@ which half of the program (Section 1a) a wave belongs to.
 | BLD-001-R2-HOST-VERIFY | VERIFICATION | Verify the signed broker and real disposable VHDX lifecycle with the complete hostile, cross-job, fault and reboot matrix. | BLD-001-R2-CODE | real supported-Windows evidence and independent review with no critical/high findings | `BLOCKED_DEPENDENCY` — requires separate exact VHDX/elevation approval plus approved signer/provisioning environment |
 | P1-SERVICE-READINESS-001 | IMPLEMENTATION | Move migrations under runtime ownership and expose authorized service projections without raw database handles. | DAT-002-CORR-001, P1-RPC-CONTRACT-001 | migration-owner, open-existing, scope and projection tests | superseded by `P1-SERVICE-READINESS-001-R1` after REV-004 corrected dependency direction |
 | P1-NODE-IPC-CLIENT-001 | IMPLEMENTATION | Reusable production Node named-pipe client with OS-protected distinct installation/agent credentials. | P1-RPC-CONTRACT-001-R1 | real pipe handshake, method, reconnect, deadline and stream tests | proposed |
-| P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001-R1, P1-RPC-CONTRACT-001-R1 | real process startup/restart/reconcile/failure tests | proposed |
+| P1-RUNTIME-COMP-001 | INTEGRATION | Compose every accepted local service in one runtime and serve authorized business RPC. | P1-SERVICE-READINESS-001-R1, P1-RPC-CONTRACT-001-R1 | real process startup/restart/reconcile/failure tests | accepted — integrated via `--no-ff` merge to `LokiAI-v1.2` (commit `9fa5f49`, from `node/P1-RUNTIME-COMP-001`@`78a58f0`, zero conflicts). Real `RuntimeBusinessService` installed into `ComposedHost::open_with_arena`, replacing `UnsupportedBusinessService`. 8 of 10 real-backed business methods now work over real IPC: `Ping`/`EchoStream` (already real, unaffected), `RuntimeGetStatus`/`DevicesList`/`DeviceGet`/`DeviceGetHealth` (real reads), `AgentRunRegister`/`AgentRunUpdate`/`WorkIntentAcknowledge` (real agent-mutations, gated by a hard, unconditional `PrincipalKind::AgentConnection` kind-check preceding any storage lookup — independently security-reviewed, PASS). `RestartRequest`/`FlashRequest`/`BuildRequest` remain `RpcError::UnsupportedMethod` by design (explicit dedicated match arms, not a catch-all) — scoped out by orchestrator decision, deferred to `P1-RUNTIME-COMP-DESKTOP-MUTATION-001` (see new row below). Independent security and test review both PASS, no Critical/High finding. `cargo test -p loki-runtime` 77/77 (62 lib + 5 `business_service` + 5 `host_lifecycle` + 4 `process_behavior` + 1 `secure_memory_arena_runtime`), 3 ignored (pre-existing `DAT-002-MEM-HOST-VERIFY-001` gate, unmodified); full-workspace `cargo build`/`clippy --workspace --all-targets -D warnings`/`cargo test --workspace -- --test-threads=1` (87/87 `test result: ok`) and `pnpm run verify` all clean on the integrated baseline. Evidence: `Docs/graph/handoffs/P1-RUNTIME-COMP-001-1.md`; `Docs/graph/evidence/P1/P1-RUNTIME-COMP-001/README.md`. |
+| P1-RUNTIME-COMP-DESKTOP-MUTATION-001 | IMPLEMENTATION | Wire `RestartRequest`/`FlashRequest`/`BuildRequest` to `MutationSubmissionPort` for a Hello-authenticated `DesktopInstallation` IPC principal — explicitly deferred from `P1-RUNTIME-COMP-001` (§1/§9 of that packet). Not yet a drafted task packet (working title only). | P1-RUNTIME-COMP-001, a not-yet-opened decision on how a Hello-authenticated `DesktopInstallation` IPC principal is bound to a real `LocalAuthority` session/generation (no code path anywhere in this workspace binds one today — confirmed by direct inspection of `crates/loki-local-authority/src/store.rs` and `crates/loki-storage/src/local_authority.rs`) | real, non-fabricated `grant_generation` resolution for `DesktopInstallation` principals; real accept/deny tests for all 3 methods; no session/grant fabrication | proposed — blocked on the session/grant-binding decision; not dispatchable until that decision is opened and accepted |
 | P1-IPC-SHUTDOWN-CORR | CORRECTION | Correction discovered during `P1-RUNTIME-COMP-001`'s implementation: `loki-ipc`'s `Server::serve` spawned per-connection dispatch tasks fully detached, so a caller (`ComposedHost::run`) could tear down storage/secure-memory while a connection (and any `BusinessService` clone it held) was still running — a real, reproduced `STATUS_ACCESS_VIOLATION` use-after-free-class crash. Fixed via a `tokio::task::JoinSet`-tracked drain-on-shutdown mechanism with a `watch`-based shutdown signal, then a follow-up round closing two independent-review findings: an outer/inner shutdown-timeout mismatch (`compose.rs`'s now-removed 5s `IPC_SHUTDOWN_GRACE` raced shorter than `loki-ipc`'s own internal drain grace, letting the crash slip through for calls in the 5-8s window) and untracked per-call dispatch tasks (`spawn_unary_call`/`spawn_stream_call` now tracked in a connection-local `JoinSet`, drained-or-aborted-and-confirmed before a connection is considered done). | RUN-002, P1-RUNTIME-COMP-001 (correction target; not a graph dependency) | `cargo fmt`/`clippy --workspace --all-targets -D warnings` clean; `cargo test -p loki-ipc` 108/108; `cargo test -p loki-runtime` 72/72 (incl. new `host_lifecycle::slow_business_call` test proving `ComposedHost::run` genuinely waits ~7-9s for a real in-flight business call, not just aborts it); real before/after reproduction through the actual `ComposedHost::run` path (crash pre-fix, clean pass post-fix) confirmed by two independent reviewers; full-workspace `cargo build`/`clippy -D warnings`/`cargo test --workspace` and `pnpm run verify` all clean on the integrated baseline | accepted — integrated via `--no-ff` merge to `LokiAI-v1.2` (commits `85fa601`, `0cc6fde`, `f3023ab`, `fef20ad` from `node/P1-IPC-SHUTDOWN-CORR`, zero conflicts — disjoint file set from every other node integrated so far). Both fix rounds passed independent security review with no remaining Critical/High findings. Two narrow non-blocking follow-ups tracked, not silently dropped: (1) a secondary nested-abort-without-confirm edge case only reachable if a connection is already catastrophically stuck beyond the normal 20s `CONNECTION_DRAIN_GRACE` bound; (2) a doc-comment overclaim. Unblocks `P1-RUNTIME-COMP-001` (still `NEEDS_REPLAN` in worktree `L:\LokiAI-v1.2-wt\P1-RUNTIME-COMP-001`, commit `9149a06`, untouched by this node) to re-dispatch against this fix. Evidence: `Docs/graph/handoffs/P1-IPC-SHUTDOWN-CORR-1.md`; `Docs/graph/evidence/P1/P1-IPC-SHUTDOWN-CORR/README.md`. |
 | P1-ELECTRON-RUNTIME-001 | IMPLEMENTATION | Replace Electron hardcoded unavailable providers with the authenticated production runtime client. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real Electron-main/runtime status, list, subscription and reconnect evidence | proposed |
 | P1-MCP-RUNTIME-001 | IMPLEMENTATION | Replace MCP unavailable/deny-all production defaults with per-request runtime authorization using a revocable agent credential. | P1-NODE-IPC-CLIENT-001, P1-RUNTIME-COMP-001 | real MCP stdio-to-runtime positive and denial matrix | proposed |
@@ -2013,4 +2014,88 @@ new_or_changed_risks: none newly introduced by integration. Carried forward
   shutdown can now legitimately take up to ~20s in the worst case (a
   genuinely wedged connection) instead of the old, unsafe-but-faster ~8s —
   a deliberate, documented safety-over-speed tradeoff, not a regression.
+```
+
+```text
+node_id: P1-RUNTIME-COMP-001
+from: worker-complete (`ACCEPTED-pending-review`), independently reviewed
+  (security PASS, test PASS)
+to: accepted (integrated — `--no-ff` merge to `LokiAI-v1.2`, landing commits
+  `0317582`, `1fea3cd`, `34523be`, `78a58f0` from `node/P1-RUNTIME-COMP-001`,
+  starting revision `41178b7`; zero conflicts)
+timestamp: 2026-09-01T00:00:00Z (approximate)
+actor: implementer (`loki-implementer`; worktree
+  `L:\LokiAI-v1.2-wt\P1-RUNTIME-COMP-001`, branch
+  `node/P1-RUNTIME-COMP-001`), independent security review (PASS, no
+  Critical/High), independent test review (PASS, no Critical/High; found and
+  reported one documentation nit, corrected before this integration),
+  loki-integrator (Claude Sonnet 5, Claude Code)
+starting_revision: `LokiAI-v1.2`@`41178b7` (post `P1-IPC-SHUTDOWN-CORR`
+  integration)
+result_revision: `node/P1-RUNTIME-COMP-001`@`78a58f0`, merged as
+  `LokiAI-v1.2`@`9fa5f49`
+evidence: `Docs/graph/handoffs/P1-RUNTIME-COMP-001-1.md`;
+  `Docs/graph/evidence/P1/P1-RUNTIME-COMP-001/README.md`; `cargo test -p
+  loki-runtime -- --test-threads=1` 77/77 (62 lib + 5 `business_service` + 5
+  `host_lifecycle` + 4 `process_behavior` + 1
+  `secure_memory_arena_runtime`), 3 ignored (pre-existing
+  `DAT-002-MEM-HOST-VERIFY-001` gate, unmodified); full-workspace `cargo
+  build`, `cargo clippy --workspace --all-targets -- -D warnings` (zero
+  warnings), `cargo test --workspace -- --test-threads=1` (87/87 `test
+  result: ok` blocks, zero failures), `pnpm run verify` (exit 0, full chain
+  including TS/Electron/`cargo:test`).
+reason: This node installs the first real `loki_ipc::server::BusinessService`
+  implementation (`RuntimeBusinessService`) into the running `ComposedHost`,
+  replacing `UnsupportedBusinessService` — the first revision at which the
+  `loki-runtime` process can actually serve a real business RPC call beyond
+  `Ping`/`EchoStream`. Scope was narrowed by orchestrator scheduling decision
+  (2026-08-31) to 8 of the 10 real-backed business methods: the 4 real reads
+  (`RuntimeGetStatus`, `DevicesList`, `DeviceGet`, `DeviceGetHealth`, wired to
+  `RuntimeReadPort`) and the 3 agent-mutation methods (`AgentRunRegister`,
+  `AgentRunUpdate`, `WorkIntentAcknowledge`, wired to
+  `MutationSubmissionPort`), the latter under an explicit
+  `principal_id == connection_id` convention gated by a mandatory, hard,
+  unconditional `PrincipalKind::AgentConnection` check preceding any storage
+  lookup — the exact security property that prevents a `DesktopInstallation`
+  principal from impersonating/targeting an agent connection, independently
+  security-reviewed and confirmed correct. The 3 desktop-approval-gated
+  mutation methods (`RestartRequest`/`FlashRequest`/`BuildRequest`) were
+  explicitly excluded rather than fabricated: no code path anywhere in this
+  workspace binds a Hello-authenticated IPC session to an issued
+  `LocalAuthority` session/generation (confirmed by direct inspection),
+  and building one would require exactly the invented-authority fabrication
+  `AGENTS.md` rule 1 forbids. They return `RpcError::UnsupportedMethod` via
+  dedicated match arms (not a silent catch-all), unchanged from
+  `UnsupportedBusinessService`'s existing behavior — not a regression.
+  The worker's first attempt (`0317582`) discovered and correctly reported a
+  real shutdown-lifecycle crash as `NEEDS_REPLAN`; the orchestrator dispatched
+  `P1-IPC-SHUTDOWN-CORR` to fix it (already integrated at `41178b7`), and this
+  node's second attempt (`1fea3cd`) rebased onto that fix, reconciling its own
+  `Arc`-wrapped `compose.rs` changes against `P1-IPC-SHUTDOWN-CORR`'s
+  `business_override` mechanism via a new `BusinessOverride` enum so
+  production `open()` genuinely installs the real service (not a gap left by
+  the other node's own more limited view at the time it was written) — this
+  reconciliation was independently reviewed and confirmed correct. Two real
+  test-fixture bugs (unrelated to the production business-service code) were
+  found and fixed by the worker during re-verification, documented in the
+  handoff §7 decision 3. Before this integration, the integrator fixed one
+  trivial documentation nit the independent test reviewer found: the handoff
+  §2/§4 said `76/76` for `cargo test -p loki-runtime`; the reproduced actual
+  total is `77` passed, 3 ignored — corrected in the worktree (commit
+  `78a58f0`) and brought in via this merge.
+unblocked_nodes: none of `P1-ELECTRON-RUNTIME-001`/`P1-MCP-RUNTIME-001` are
+  dispatchable yet — both also still depend on `P1-NODE-IPC-CLIENT-001`
+  (`proposed`, unaffected by this integration). A new follow-up node is
+  registered in the node register above (working title
+  `P1-RUNTIME-COMP-DESKTOP-MUTATION-001`) for the 3 explicitly deferred
+  desktop-mutation methods, itself blocked on a not-yet-opened decision
+  covering how a Hello-authenticated `DesktopInstallation` IPC principal is
+  bound to a real `LocalAuthority` session/generation — not silently
+  absorbed into this node's acceptance, recorded as its own row per the
+  dispatching instruction.
+new_or_changed_risks: none newly introduced by integration. The 3
+  desktop-mutation methods staying `RpcError::UnsupportedMethod` is a known,
+  named, tracked gap (not a regression — `UnsupportedBusinessService`
+  returned the same result for them before this node), explicitly recorded
+  above rather than silently absorbed as complete scope.
 ```
