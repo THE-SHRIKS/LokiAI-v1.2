@@ -24,6 +24,12 @@
 //! - [`clock`]: minimal UTC/Unix-millis "now" helpers this composition needs
 //!   as a caller of `loki-storage` (which never reads a system clock itself)
 //!   and of the discovery file format.
+//! - [`business_service`] (`P1-RUNTIME-COMP-001`): the real
+//!   `loki_ipc::server::BusinessService` implementation `compose` installs
+//!   into the bound `Server`, replacing the fail-closed
+//!   `UnsupportedBusinessService` default for the 8 in-scope business
+//!   methods — see that module's doc comment for exactly which methods and
+//!   the security convention it documents.
 //!
 //! ## Platform gate
 //!
@@ -36,6 +42,7 @@
 //! compiles for a contributor on a non-Windows machine, exactly as
 //! `Cargo.toml`'s dependency comment for `loki-ipc` describes.
 
+pub mod business_service;
 pub mod clock;
 pub mod compose;
 pub mod discovery;

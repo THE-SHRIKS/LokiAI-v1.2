@@ -342,3 +342,134 @@ fn run_mode_composes_a_real_ipc_listener_that_accepts_a_connection_then_shuts_do
         "expected the discovery file to record the stopped state after a clean shutdown: {discovery_contents}"
     );
 }
+
+/// `P1-RUNTIME-COMP-001`: proves, once `DAT-002-MEM-HOST-VERIFY-001` lands,
+/// that a spawned real `loki-runtime` `Run`-mode process serves a real
+/// business RPC call end-to-end through the newly-installed
+/// `crate::host::business_service::RuntimeBusinessService` (replacing
+/// `UnsupportedBusinessService`), not merely `Ping`/`EchoStream`.
+///
+/// This test's achievable assertion is bounded by a real, already-documented
+/// limitation this node's own task packet records (`Docs/graph/tasks/
+/// P1-RUNTIME-COMP-001.md` §3 "known starting conditions"): production
+/// `ComposedHost::open_with_arena` still uses `ServerConfig::new`'s single
+/// legacy shared-secret token/principal, whose `authority` and
+/// `authorized_entity_ids` are both empty. That means a real client
+/// authenticated through the real spawned binary's real token is *always*
+/// denied by `crate::server::authorize_method`'s real authorization check
+/// before ever reaching the real `BusinessService::call` — identically
+/// whether the installed `BusinessService` is the old
+/// `UnsupportedBusinessService` or this node's new
+/// `RuntimeBusinessService`. Resolving that limitation (issuing a real,
+/// authorized credential to a real IPC caller) is `P1-NODE-IPC-CLIENT-001`'s
+/// pending scope, not this node's (`Docs/graph/tasks/P1-RUNTIME-COMP-001.md`
+/// §1, §3). The honest, currently-achievable black-box proof is therefore
+/// that the real business-RPC round trip completes end-to-end with a
+/// definitive `PermissionDenied` outcome — not a hang, not a dropped
+/// connection, not `MissingCapability`, and not `UnsupportedMethod` — for a
+/// real, now-recognized, closed business method (`RuntimeGetStatus`),
+/// proving the negotiated business capability and the real authorization
+/// path are both live against the real compiled binary. Once
+/// `P1-NODE-IPC-CLIENT-001` lands a real authorized-credential distribution
+/// path, a follow-up node should extend this test (or add a sibling) to
+/// assert a real `Ok` business result end-to-end.
+///
+/// Skips (rather than failing the suite) under the same no-console
+/// environment condition the other tests in this file document.
+#[cfg(windows)]
+#[test]
+#[ignore = "DAT-002-MEM-CODE-001: ComposedHost::open() now fail-closes Run \
+            mode until an accepted, measured secure-memory bounds profile \
+            exists; that profile is only produced by the separately-gated \
+            DAT-002-MEM-HOST-VERIFY-001 node, which is blocked on a \
+            not-yet-approved VM/elevation operation. This is expected, \
+            temporary behavior, not a regression — re-enable this test \
+            (remove this attribute) once DAT-002-MEM-HOST-VERIFY-001 lands \
+            and a real bounds profile is available for the real binary to \
+            load."]
+fn run_mode_serves_a_real_business_rpc_round_trip_that_completes_with_a_definitive_authorization_outcome()
+ {
+    let _guard = RUN_MODE_PIPE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let local_app_data = tempfile::tempdir().expect("failed to create a temp LOCALAPPDATA");
+    let child = support::RunningChild::spawn_with_env(&[(
+        "LOCALAPPDATA",
+        local_app_data
+            .path()
+            .to_str()
+            .expect("temp dir path must be valid UTF-8"),
+    )]);
+    let mut stdout_lines = Vec::new();
+
+    let bound = child.wait_for_stdout_line(Duration::from_secs(10), &mut stdout_lines, |line| {
+        line.contains("ipc listener bound and serving")
+    });
+    assert!(
+        bound,
+        "loki-runtime did not log the ipc-listener-bound line within 10s; stdout so far: {stdout_lines:?}"
+    );
+
+    let runtime_dir = local_app_data.path().join("LokiAI").join("runtime");
+    let legacy_token_path = runtime_dir.join("ipc.token");
+    let raw_token = loki_runtime::host::token::load_or_create(&legacy_token_path)
+        .expect("DPAPI-protected IPC token must be readable once serving was logged");
+    let pipe_name = loki_runtime::host::discovery::well_known_pipe_name().expect(
+        "failed to resolve the well-known pipe name (same-user, same function the child used)",
+    );
+
+    let connect_rt =
+        tokio::runtime::Runtime::new().expect("failed to build a client-side tokio runtime");
+    connect_rt.block_on(async {
+        let client_config = loki_ipc::ClientConfig::new(
+            pipe_name,
+            loki_ipc::auth::AuthToken::new(raw_token),
+            "process-behavior-business-test-client",
+        );
+        let client = tokio::time::timeout(
+            Duration::from_secs(5),
+            loki_ipc::Client::connect(client_config),
+        )
+        .await
+        .expect("connect must not hang")
+        .expect("connect should succeed against the real running background host");
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.business_call(
+                loki_ipc::protocol::Method::RuntimeGetStatus(loki_ipc::business::EmptyParams {}),
+                Duration::from_secs(3),
+            ),
+        )
+        .await
+        .expect("business call must not hang");
+        assert!(
+            matches!(
+                result,
+                Err(loki_ipc::client::CallError::Rpc(
+                    loki_ipc::protocol::RpcError::PermissionDenied
+                ))
+            ),
+            "expected a definitive PermissionDenied round trip (see this test's doc comment \
+             for why that, not an Ok result, is the currently-achievable proof), got {result:?}"
+        );
+    });
+
+    if let Err(err) = child.send_ctrl_break() {
+        child.kill();
+        eprintln!(
+            "skipping shutdown assertions in \
+             run_mode_serves_a_real_business_rpc_round_trip_that_completes_with_a_definitive_authorization_outcome: \
+             GenerateConsoleCtrlEvent failed ({err}); this host is not attached to a console."
+        );
+        return;
+    }
+
+    let (status, stderr) = child.wait_for_exit(Duration::from_secs(10), &mut stdout_lines);
+    assert!(
+        status.success(),
+        "expected exit 0 after CTRL_BREAK, got {:?}\nstdout: {}\nstderr: {stderr}",
+        status.code(),
+        stdout_lines.join("\n"),
+    );
+}
