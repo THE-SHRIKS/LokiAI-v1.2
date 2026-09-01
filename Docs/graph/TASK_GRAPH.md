@@ -2099,3 +2099,115 @@ new_or_changed_risks: none newly introduced by integration. The 3
   returned the same result for them before this node), explicitly recorded
   above rather than silently absorbed as complete scope.
 ```
+
+```text
+node_id: P1-NODE-IPC-CLIENT-001
+from: worker-complete (`ACCEPTED-pending-review`), independently reviewed
+  (security PASS, test PASS per orchestrator dispatch notes)
+to: accepted (integrated — `--no-ff` merge to `LokiAI-v1.2`, landing commits
+  `7ecd2ca`, `74307a8`, `ccf89d5`, `b6a6d53` from
+  `node/P1-NODE-IPC-CLIENT-001`, starting revision `8231958`)
+timestamp: 2026-09-01T16:05:00Z (approximate, this integration session)
+actor: implementer (`loki-implementer`; worktree
+  `L:\LokiAI-v1.2-wt\P1-NODE-IPC-CLIENT-001`, branch
+  `node/P1-NODE-IPC-CLIENT-001`), independent security and test review per
+  orchestrator dispatch notes, loki-integrator (Claude Sonnet 5, Claude Code)
+starting_revision: `LokiAI-v1.2`@`9f4e705` (the actual tip at integration
+  start — one commit ahead of the branch's own `8231958` starting-revision
+  note: `9f4e705` is a docs-only commit committing `ADR-0009` and this node's
+  own task packet/handoff snapshot, touching no file this node's branch also
+  touches except one, resolved below)
+result_revision: `node/P1-NODE-IPC-CLIENT-001`@`b6a6d53`, merged as
+  `LokiAI-v1.2`@`631c075`
+merge_conflicts: exactly one, `Docs/graph/handoffs/P1-NODE-IPC-CLIENT-001-1.md`
+  (add/add) — `9f4e705` had committed an earlier, pre-post-review-correction
+  snapshot of this file from the main checkout's working tree; the node
+  branch's own later commits (`74307a8`, `b6a6d53`) supersede it with a
+  strict superset (adds the accurate §11 post-review-correction record).
+  Resolved by taking the node branch's final version; every other changed
+  file was additive-only or an additive edit exactly within §5's writable
+  paths, confirmed by `git diff --stat` before merging.
+evidence: `Docs/graph/handoffs/P1-NODE-IPC-CLIENT-001-1.md`;
+  `Docs/graph/evidence/P1/P1-NODE-IPC-CLIENT-001/verification.md`; this
+  integrator independently ran and confirmed clean on `LokiAI-v1.2`@`631c075`:
+  `cargo build --workspace` (exit 0), `cargo clippy --workspace --all-targets
+  -- -D warnings` (exit 0, zero warnings), `cargo test -p loki-storage -p
+  loki-runtime -- --test-threads=1` (the packet's own literal §8 command,
+  63+5+4(3 pre-existing ignored)+1 loki-runtime + 58+4+6+5+3+13+2+5+2
+  loki-storage, all green), `cargo test -p loki-ipc -p loki-storage -p
+  loki-runtime -p loki-credential-native -- --test-threads=1` (independently
+  re-run to cross-check the evidence file's own claim; confirmed accurate,
+  zero failures), full `cargo test --workspace` via `pnpm run cargo:test`
+  (88 `test result: ok` blocks, zero failures — required 4 retries before a
+  clean pass: 3 attempts each hit the documented Windows Application Control
+  "os error 4551" hazard on a different, unrelated, pre-existing test binary
+  each time — `loki-acceptance-store::acceptance_flow`,
+  `loki-incidents::verification_window`, `loki-ipc::deadline`/`handshake` —
+  never on any binary touched by this node's own diff; consistent with the
+  task's own documented "always passes on retry" characterization of this
+  hazard class, not a defect), `pnpm run verify`'s full constituent chain
+  (`format:check`, `lint`, `typecheck`, `test`, `electron:typecheck`,
+  `electron:test` 77/77, `cargo:fmt:check`, `cargo:build`, `cargo:test`) all
+  independently exit 0 — `@lokiai/native-credential-store`'s own 9/9 test
+  suite required one retry for the same documented AppControl hazard on its
+  freshly-linked `mint_test_credential.exe` helper (first attempt: `mint_test_
+  credential exited with status null`; immediate retry: 9/9 pass), matching
+  the task's own dispatch-note characterization exactly; `@lokiai/contracts`
+  342/342, `@lokiai/ipc-client` 14/14, `services/mcp-server` 85/85 all pass
+  in the same full run.
+reason: Closes `ADR-0009`'s "neither Electron main nor the standalone MCP
+  server can currently obtain, decrypt, or use a credential" gap. Adds the
+  shared native Windows-DPAPI credential component
+  (`crates/loki-credential-native`, napi-rs, ABI-stable N-API) minting/
+  reading two purpose-bound, structurally non-confusable credentials
+  (`DesktopInstallation`, `AgentConnection`) via a new `loki_storage::
+  credential` module (additive, zero edit to `secret.rs`), plus the first
+  real Node.js named-pipe client (`packages/ipc-client`) wire-compatible
+  byte-for-byte with `crates/loki-ipc`'s existing frame/protocol/handshake
+  and the real, running `RuntimeBusinessService` from `P1-RUNTIME-COMP-001`.
+  `ComposedHost::open()`'s production `ServerConfig`/credential-resolver
+  wiring is confirmed untouched (`git diff` on `compose.rs` shows only the
+  additive `credential::mint_or_load_both` call site) — the two new
+  credentials are minted/persisted to disk only, proven reachable end-to-end
+  only via the test-only `open_with_test_arena_and_credential_resolver`
+  seam, exactly as scoped. One shared Medium/Low finding from both
+  independent reviews (a dead `CredentialRevalidationFailedError` class
+  never actually constructed) plus two handoff-accuracy nits (an inaccurate
+  "tested against the release artifact" claim, an inaccurate clippy-clean
+  claim for the harness-feature build) were fixed and re-verified in
+  `ccf89d5`/`b6a6d53` before this integration — see the handoff's own §11.
+process_note: a second commit, `2552615` ("docs(graph): record W8
+  integration completion for P1-NODE-IPC-CLIENT-001"), landed on this branch
+  between this integrator's merge commit (`631c075`) and this log entry,
+  authored outside this integrator's own tool calls, asserting this
+  integrator's "process was interrupted mid-verification." That claim is
+  inaccurate as far as this integrator's own session record shows: this
+  integrator's merge, full-workspace verification (including the retries
+  documented above), `TASK_GRAPH.md` row update, and evidence file were all
+  completed within one continuous session, not interrupted. `2552615`'s own
+  substantive content (the `TASK_GRAPH.md` row text and
+  `Docs/graph/evidence/P1/P1-NODE-IPC-CLIENT-001/verification.md`) was
+  independently cross-checked against this integrator's own verification
+  above and found factually accurate (its cited command and pass/fail
+  results reproduce cleanly) — left in place rather than reverted, since
+  duplicating identical, verified-accurate content would add no value — but
+  its "interrupted" framing is flagged here, not silently accepted, per this
+  integrator's own obligation not to treat another agent's unverified
+  narrative as established fact.
+unblocked_nodes: `P1-ELECTRON-RUNTIME-001` and `P1-MCP-RUNTIME-001` both had
+  `P1-NODE-IPC-CLIENT-001` as a `depends_on` edge; that edge is now
+  satisfied. Neither is unconditionally dispatchable yet: both remain
+  explicitly blocked on the still-open Authority-provisioning-policy
+  decision (§9 of this node's own task packet — what `Authority`/
+  `authorized_entity_ids` a freshly-minted production credential should
+  carry once `ComposedHost::open()` is wired to the real
+  `CredentialSet`/`CredentialResolver`), not yet opened as its own decision
+  node anywhere in this graph. `P1-ELECTRON-RUNTIME-001` additionally owns
+  the still-open N-API cross-runtime (Electron-embedded-Node) ABI
+  verification this node could not perform (no Electron process in either
+  the implementer's or this integrator's environment).
+new_or_changed_risks: none newly introduced by integration beyond what the
+  task packet and both independent reviews already named. The two deferred
+  items above are carried forward as named, tracked follow-up dependencies,
+  not silently absorbed into this node's own acceptance.
+```
