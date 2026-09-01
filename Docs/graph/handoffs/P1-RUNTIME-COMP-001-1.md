@@ -39,7 +39,7 @@ pre-existing ignored tests exactly.
 | Criterion | Result | Evidence |
 |---|---|---|
 | `cargo build --workspace` / `cargo clippy --workspace --all-targets -- -D warnings` zero warnings | pass | §4 |
-| `cargo test -p loki-runtime -- --test-threads=1` passes, including new `tests/business_service.rs` | pass | §4 — 76/76 across lib + all 4 integration-test binaries |
+| `cargo test -p loki-runtime -- --test-threads=1` passes, including new `tests/business_service.rs` | pass | §4 — 77/77 across lib + all 4 integration-test binaries |
 | `cargo test -p loki-ipc -p loki-storage -p loki-mutation-contract -- --test-threads=1` unchanged, still green | pass | §4 |
 | Real client receives real results for the 8 in-scope methods over a real pipe against a real `ComposedHost` | pass | `startup_serves_ping_all_four_reads_and_all_three_agent_mutations_over_a_real_pipe` |
 | `RestartRequest`/`FlashRequest`/`BuildRequest` return `UnsupportedMethod` | pass | `desktop_mutation_methods_remain_unsupported_even_for_a_fully_authorized_principal` |
@@ -70,7 +70,7 @@ pre-existing ignored tests exactly.
 | `cargo fmt --all -- --check` | Windows 11, workspace toolchain | exit 0 | ran clean after `cargo fmt --all` |
 | `cargo clippy --workspace --all-targets -- -D warnings` | same | exit 0, zero warnings | full workspace check, post-rebase |
 | `cargo build --workspace` | same | exit 0 | only pre-existing, unrelated `openssl-sys` static-link `LNK4099` PDB warnings |
-| `cargo test -p loki-runtime -- --test-threads=1` | same | 76 passed, 0 failed, 3 ignored (pre-existing `DAT-002-MEM-HOST-VERIFY-001`-gated black-box tests, unchanged) | lib (62) + `tests/business_service.rs` (5) + `tests/host_lifecycle.rs` (5) + `tests/process_behavior.rs` (4 run + 3 ignored) + `tests/secure_memory_arena_runtime.rs` (1) |
+| `cargo test -p loki-runtime -- --test-threads=1` | same | 77 passed, 0 failed, 3 ignored (pre-existing `DAT-002-MEM-HOST-VERIFY-001`-gated black-box tests, unchanged) | lib (62) + `tests/business_service.rs` (5) + `tests/host_lifecycle.rs` (5) + `tests/process_behavior.rs` (4 run + 3 ignored) + `tests/secure_memory_arena_runtime.rs` (1) |
 | `cargo test -p loki-ipc -p loki-storage -p loki-mutation-contract -- --test-threads=1` | same | all green, 0 failed across every suite | regression check — none of these crates' behavior was touched |
 | `cargo test -p loki-runtime --test business_service --test host_lifecycle -- --test-threads=1`, repeated 3x | same | 5/5 and 5/5 pass every time, no crash | flake-check specifically targeting the previously-crashing suites |
 | `cargo test -p loki-runtime --test host_lifecycle -- --test-threads=1` on the **pristine pre-`P1-RUNTIME-COMP-001` tree** (`git stash`, first attempt's own control) | same | exit 0, 4/4 passed | established in the first attempt as the crash-attribution baseline; not re-run this round since the crash itself is now independently fixed and re-confirmed below |
