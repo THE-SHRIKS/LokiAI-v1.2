@@ -25,6 +25,7 @@ members = [
   "crates/loki-build-executor",
   "crates/loki-connector-esp32-s3",
   "crates/loki-acceptance-store",
+  "crates/loki-credential-native",
 ]
 
 [workspace.package]

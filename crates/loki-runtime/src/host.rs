@@ -30,6 +30,11 @@
 //!   `UnsupportedBusinessService` default for the 8 in-scope business
 //!   methods — see that module's doc comment for exactly which methods and
 //!   the security convention it documents.
+//! - [`credential`] (`P1-NODE-IPC-CLIENT-001`/`ADR-0009`): mints/loads the
+//!   `DesktopInstallation`/`AgentConnection` DPAPI-protected credentials
+//!   `compose` persists alongside the legacy token — additive, disk-only in
+//!   this node (not yet read back into the live `Server`'s
+//!   `CredentialResolver`; see that module's doc comment for why).
 //!
 //! ## Platform gate
 //!
@@ -45,6 +50,7 @@
 pub mod business_service;
 pub mod clock;
 pub mod compose;
+pub mod credential;
 pub mod discovery;
 pub mod paths;
 pub mod supervisor;

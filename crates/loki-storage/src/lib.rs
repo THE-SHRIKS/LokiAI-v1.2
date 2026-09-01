@@ -48,6 +48,8 @@ pub mod agent_delivery;
 pub mod agents;
 pub mod approvals;
 pub mod cipher;
+#[cfg(windows)]
+pub mod credential;
 pub mod devices;
 pub mod error;
 pub mod ids;
