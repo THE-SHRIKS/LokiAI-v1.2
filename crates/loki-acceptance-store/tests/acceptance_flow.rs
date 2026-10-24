@@ -9,6 +9,7 @@ use std::sync::{Arc, Barrier};
 
 use loki_acceptance_store::{AcceptanceStoreError, accept_mutation, clock};
 use loki_approvals::{ApprovalRequest, ApprovalStore};
+use loki_jobs::{CancelOutcome, JobEngine};
 use loki_local_authority::{LocalAuthority, LocalContext};
 use loki_mutation_contract::{
     AcceptanceResult, ApprovalReference, IdempotencyKey, MutationAcceptanceRequest,
@@ -28,6 +29,99 @@ use loki_storage::states::JobState;
 
 const PRINCIPAL_SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 const AGENT_CONNECTION_ID: &str = "ac_test_connection_1";
+
+/// Reconciles the older approval regression with the current actor/parameters
+/// binding and the production approval creation path. A caller's re-derived
+/// reference cannot override the binding persisted by the approval store.
+#[test]
+fn fresh_changed_operation_cannot_reuse_a_granted_approval() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = open_storage(dir.path(), "changed-operation.sqlite3");
+    let (original, approval_id) = real_flash_request_with_granted_approval(
+        &storage,
+        "idem-original-operation",
+        "target-original",
+    );
+    let changed = MutationAcceptanceRequest::new(
+        original.principal_sid(),
+        original.actor_id(),
+        original.grant_generation(),
+        original.method(),
+        "target-changed",
+        original.artifact_digest().map(str::to_owned),
+        original.parameters_digest(),
+        IdempotencyKey::new("idem-changed-operation").unwrap(),
+        None,
+    )
+    .unwrap();
+    let changed = changed.clone().with_approval_reference(ApprovalReference {
+        approval_id: approval_id.clone(),
+        bound_request_digest: changed.request_digest(),
+        expires_at_ms: original.approval_reference().unwrap().expires_at_ms,
+    });
+
+    assert_eq!(
+        accept_mutation(&storage, &changed).unwrap(),
+        AcceptanceResult::Rejected(MutationRejection::ApprovalNotConsumable),
+    );
+    assert!(
+        storage
+            .get_approval(&approval_id)
+            .unwrap()
+            .unwrap()
+            .consumed_at_ms
+            .is_none()
+    );
+    assert!(!mutation_acceptance_exists(
+        &storage,
+        "idem-changed-operation"
+    ));
+    assert!(matches!(
+        accept_mutation(&storage, &original).unwrap(),
+        AcceptanceResult::Accepted(_)
+    ));
+}
+
+/// Uses the exact same persisted job and approval database, rather than the
+/// older test's unrelated mirrored job, to verify cancellation cannot restore
+/// an already-consumed approval.
+#[test]
+fn cancellation_of_the_accepted_job_keeps_its_approval_consumed() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = open_storage(dir.path(), "cancel-accepted-job.sqlite3");
+    let (request, approval_id) = real_flash_request_with_granted_approval(
+        &storage,
+        "idem-cancel-accepted-job",
+        "target-cancel",
+    );
+    let result = accept_mutation(&storage, &request).unwrap();
+    let AcceptanceResult::Accepted(record) = result else {
+        panic!("expected a real accepted job, got {result:?}");
+    };
+    let before = storage
+        .get_approval(&approval_id)
+        .unwrap()
+        .unwrap()
+        .consumed_at_ms;
+    assert!(before.is_some());
+    let engine = JobEngine::new(Arc::clone(&storage));
+    assert!(matches!(
+        engine.request_cancel(record.job_id()).unwrap(),
+        CancelOutcome::CancelledImmediately(_)
+    ));
+    assert_eq!(
+        storage.get_job(record.job_id()).unwrap().unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        storage
+            .get_approval(&approval_id)
+            .unwrap()
+            .unwrap()
+            .consumed_at_ms,
+        before
+    );
+}
 
 /// Opens a real, on-disk, DPAPI-managed SQLCipher-encrypted database (not
 /// `:memory:`, not plaintext — `Storage::open` itself refuses

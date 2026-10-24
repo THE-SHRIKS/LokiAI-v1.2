@@ -66,3 +66,8 @@ hardware: <operator record and artifact digest when required>
 
 If an accepted change adds a requirement, add its traceability row in the same
 change before implementation dispatch.
+
+
+## Source reconciliation, 24 October 2026
+
+The accepted AS-007 approval binding and ADR-0008 restart/replay behavior retain their current production contracts. Additional regression coverage is in `crates/loki-acceptance-store/tests/acceptance_flow.rs` and `agent_mutation_composition.rs`. The existing DAT-002 host-bounds requirements remain deferred; their opt-in tests are not acceptance evidence. See `Docs/graph/evidence/RECONCILIATION-2026-10-24/resolution-record.md` and `verification.md`.

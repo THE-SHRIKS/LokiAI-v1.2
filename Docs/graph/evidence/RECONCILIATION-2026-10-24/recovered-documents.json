@@ -1,0 +1,9 @@
+{
+  "recovered": [
+    "Docs/graph/evidence/W4/DAT-002-MEM-HOST-VERIFY-001/VM-ENVIRONMENT-FINDING.md",
+    "Docs/graph/evidence/W4/DAT-002-MEM-HOST-VERIFY-001/vm-boot-splash-t0.png",
+    "Docs/graph/evidence/W4/DAT-002-MEM-HOST-VERIFY-001/vm-boot-splash-t13min.png",
+    "Docs/graph/handoffs/P1-RPC-CONTRACT-001-1.md"
+  ],
+  "newer_main_documents_retained": []
+}

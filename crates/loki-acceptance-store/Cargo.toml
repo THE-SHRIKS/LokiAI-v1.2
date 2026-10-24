@@ -64,3 +64,11 @@ loki-local-authority = { path = "../loki-local-authority" }
 # this crate's own `[dev-dependencies]`-gated build only. Mirrors every
 # sibling crate's identical self-referential dev-dependency.
 loki-storage = { path = "../loki-storage", features = ["test-support"] }
+
+# Reconciled restart/replay and same-store cancellation integration tests.
+# Existing workspace crates only; no new production dependencies.
+loki-agents = { path = "../loki-agents" }
+loki-agent-delivery = { path = "../loki-agent-delivery" }
+loki-incidents = { path = "../loki-incidents" }
+loki-connectors-sdk = { path = "../loki-connectors-sdk" }
+loki-jobs = { path = "../loki-jobs" }
