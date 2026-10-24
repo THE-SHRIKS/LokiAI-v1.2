@@ -2,7 +2,10 @@
 
 use std::fs;
 
-use loki_storage::{backup_sqlcipher_database, open_or_migrate_sqlcipher, rotate_sqlcipher_key};
+use loki_storage::{
+    backup_sqlcipher_database, open_backup_sqlcipher, open_or_migrate_sqlcipher,
+    rotate_sqlcipher_key,
+};
 use rusqlite::Connection;
 
 const MARKER: &str = "LOKIAI_DAT002_CONFIDENTIAL_MARKER_7d9b";
@@ -140,10 +143,41 @@ fn managed_backup_is_encrypted_integrity_checked_and_readable() {
     drop(connection);
 
     backup_sqlcipher_database(&database, &key_path, &backup).unwrap();
+    let backup_key = loki_storage::secret::backup_key_path(&backup);
+    let backup_manifest = loki_storage::secret::backup_manifest_path(&backup);
+    assert!(backup_key.exists());
+    assert!(backup_manifest.exists());
     assert!(!contains(&fs::read(&backup).unwrap(), MARKER.as_bytes()));
-    let (reopened, _key) = open_or_migrate_sqlcipher(&backup, &key_path).unwrap();
+    rotate_sqlcipher_key(&database, &key_path).unwrap();
+    rotate_sqlcipher_key(&database, &key_path).unwrap();
+    assert!(open_or_migrate_sqlcipher(&backup, &backup_key).is_err());
+    let (reopened, _key) = open_backup_sqlcipher(&backup).unwrap();
     let value: String = reopened
         .query_row("SELECT value FROM protected", [], |row| row.get(0))
         .unwrap();
     assert_eq!(value, MARKER);
+}
+
+#[test]
+fn partial_backup_bundle_fails_closed() {
+    for missing in ["database", "key", "manifest"] {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("core.sqlite3");
+        let key = dir.path().join("core.key.protected");
+        let backup = dir.path().join("core.backup.sqlite3");
+        drop(open_or_migrate_sqlcipher(&database, &key).unwrap());
+        backup_sqlcipher_database(&database, &key, &backup).unwrap();
+        match missing {
+            "database" => fs::remove_file(&backup).unwrap(),
+            "key" => fs::remove_file(loki_storage::secret::backup_key_path(&backup)).unwrap(),
+            "manifest" => {
+                fs::remove_file(loki_storage::secret::backup_manifest_path(&backup)).unwrap()
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            open_backup_sqlcipher(&backup).is_err(),
+            "accepted missing {missing}"
+        );
+    }
 }

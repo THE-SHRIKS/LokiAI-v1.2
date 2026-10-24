@@ -19,10 +19,15 @@ pub fn load_or_create_with_legacy(
     legacy_plaintext_path: &Path,
 ) -> io::Result<String> {
     if protected_path.exists() {
-        let protected = loki_storage::secret::load_ipc_token(protected_path).map_err(secret_io)?;
-        let token = validate(protected.expose())?;
-        remove_legacy_plaintext(legacy_plaintext_path)?;
-        return Ok(token);
+        let loaded = loki_storage::secret::load_ipc_token(protected_path)
+            .map_err(secret_io)
+            .and_then(|protected| validate(protected.expose()));
+        let cleanup = remove_legacy_plaintext(legacy_plaintext_path);
+        return match (loaded, cleanup) {
+            (_, Err(cleanup_error)) => Err(cleanup_error),
+            (Err(load_error), Ok(())) => Err(load_error),
+            (Ok(token), Ok(())) => Ok(token),
+        };
     }
     let token = match std::fs::read_to_string(legacy_plaintext_path) {
         Ok(value) if value.trim().len() >= MIN_TOKEN_LEN => value.trim().to_owned(),
@@ -153,5 +158,79 @@ mod tests {
         overwrite_with_zeroes(&mut writer, simulated_large_file).unwrap();
         assert_eq!(writer.total, simulated_large_file);
         assert_eq!(writer.largest_write, LEGACY_OVERWRITE_CHUNK_BYTES);
+    }
+
+    #[test]
+    fn malformed_protected_token_still_removes_legacy_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let protected = dir.path().join("ipc.token.protected");
+        let legacy = dir.path().join("ipc.token");
+        std::fs::write(&protected, b"not a DPAPI envelope").unwrap();
+        std::fs::write(&legacy, generate()).unwrap();
+
+        assert!(load_or_create_with_legacy(&protected, &legacy).is_err());
+        assert!(
+            !legacy.exists(),
+            "legacy plaintext must be removed on load failure"
+        );
+    }
+
+    #[test]
+    fn every_locally_constructible_protected_token_failure_removes_legacy_plaintext() {
+        for case in [
+            "zero",
+            "truncated",
+            "wrong-purpose",
+            "raw-dpapi",
+            "short-token",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let protected = dir.path().join("ipc.token.protected");
+            let legacy = dir.path().join("ipc.token");
+            match case {
+                "zero" => std::fs::write(&protected, []).unwrap(),
+                "truncated" => std::fs::write(&protected, b"LOKIAI.SECRET.V2").unwrap(),
+                "wrong-purpose" => {
+                    loki_storage::secret::store_new_ipc_token(&protected, &generate()).unwrap();
+                    let mut encoded = std::fs::read(&protected).unwrap();
+                    encoded[16] = 1;
+                    std::fs::write(&protected, encoded).unwrap();
+                }
+                "raw-dpapi" => std::fs::write(&protected, [0x5a; 128]).unwrap(),
+                "short-token" => {
+                    loki_storage::secret::store_new_ipc_token(&protected, "short").unwrap()
+                }
+                _ => unreachable!(),
+            }
+            std::fs::write(&legacy, generate()).unwrap();
+            assert!(
+                load_or_create_with_legacy(&protected, &legacy).is_err(),
+                "{case} unexpectedly loaded"
+            );
+            assert!(!legacy.exists(), "{case} left legacy plaintext behind");
+        }
+    }
+
+    #[test]
+    fn cleanup_failure_is_explicit_and_never_returns_a_token() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let protected = dir.path().join("ipc.token.protected");
+        let legacy = dir.path().join("ipc.token");
+        loki_storage::secret::store_new_ipc_token(&protected, &generate()).unwrap();
+        std::fs::write(&legacy, generate()).unwrap();
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&legacy)
+            .unwrap();
+
+        assert!(load_or_create_with_legacy(&protected, &legacy).is_err());
+        assert!(
+            legacy.exists(),
+            "test must exercise the explicit cleanup-remnant state"
+        );
+        drop(locked);
     }
 }

@@ -23,6 +23,8 @@ use crate::storage::{configure_connection, configure_sqlcipher, verify_cipher_in
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
 const MIN_DATABASE_BYTES: u64 = 512;
+const BACKUP_MANIFEST_MAGIC: &[u8; 16] = b"LOKIAI.BACKUP.V1";
+const BACKUP_MANIFEST_BYTES: usize = BACKUP_MANIFEST_MAGIC.len() + 8 + 32;
 
 #[derive(Debug)]
 struct OperationPaths {
@@ -39,7 +41,12 @@ struct OperationPaths {
     recovery_next_key: PathBuf,
     recovery_previous: PathBuf,
     recovery_previous_key: PathBuf,
+    recovery_reconciled: PathBuf,
+    recovery_reconciled_key: PathBuf,
     maintenance_lock: PathBuf,
+    wal: PathBuf,
+    shm: PathBuf,
+    journal: PathBuf,
 }
 
 impl OperationPaths {
@@ -58,7 +65,12 @@ impl OperationPaths {
             recovery_next_key: key.with_extension("recovery.next.protected"),
             recovery_previous: database.with_extension("recovery.previous.sqlite3"),
             recovery_previous_key: key.with_extension("recovery.previous.protected"),
+            recovery_reconciled: database.with_extension("recovery.reconciled.sqlite3"),
+            recovery_reconciled_key: key.with_extension("recovery.reconciled.protected"),
             maintenance_lock: database.with_extension("maintenance.lock"),
+            wal: sqlite_sidecar(database, "-wal"),
+            shm: sqlite_sidecar(database, "-shm"),
+            journal: sqlite_sidecar(database, "-journal"),
         }
     }
 
@@ -77,6 +89,11 @@ impl OperationPaths {
             &self.recovery_next_key,
             &self.recovery_previous,
             &self.recovery_previous_key,
+            &self.recovery_reconciled,
+            &self.recovery_reconciled_key,
+            &self.wal,
+            &self.shm,
+            &self.journal,
         ]
         .iter()
         .any(|path| path.exists())
@@ -140,24 +157,69 @@ pub fn backup_sqlcipher_database(
 ) -> Result<(), StorageError> {
     let paths = OperationPaths::new(database, protected_key);
     let _lease = MaintenanceLease::acquire(&paths.maintenance_lock)?;
-    if destination.exists() {
+    let destination_key = secret::backup_key_path(destination);
+    let destination_manifest = secret::backup_manifest_path(destination);
+    if destination.exists() || destination_key.exists() || destination_manifest.exists() {
         return Err(StorageError::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
-            "refusing to overwrite an existing backup",
+            "refusing to overwrite an existing backup database/key pair",
         )));
     }
     reject_truncated(database)?;
     let key = load_key(protected_key)?;
     let _fence = DatabaseWriteFence::acquire(database)?;
     let source = open_read_only_with_key(database, &key)?;
-    let result = export_to_encrypted(&source, destination, &key)
-        .and_then(|()| verify_pair(destination, &key));
+    let result = secret::store_backup_key(&destination_key, &key)
+        .map_err(StorageError::Secret)
+        .and_then(|()| export_to_encrypted(&source, destination, &key))
+        .and_then(|()| verify_pair(destination, &key))
+        .and_then(|()| create_backup_manifest(destination, &destination_key))
+        .and_then(|manifest| {
+            secret::store_backup_manifest(&destination_manifest, &manifest)
+                .map_err(StorageError::Secret)
+        });
     if result.is_err() {
         remove_if_exists(destination).ok();
+        remove_if_exists(&destination_key).ok();
+        remove_if_exists(&destination_manifest).ok();
     } else {
         secret::harden_path(destination, false)?;
     }
     result
+}
+
+/// Opens only a complete, purpose-bound backup database/key/manifest bundle.
+/// Normal managed-open deliberately cannot consume a backup-purpose key.
+pub fn open_backup_sqlcipher(database: &Path) -> Result<(Connection, DatabaseKey), StorageError> {
+    let key_path = secret::backup_key_path(database);
+    let manifest_path = secret::backup_manifest_path(database);
+    if !database.exists() || !key_path.exists() || !manifest_path.exists() {
+        return Err(StorageError::RecoveryRequired {
+            path: database.display().to_string(),
+            detail: "backup database/key/manifest bundle is incomplete".to_string(),
+        });
+    }
+    let expected = create_backup_manifest(database, &key_path)?;
+    let actual = secret::load_backup_manifest(&manifest_path).map_err(StorageError::Secret)?;
+    if actual != expected {
+        return Err(StorageError::Corrupt {
+            path: database.display().to_string(),
+            detail: "backup manifest does not match the database/key bundle".to_string(),
+        });
+    }
+    let key = secret::load_backup_key(&key_path).map_err(StorageError::Secret)?;
+    open_verified(database, key)
+}
+
+fn create_backup_manifest(database: &Path, key_path: &Path) -> Result<Vec<u8>, StorageError> {
+    let database_len = std::fs::metadata(database)?.len();
+    let protected_key = std::fs::read(key_path)?;
+    let key_digest = secret::sha256(&protected_key).map_err(StorageError::Secret)?;
+    let mut manifest = Vec::with_capacity(BACKUP_MANIFEST_BYTES);
+    manifest.extend_from_slice(BACKUP_MANIFEST_MAGIC);
+    manifest.extend_from_slice(&database_len.to_le_bytes());
+    manifest.extend_from_slice(&key_digest);
+    Ok(manifest)
 }
 
 fn create_first_database(
@@ -188,6 +250,9 @@ fn create_first_database(
             // failed attempt so retry cannot observe a mismatched half-pair.
             remove_if_exists(database).ok();
             remove_if_exists(protected_key).ok();
+            remove_if_exists(&sqlite_sidecar(database, "-wal")).ok();
+            remove_if_exists(&sqlite_sidecar(database, "-shm")).ok();
+            remove_if_exists(&sqlite_sidecar(database, "-journal")).ok();
             Err(error)
         }
     }
@@ -229,7 +294,23 @@ fn migrate_plaintext(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FaultPoint {
     None,
+    AfterRecoveryPair,
+    AfterPendingKeys,
+    AfterReplacementVerified,
+    AfterDatabaseDemotion,
+    AfterDatabasePromotion,
+    AfterKeyPromotion,
     CorruptAfterKeyPromotion,
+    AfterFinalVerification,
+}
+
+fn inject_rotation_fault(requested: FaultPoint, current: FaultPoint) -> Result<(), StorageError> {
+    if requested == current {
+        return Err(StorageError::Io(std::io::Error::other(format!(
+            "injected rotation crash at {current:?}"
+        ))));
+    }
+    Ok(())
 }
 
 fn rotate_with_fault(
@@ -251,26 +332,35 @@ fn rotate_with_fault(
     let new_key = secret::generate_database_key()?;
     let result = (|| {
         create_recovery_backup(&source, &paths, &old_key)?;
+        inject_rotation_fault(fault, FaultPoint::AfterRecoveryPair)?;
         secret::store_database_key(&paths.rollback_key, &old_key)?;
         secret::store_database_key(&paths.pending_key, &new_key)?;
+        inject_rotation_fault(fault, FaultPoint::AfterPendingKeys)?;
         export_to_encrypted(&source, &paths.replacement, &new_key)?;
         verify_pair(&paths.replacement, &new_key)?;
+        inject_rotation_fault(fault, FaultPoint::AfterReplacementVerified)?;
         drop(source);
 
         rename(database, &paths.rollback)?;
+        inject_rotation_fault(fault, FaultPoint::AfterDatabaseDemotion)?;
         rename(&paths.replacement, database)?;
+        inject_rotation_fault(fault, FaultPoint::AfterDatabasePromotion)?;
         secret::replace_database_key(protected_key, &new_key)?;
+        inject_rotation_fault(fault, FaultPoint::AfterKeyPromotion)?;
 
         if fault == FaultPoint::CorruptAfterKeyPromotion {
             std::fs::write(database, b"injected post-promotion corruption")?;
         }
 
         verify_pair(database, &new_key)?;
+        inject_rotation_fault(fault, FaultPoint::AfterFinalVerification)?;
         finish_operation(&paths)?;
         Ok(())
     })();
     if let Err(error) = result {
-        recover_interrupted(database, protected_key, &paths)?;
+        if fault == FaultPoint::None {
+            recover_interrupted(database, protected_key, &paths)?;
+        }
         return Err(error);
     }
     Ok(())
@@ -332,6 +422,12 @@ fn recover_interrupted(
     protected_key: &Path,
     paths: &OperationPaths,
 ) -> Result<(), StorageError> {
+    let _fence = if database.exists() {
+        Some(DatabaseWriteFence::acquire(database)?)
+    } else {
+        None
+    };
+    reconcile_recovery_generations(paths)?;
     // Prefer the promoted live pair if it is valid.
     if pair_is_valid(database, protected_key) {
         finish_operation(paths)?;
@@ -380,6 +476,63 @@ fn recover_interrupted(
         path: database.display().to_string(),
         detail: "no matching verified database/key recovery pair exists".to_string(),
     })
+}
+
+fn reconcile_recovery_generations(paths: &OperationPaths) -> Result<(), StorageError> {
+    let has_split_generation = [
+        &paths.recovery_next,
+        &paths.recovery_next_key,
+        &paths.recovery_previous,
+        &paths.recovery_previous_key,
+        &paths.recovery_reconciled,
+        &paths.recovery_reconciled_key,
+    ]
+    .iter()
+    .any(|path| path.exists());
+    if !has_split_generation {
+        return Ok(());
+    }
+
+    let databases = [
+        &paths.recovery_reconciled,
+        &paths.recovery_next,
+        &paths.recovery,
+        &paths.recovery_previous,
+    ];
+    let keys = [
+        &paths.recovery_reconciled_key,
+        &paths.recovery_next_key,
+        &paths.recovery_key,
+        &paths.recovery_previous_key,
+    ];
+    let matching = databases.iter().find_map(|database| {
+        keys.iter()
+            .find(|key| pair_is_valid(database, key))
+            .map(|key| (*database, *key))
+    });
+    let Some((database, key_path)) = matching else {
+        return Err(StorageError::Corrupt {
+            path: paths.recovery.display().to_string(),
+            detail: "split recovery generations contain no matching verified database/key pair"
+                .to_string(),
+        });
+    };
+
+    if database != &paths.recovery_reconciled {
+        remove_pair(&paths.recovery_reconciled, &paths.recovery_reconciled_key)?;
+        std::fs::copy(database, &paths.recovery_reconciled)?;
+        let key = load_key(key_path)?;
+        secret::store_database_key(&paths.recovery_reconciled_key, &key)?;
+        verify_pair_path(&paths.recovery_reconciled, &paths.recovery_reconciled_key)?;
+    }
+
+    // The reconciled staging pair remains intact until both canonical files
+    // are copied and verified, so every crash point retains a matching pair.
+    std::fs::copy(&paths.recovery_reconciled, &paths.recovery)?;
+    std::fs::copy(&paths.recovery_reconciled_key, &paths.recovery_key)?;
+    verify_pair_path(&paths.recovery, &paths.recovery_key)?;
+    remove_pair(&paths.recovery_reconciled, &paths.recovery_reconciled_key)?;
+    Ok(())
 }
 
 fn restore_pair(
@@ -445,15 +598,16 @@ fn finish_operation(paths: &OperationPaths) -> Result<(), StorageError> {
         &paths.rollback,
         &paths.pending_key,
         &paths.rollback_key,
-        &paths.marker,
         &paths.recovery_next,
         &paths.recovery_next_key,
         &paths.recovery_previous,
         &paths.recovery_previous_key,
+        &paths.recovery_reconciled,
+        &paths.recovery_reconciled_key,
     ] {
         remove_if_exists(path)?;
     }
-    Ok(())
+    remove_if_exists(&paths.marker)
 }
 
 fn refuse_transient_targets(paths: &OperationPaths) -> Result<(), StorageError> {
@@ -490,19 +644,13 @@ fn export_to_encrypted(
     // Create and harden the destination through the reviewed filesystem
     // boundary before SQLCipher opens it. This also prevents a directory ACL
     // race where SQLite would otherwise create a file before its DACL is set.
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?
-        .sync_all()?;
-    secret::harden_path(destination, false)?;
+    secret::create_secure_new_file(destination)?.sync_all()?;
     let mut encrypted = Connection::open(destination)?;
     configure_sqlcipher(&encrypted, key)?;
     {
         let backup = rusqlite::backup::Backup::new(source, &mut encrypted)?;
         backup.run_to_completion(64, Duration::from_millis(25), None)?;
     }
-    verify_cipher_integrity(&encrypted, destination)?;
     drop(encrypted);
     secret::harden_path(destination, false)?;
     Ok(())
@@ -523,12 +671,7 @@ fn export_plaintext_to_encrypted(
             format!("refusing to overwrite {}", destination.display()),
         )));
     }
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?
-        .sync_all()?;
-    secret::harden_path(destination, false)?;
+    secret::create_secure_new_file(destination)?.sync_all()?;
     let destination_text = destination.to_str().ok_or_else(|| {
         StorageError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -695,6 +838,12 @@ fn remove_if_exists(path: &Path) -> Result<(), StorageError> {
     }
 }
 
+fn sqlite_sidecar(database: &Path, suffix: &str) -> PathBuf {
+    let mut path = database.as_os_str().to_os_string();
+    path.push(suffix);
+    PathBuf::from(path)
+}
+
 /// OS-owned byte-range lock. Windows releases it on process termination, so a
 /// durable marker denotes recovery state while this lock denotes a live owner.
 struct MaintenanceLease {
@@ -813,6 +962,72 @@ mod tests {
     }
 
     #[test]
+    fn every_rotation_promotion_boundary_recovers_on_the_next_open() {
+        for fault in [
+            FaultPoint::AfterRecoveryPair,
+            FaultPoint::AfterPendingKeys,
+            FaultPoint::AfterReplacementVerified,
+            FaultPoint::AfterDatabaseDemotion,
+            FaultPoint::AfterDatabasePromotion,
+            FaultPoint::AfterKeyPromotion,
+            FaultPoint::AfterFinalVerification,
+        ] {
+            eprintln!("running rotation crash matrix point {fault:?}");
+            let dir = tempfile::tempdir().unwrap();
+            let database = dir.path().join(format!("rotate-{fault:?}.sqlite3"));
+            let key = dir.path().join(format!("rotate-{fault:?}.key.protected"));
+            let (connection, _) = open_or_migrate_sqlcipher(&database, &key).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES ('yes');",
+                )
+                .unwrap();
+            drop(connection);
+
+            assert!(rotate_with_fault(&database, &key, fault).is_err());
+            let paths = OperationPaths::new(&database, &key);
+            assert!(
+                paths.marker.exists(),
+                "{fault:?} must leave a recovery journal"
+            );
+            let (reopened, _) = open_or_migrate_sqlcipher(&database, &key).unwrap();
+            let value: String = reopened
+                .query_row("SELECT value FROM preserved", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(value, "yes", "data lost after {fault:?}");
+            assert!(
+                !paths.marker.exists(),
+                "recovery did not finish for {fault:?}"
+            );
+            drop(reopened);
+            rotate_sqlcipher_key(&database, &key).unwrap_or_else(|error| {
+                panic!("next rotation failed after recovery from {fault:?}: {error}")
+            });
+        }
+    }
+
+    #[test]
+    fn split_recovery_generations_are_reconciled_before_live_pair_short_circuit() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("split.sqlite3");
+        let key = dir.path().join("split.key.protected");
+        drop(open_or_migrate_sqlcipher(&database, &key).unwrap());
+        rotate_sqlcipher_key(&database, &key).unwrap();
+        let paths = OperationPaths::new(&database, &key);
+        std::fs::copy(&paths.recovery, &paths.recovery_next).unwrap();
+        std::fs::copy(&paths.recovery_key, &paths.recovery_next_key).unwrap();
+        std::fs::rename(&paths.recovery, &paths.recovery_previous).unwrap();
+        std::fs::write(&paths.marker, b"version=2\noperation=rotation\n").unwrap();
+        assert!(pair_is_valid(&database, &key));
+
+        drop(open_or_migrate_sqlcipher(&database, &key).unwrap());
+        assert!(pair_is_valid(&paths.recovery, &paths.recovery_key));
+        assert!(!paths.recovery_next.exists());
+        assert!(!paths.recovery_previous.exists());
+        rotate_sqlcipher_key(&database, &key).unwrap();
+    }
+
+    #[test]
     fn retained_recovery_pair_is_encrypted_and_readable_after_rotation() {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("rotate.sqlite3");
@@ -907,6 +1122,212 @@ mod tests {
         );
         assert!(!key.exists(), "must not synthesize a replacement key");
         assert!(pair_is_valid(&paths.recovery, &paths.recovery_key));
+    }
+
+    #[test]
+    fn orphan_sqlite_sidecars_block_empty_first_use() {
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let dir = tempfile::tempdir().unwrap();
+            let database = dir.path().join("sidecar.sqlite3");
+            let key = dir.path().join("sidecar.key.protected");
+            let sidecar = sqlite_sidecar(&database, suffix);
+            std::fs::write(&sidecar, b"durable lifecycle evidence").unwrap();
+
+            assert!(matches!(
+                open_or_migrate_sqlcipher(&database, &key),
+                Err(StorageError::RecoveryRequired { .. })
+            ));
+            assert!(!database.exists());
+            assert!(!key.exists());
+            assert!(sidecar.exists());
+        }
+    }
+
+    #[test]
+    fn real_sqlite_wal_shm_and_journal_are_encrypted_lifecycle_evidence() {
+        const MARKER: &[u8] = b"LOKIAI_REAL_SIDECAR_SECRET_74c13b";
+
+        let wal_dir = tempfile::tempdir().unwrap();
+        let wal_database = wal_dir.path().join("wal.sqlite3");
+        let wal_key = wal_dir.path().join("wal.key.protected");
+        let (wal_connection, _) = open_or_migrate_sqlcipher(&wal_database, &wal_key).unwrap();
+        wal_connection
+            .execute_batch(
+                "PRAGMA wal_autocheckpoint=0;
+                 CREATE TABLE sidecar_secret(v BLOB);
+                 INSERT INTO sidecar_secret VALUES (x'4c4f4b4941495f5245414c5f534944454341525f5345435245545f373463313362');",
+            )
+            .unwrap();
+        let wal_path = sqlite_sidecar(&wal_database, "-wal");
+        let shm_path = sqlite_sidecar(&wal_database, "-shm");
+        let wal_bytes = std::fs::read(&wal_path).unwrap();
+        let shm_bytes = std::fs::read(&shm_path).unwrap();
+        assert!(!wal_bytes.windows(MARKER.len()).any(|bytes| bytes == MARKER));
+        assert!(!shm_bytes.windows(MARKER.len()).any(|bytes| bytes == MARKER));
+        drop(wal_connection);
+        std::fs::remove_file(&wal_database).unwrap();
+        std::fs::remove_file(&wal_key).unwrap();
+        std::fs::write(&wal_path, wal_bytes).unwrap();
+        std::fs::write(&shm_path, shm_bytes).unwrap();
+        assert!(matches!(
+            open_or_migrate_sqlcipher(&wal_database, &wal_key),
+            Err(StorageError::RecoveryRequired { .. })
+        ));
+
+        let journal_dir = tempfile::tempdir().unwrap();
+        let journal_database = journal_dir.path().join("journal.sqlite3");
+        let journal_key = journal_dir.path().join("journal.key.protected");
+        let (journal_connection, _) =
+            open_or_migrate_sqlcipher(&journal_database, &journal_key).unwrap();
+        journal_connection
+            .execute_batch(
+                "PRAGMA journal_mode=DELETE;
+                 CREATE TABLE sidecar_secret(v BLOB);
+                 INSERT INTO sidecar_secret VALUES (x'4c4f4b4941495f5245414c5f534944454341525f5345435245545f373463313362');
+                 BEGIN IMMEDIATE;
+                 UPDATE sidecar_secret SET v = zeroblob(4096);",
+            )
+            .unwrap();
+        let journal_path = sqlite_sidecar(&journal_database, "-journal");
+        let journal_bytes = std::fs::read(&journal_path).unwrap();
+        assert!(
+            !journal_bytes
+                .windows(MARKER.len())
+                .any(|bytes| bytes == MARKER)
+        );
+        journal_connection.execute_batch("ROLLBACK").unwrap();
+        drop(journal_connection);
+        std::fs::remove_file(&journal_database).unwrap();
+        std::fs::remove_file(&journal_key).unwrap();
+        std::fs::write(&journal_path, journal_bytes).unwrap();
+        assert!(matches!(
+            open_or_migrate_sqlcipher(&journal_database, &journal_key),
+            Err(StorageError::RecoveryRequired { .. })
+        ));
+    }
+
+    #[test]
+    fn recovery_refuses_an_existing_writable_database_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("recovery-fence.sqlite3");
+        let key = dir.path().join("recovery-fence.key.protected");
+        let (writer, _) = open_or_migrate_sqlcipher(&database, &key).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let paths = OperationPaths::new(&database, &key);
+        std::fs::write(&paths.marker, b"version=2\noperation=rotation\n").unwrap();
+
+        assert!(matches!(
+            open_or_migrate_sqlcipher(&database, &key),
+            Err(StorageError::MaintenanceInProgress { .. })
+        ));
+        assert!(
+            paths.marker.exists(),
+            "unfenced recovery must not consume the journal"
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn database_write_fence_is_bidirectional_across_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("bidirectional.sqlite3");
+        Connection::open(&database)
+            .unwrap()
+            .execute_batch("CREATE TABLE t(v)")
+            .unwrap();
+
+        let fence = DatabaseWriteFence::acquire(&database).unwrap();
+        let denied = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("managed::tests::database_write_fence_child_probe")
+            .arg("--nocapture")
+            .env("LOKIAI_DB_FENCE_CHILD_MODE", "expect-denied")
+            .env("LOKIAI_DB_FENCE_DATABASE", &database)
+            .status()
+            .unwrap();
+        assert!(
+            denied.success(),
+            "child writable open bypassed the parent fence"
+        );
+        drop(fence);
+
+        let ready = dir.path().join("writer.ready");
+        let release = dir.path().join("writer.release");
+        let mut writer = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("managed::tests::database_write_fence_child_probe")
+            .arg("--nocapture")
+            .env("LOKIAI_DB_FENCE_CHILD_MODE", "hold-writer")
+            .env("LOKIAI_DB_FENCE_DATABASE", &database)
+            .env("LOKIAI_DB_FENCE_READY", &ready)
+            .env("LOKIAI_DB_FENCE_RELEASE", &release)
+            .spawn()
+            .unwrap();
+        for _ in 0..500 {
+            if ready.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            ready.exists(),
+            "child did not establish its writable handle"
+        );
+        assert!(matches!(
+            DatabaseWriteFence::acquire(&database),
+            Err(StorageError::MaintenanceInProgress { .. })
+        ));
+        std::fs::write(&release, b"release").unwrap();
+        assert!(writer.wait().unwrap().success());
+    }
+
+    #[test]
+    fn database_write_fence_child_probe() {
+        let Ok(mode) = std::env::var("LOKIAI_DB_FENCE_CHILD_MODE") else {
+            return;
+        };
+        let database = PathBuf::from(std::env::var_os("LOKIAI_DB_FENCE_DATABASE").unwrap());
+        if mode == "expect-denied" {
+            assert!(Connection::open(database).is_err());
+            return;
+        }
+        let connection = Connection::open(database).unwrap();
+        connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let ready = PathBuf::from(std::env::var_os("LOKIAI_DB_FENCE_READY").unwrap());
+        let release = PathBuf::from(std::env::var_os("LOKIAI_DB_FENCE_RELEASE").unwrap());
+        std::fs::write(ready, b"ready").unwrap();
+        for _ in 0..1000 {
+            if release.exists() {
+                connection.execute_batch("ROLLBACK").unwrap();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("parent did not release child writer");
+    }
+
+    #[test]
+    fn cleanup_failure_keeps_the_recovery_marker_until_transients_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("cleanup.sqlite3");
+        let key = dir.path().join("cleanup.key.protected");
+        let paths = OperationPaths::new(&database, &key);
+        std::fs::write(&paths.marker, b"version=2\noperation=rotation\n").unwrap();
+        let locked = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .open(&paths.replacement)
+            .unwrap();
+
+        assert!(finish_operation(&paths).is_err());
+        assert!(
+            paths.marker.exists(),
+            "journal must be the final cleanup artifact"
+        );
+        drop(locked);
+        finish_operation(&paths).unwrap();
+        assert!(!paths.marker.exists());
     }
 
     #[test]

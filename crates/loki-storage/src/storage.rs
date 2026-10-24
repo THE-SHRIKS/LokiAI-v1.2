@@ -242,11 +242,18 @@ pub fn configure_sqlcipher(
     conn: &Connection,
     key: &crate::key::DatabaseKey,
 ) -> Result<(), StorageError> {
+    configure_global_cipher_memory_security(conn)?;
     // SQLCipher requires the key before *any* schema/page access. The key is
     // only materialized for this one native pragma call and is never logged.
     let mut statement = format!(
         "PRAGMA key = \"x'{}'\";
          PRAGMA cipher_compatibility = 4;
+         PRAGMA cipher_page_size = 4096;
+         PRAGMA kdf_iter = 256000;
+         PRAGMA cipher_hmac_algorithm = HMAC_SHA512;
+         PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;
+         PRAGMA cipher_use_hmac = ON;
+         PRAGMA cipher_plaintext_header_size = 0;
          PRAGMA temp_store = MEMORY;",
         key.sqlcipher_hex()
     );
@@ -264,32 +271,58 @@ pub fn configure_sqlcipher(
             detail: "cipher_version is empty".to_string(),
         });
     }
-    let temp_store: i64 = conn
-        .query_row("PRAGMA temp_store", [], |row| row.get(0))
-        .map_err(|error| StorageError::CipherConfiguration {
-            detail: format!("temp_store cannot be verified: {error}"),
-        })?;
-    if temp_store != 2 {
-        return Err(StorageError::CipherConfiguration {
-            detail: format!("temp_store must be MEMORY (2), got {temp_store}"),
-        });
-    }
-    let cipher_page_size_text: String = conn
-        .query_row("PRAGMA cipher_page_size", [], |row| row.get(0))
-        .map_err(|error| StorageError::CipherConfiguration {
-            detail: format!("cipher_page_size cannot be verified: {error}"),
-        })?;
-    let cipher_page_size = cipher_page_size_text.parse::<i64>().map_err(|error| {
-        StorageError::CipherConfiguration {
-            detail: format!("cipher_page_size {cipher_page_size_text:?} is not numeric: {error}"),
+    verify_sqlcipher_profile(conn)
+}
+
+fn configure_global_cipher_memory_security(conn: &Connection) -> Result<(), StorageError> {
+    static CONFIGURED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    let configured = CONFIGURED.get_or_init(|| {
+        conn.execute_batch("PRAGMA cipher_memory_security = ON")
+            .map_err(|error| error.to_string())
+    });
+    configured
+        .clone()
+        .map_err(|detail| StorageError::CipherConfiguration {
+            detail: format!("cipher_memory_security initialization failed: {detail}"),
+        })
+}
+
+fn pragma_text(conn: &Connection, name: &'static str) -> Result<String, StorageError> {
+    conn.query_row(&format!("PRAGMA {name}"), [], |row| {
+        match row.get_ref(0)? {
+            rusqlite::types::ValueRef::Integer(value) => Ok(value.to_string()),
+            rusqlite::types::ValueRef::Text(value) => {
+                Ok(String::from_utf8_lossy(value).into_owned())
+            }
+            value => Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                value.data_type(),
+                "pragma value is neither text nor integer".into(),
+            )),
         }
-    })?;
-    if !(512..=65_536).contains(&cipher_page_size)
-        || (cipher_page_size & (cipher_page_size - 1)) != 0
-    {
-        return Err(StorageError::CipherConfiguration {
-            detail: format!("invalid cipher_page_size {cipher_page_size}"),
-        });
+    })
+    .map_err(|error| StorageError::CipherConfiguration {
+        detail: format!("{name} cannot be verified: {error}"),
+    })
+}
+
+pub(crate) fn verify_sqlcipher_profile(conn: &Connection) -> Result<(), StorageError> {
+    for (name, expected) in [
+        ("cipher_page_size", "4096"),
+        ("kdf_iter", "256000"),
+        ("cipher_hmac_algorithm", "HMAC_SHA512"),
+        ("cipher_kdf_algorithm", "PBKDF2_HMAC_SHA512"),
+        ("cipher_use_hmac", "1"),
+        ("cipher_plaintext_header_size", "0"),
+        ("cipher_memory_security", "1"),
+        ("temp_store", "2"),
+    ] {
+        let actual = pragma_text(conn, name)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(StorageError::CipherConfiguration {
+                detail: format!("{name} must be {expected}, got {actual}"),
+            });
+        }
     }
     Ok(())
 }
@@ -388,6 +421,60 @@ mod tests {
         let storage = Storage::open_in_memory(Cipher::None).unwrap();
         storage.run_migrations("2026-01-01T00:00:00Z").unwrap();
         assert_eq!(storage.integrity_check().unwrap(), IntegrityStatus::Ok);
+    }
+
+    #[test]
+    fn every_locked_sqlcipher_profile_setting_is_verified_against_perturbation() {
+        let key = crate::key::DatabaseKey::from_bytes([0x5a; 32]);
+        for perturbation in [
+            "PRAGMA cipher_page_size = 1024",
+            "PRAGMA kdf_iter = 64000",
+            "PRAGMA cipher_hmac_algorithm = HMAC_SHA256",
+            "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA256",
+            "PRAGMA cipher_use_hmac = OFF",
+            "PRAGMA cipher_plaintext_header_size = 32",
+            "PRAGMA temp_store = FILE",
+        ] {
+            let connection = Connection::open_in_memory().unwrap();
+            configure_sqlcipher(&connection, &key).unwrap();
+            connection.execute_batch(perturbation).unwrap();
+            assert!(
+                matches!(
+                    verify_sqlcipher_profile(&connection),
+                    Err(StorageError::CipherConfiguration { .. })
+                ),
+                "profile verifier accepted {perturbation}"
+            );
+        }
+    }
+
+    #[test]
+    fn global_cipher_memory_security_perturbation_is_detected_in_a_child_process() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("storage::tests::cipher_memory_security_child_probe")
+            .arg("--nocapture")
+            .env("LOKIAI_CIPHER_MEMORY_SECURITY_CHILD", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn cipher_memory_security_child_probe() {
+        if std::env::var_os("LOKIAI_CIPHER_MEMORY_SECURITY_CHILD").is_none() {
+            return;
+        }
+        let key = crate::key::DatabaseKey::from_bytes([0x6b; 32]);
+        let connection = Connection::open_in_memory().unwrap();
+        configure_sqlcipher(&connection, &key).unwrap();
+        connection
+            .execute_batch("PRAGMA cipher_memory_security = OFF")
+            .unwrap();
+        assert!(matches!(
+            verify_sqlcipher_profile(&connection),
+            Err(StorageError::CipherConfiguration { .. })
+        ));
     }
 
     #[test]

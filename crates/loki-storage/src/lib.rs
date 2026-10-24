@@ -58,6 +58,9 @@ pub use cipher::Cipher;
 pub use error::StorageError;
 pub use key::DatabaseKey;
 #[cfg(windows)]
-pub use managed::{backup_sqlcipher_database, open_or_migrate_sqlcipher, rotate_sqlcipher_key};
+pub use managed::{
+    backup_sqlcipher_database, open_backup_sqlcipher, open_or_migrate_sqlcipher,
+    rotate_sqlcipher_key,
+};
 pub use migrations::MigrationReport;
 pub use storage::{IntegrityStatus, Storage, configure_connection, configure_sqlcipher};
