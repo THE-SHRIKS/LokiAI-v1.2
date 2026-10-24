@@ -1074,4 +1074,55 @@ pub mod test_support {
             }
         }
     }
+
+    /// Bootstraps a fresh disposable arena from a caller-supplied candidate
+    /// bounds shape instead of the fixed [`DISPOSABLE_TEST_ARENA_BYTES`]
+    /// profile, so a real-host measurement test
+    /// (`DAT-002-MEM-HOST-VERIFY-001`) can drive the exact same production
+    /// `bootstrap_profile` path — working-set adjustment, `VirtualAlloc`,
+    /// `VirtualLock`, per-page `QueryWorkingSetEx` attestation, and the
+    /// `SQLITE_CONFIG_MALLOC` handoff — at an arbitrary arena/working-set/
+    /// connection/cache candidate to observe real Windows success or refusal
+    /// at that exact size.
+    ///
+    /// This bypasses only [`accepted_profile`](super::accepted_profile) (the
+    /// production entrypoint, permanently fail-closed at this revision) via
+    /// the same crate-private [`SecureMemoryRuntime::bootstrap_profile`] every
+    /// other `test_support` entry point already uses. It does not touch
+    /// `crate::secure_profile::ACCEPTED_PROFILE`, `require_ready()`, or any
+    /// other production fail-closed gate, and — like every item in this
+    /// module — compiles only under `cfg(test)` or the opt-in `test-support`
+    /// feature, never a release build.
+    ///
+    /// Returns the real `Result` from `bootstrap_profile` instead of
+    /// panicking on failure: unlike [`bootstrap_disposable_test_arena`] (whose
+    /// callers only want a ready arena or a hard test-infrastructure failure),
+    /// a host-bounds measurement test's entire point is to observe and assert
+    /// on a real refusal (a quota failure, a lock failure, an oversized
+    /// candidate) without that refusal ever reaching SQLite, a key, or a
+    /// database file. Serializes against every other disposable-arena caller
+    /// in this process the same way `bootstrap_disposable_test_arena` does,
+    /// and releases the shared slot itself on the `Err` path (mirroring that
+    /// function's own release-on-error behavior) so a failed candidate never
+    /// deadlocks a later caller in the same process.
+    pub fn bootstrap_candidate_test_arena(
+        candidate: ProfileInspection,
+    ) -> Result<SecureMemoryRuntime, super::SecureMemoryError> {
+        while TEST_ARENA_BUSY
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            std::thread::yield_now();
+        }
+        super::reset_phase_for_disposable_test_bootstrap();
+        match SecureMemoryRuntime::bootstrap_profile(AcceptedProfile {
+            inspection: candidate,
+        }) {
+            Ok(runtime) => Ok(runtime),
+            Err(error) => {
+                TEST_ARENA_BUSY.store(false, Ordering::Release);
+                Err(error)
+            }
+        }
+    }
 }
