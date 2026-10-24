@@ -82,7 +82,7 @@ fn tiny_exhaustible_candidate() -> ProfileInspection {
 /// the *refusal*, not a reproduction of the old non-fatal continuation.
 fn quota_hostile_candidate() -> ProfileInspection {
     const ARENA_BYTES: usize = 64 * 1024 * 1024; // 64 MiB: far beyond the tiny ceiling below.
-    const CEILING_BYTES: usize = 1 * 1024 * 1024; // 1 MiB working-set ceiling.
+    const CEILING_BYTES: usize = 1024 * 1024; // 1 MiB working-set ceiling.
     ProfileInspection {
         arena_bytes: ARENA_BYTES,
         working_set_min_bytes: CEILING_BYTES,
