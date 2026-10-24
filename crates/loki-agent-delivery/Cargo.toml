@@ -19,3 +19,15 @@ serde_json = "=1.0.151"
 loki-connectors-sdk = { path = "../loki-connectors-sdk" }
 loki-local-authority = { path = "../loki-local-authority" }
 tempfile = "=3.27.0"
+
+# Enables loki-storage's `test-support` feature (a disposable,
+# non-production secure-memory arena bootstrap — DAT-002-MEM-CODE-001) for
+# this crate's own `[dev-dependencies]`-gated build only, so tests that call
+# `loki_storage::open_or_migrate_sqlcipher` (via `WorkIntentDeliveryStore::
+# open`) can satisfy the new fail-closed `require_ready()` gate with a
+# disposable test-only arena instead of a real accepted profile. Cargo's
+# resolver-2 feature unification applies this feature to the regular
+# `[dependencies] loki-storage` entry above only when building this crate's
+# tests, never in a release build. Mirrors crates/loki-storage/Cargo.toml's
+# own self-referential dev-dependency.
+loki-storage = { path = "../loki-storage", features = ["test-support"] }

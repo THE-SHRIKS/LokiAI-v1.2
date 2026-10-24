@@ -25,6 +25,18 @@ license.workspace = true
 publish.workspace = true
 description = "LokiAI Main v1.2 Rust runtime process (hardware/job/durable-execution authority boundary)."
 
+[features]
+# Exposes `ComposedHost::open_with_test_arena` (`src/host/compose.rs`) — a
+# test-only alternate startup entrypoint that bootstraps
+# `loki_storage::secure_memory::test_support`'s disposable, non-production
+# arena instead of the real `SecureMemoryRuntime::bootstrap()` production
+# entrypoint `open()` always uses. Off by default; only turned on by this
+# crate's own self-referential `[dev-dependencies]` entry below, so this
+# crate's separate-process `tests/*.rs` integration-test binaries (which
+# cannot see `cfg(test)`-only items) can still reach it, mirroring
+# `crates/loki-storage/Cargo.toml`'s own `test-support` feature exactly.
+test-support = []
+
 [dependencies]
 # Async runtime — Docs/TECH_STACK.md's "Async/diagnostics" row names Tokio
 # explicitly. License: MIT. Maintainer: the tokio-rs project (also publishes
@@ -114,3 +126,24 @@ loki-ipc = { path = "../loki-ipc" }
 # via `crates/loki-storage/Cargo.toml`'s dev-dependency — no new crate.
 # License: MIT OR Apache-2.0.
 tempfile = "=3.27.0"
+
+# Enables `loki-storage`'s `test-support` feature (a disposable,
+# non-production secure-memory arena bootstrap — DAT-002-MEM-CODE-001) for
+# this crate's own `[dev-dependencies]`-gated build only, so
+# `ComposedHost::open_with_test_arena` can reach
+# `loki_storage::secure_memory::test_support::bootstrap_disposable_test_arena`.
+# Cargo's resolver-2 feature unification applies this feature to the regular
+# `[dependencies] loki-storage` entry above only when building this crate's
+# tests, never in a release build. Mirrors every other consumer crate's
+# identical dev-dependency entry (see `crates/loki-monitoring/Cargo.toml`
+# for the same pattern).
+loki-storage = { path = "../loki-storage", features = ["test-support"] }
+
+# Self-referential dev-dependency with `test-support` enabled: Cargo builds
+# `tests/host_lifecycle.rs` as a separate integration-test binary against
+# this crate as an ordinary external dependency, so the `#[cfg(test)]`-only
+# half of `open_with_test_arena`'s gate is invisible to it — only the
+# `feature = "test-support"` half is reachable from outside the crate.
+# Mirrors `crates/loki-storage/Cargo.toml`'s own self-referential
+# dev-dependency exactly.
+loki-runtime = { path = ".", features = ["test-support"] }

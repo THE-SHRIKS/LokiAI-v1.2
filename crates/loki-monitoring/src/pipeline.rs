@@ -331,6 +331,14 @@ mod tests {
 
     #[test]
     fn ingest_sample_with_a_store_persists_and_reports_success() {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with this binary's other tests that open a real
+        // SqlCipher-backed store through the secure-memory arena
+        // (DAT-002-MEM-CODE-001). `sqlite3_config` can only run before
+        // SQLite's first implicit initialization, so every SQLite-touching
+        // test in this binary — in-memory or not — must bootstrap the
+        // arena first, regardless of which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let store = SqliteTelemetryStore::open_in_memory().unwrap();
         let pipeline = Pipeline::new(4, 4, 8).with_store(store);
         let t = SystemTime::UNIX_EPOCH + Duration::from_secs(100);

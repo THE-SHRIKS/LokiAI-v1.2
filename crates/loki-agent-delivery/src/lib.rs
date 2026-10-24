@@ -550,8 +550,24 @@ mod tests {
         (authority, context, session.session_id, registry, credential)
     }
 
+    /// Every SQLite-touching test in this binary — in-memory or not — must
+    /// bootstrap the disposable, non-production secure-memory arena first
+    /// (DAT-002-MEM-CODE-001, ADR-0005), regardless of which test happens to
+    /// run first: `sqlite3_config` can only run before SQLite's first
+    /// implicit initialization, and this binary's
+    /// `encrypted_restart_hides_schema_and_preserves_state` test opens a
+    /// real SqlCipher-backed store through that arena via
+    /// `loki_storage::open_or_migrate_sqlcipher`. Production never embeds an
+    /// accepted bounds profile at this revision (fail-closed by design), so
+    /// this is test-only — see `loki_storage::secure_memory::test_support`
+    /// for why this bypass cannot reach a release build.
+    fn ensure_ready() {
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
+    }
+
     #[test]
     fn scoped_claim_and_owned_run_acknowledgement() {
+        ensure_ready();
         let store = WorkIntentDeliveryStore::open_in_memory().unwrap();
         let wi = intent();
         let queued = store.enqueue(&wi, 1_100).unwrap();
@@ -618,6 +634,7 @@ mod tests {
 
     #[test]
     fn wrong_secret_missing_scope_and_revocation_fail_closed() {
+        ensure_ready();
         let store = WorkIntentDeliveryStore::open_in_memory().unwrap();
         let wi = intent();
         let q = store.enqueue(&wi, 1_100).unwrap();
@@ -674,6 +691,7 @@ mod tests {
 
     #[test]
     fn cross_connection_run_cannot_acknowledge() {
+        ensure_ready();
         let store = WorkIntentDeliveryStore::open_in_memory().unwrap();
         let wi = intent();
         let q = store.enqueue(&wi, 1_100).unwrap();
@@ -727,6 +745,7 @@ mod tests {
 
     #[test]
     fn unavailable_client_falls_back_once_to_human() {
+        ensure_ready();
         let store = WorkIntentDeliveryStore::open_in_memory().unwrap();
         let notifications = LocalNotificationStore::open_in_memory().unwrap();
         let wi = intent();
@@ -746,6 +765,7 @@ mod tests {
 
     #[test]
     fn expiry_and_failure_are_terminal() {
+        ensure_ready();
         let store = WorkIntentDeliveryStore::open_in_memory().unwrap();
         let wi = intent();
         let q = store.enqueue(&wi, 1_100).unwrap();
@@ -773,6 +793,7 @@ mod tests {
 
     #[test]
     fn concurrent_claim_has_one_winner_and_one_attempt() {
+        ensure_ready();
         let store = Arc::new(WorkIntentDeliveryStore::open_in_memory().unwrap());
         let wi = intent();
         let q = store.enqueue(&wi, 1_100).unwrap();
@@ -824,6 +845,7 @@ mod tests {
 
     #[test]
     fn encrypted_restart_hides_schema_and_preserves_state() {
+        ensure_ready();
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("delivery.db");
         let key = temp.path().join("delivery.key");

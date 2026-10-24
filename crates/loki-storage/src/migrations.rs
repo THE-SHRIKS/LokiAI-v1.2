@@ -111,6 +111,15 @@ mod tests {
 
     #[test]
     fn applies_cleanly_on_empty_db() {
+        // `Connection::open_in_memory()` here bypasses `Storage`/`Cipher`
+        // entirely, but still performs SQLite's process-global lazy default
+        // init the first time any connection opens in this process — the
+        // same one-shot window `secure_memory::test_support::
+        // ensure_test_arena_ready`'s `sqlite3_config(SQLITE_CONFIG_MALLOC)`
+        // needs (see `storage.rs`'s equivalent tests for the full
+        // explanation; this file shares the `loki-storage --lib` binary
+        // with `storage.rs` and `managed.rs`).
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let report = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
         assert_eq!(report.applied_versions, vec![1, 2, 3]);
@@ -131,6 +140,7 @@ mod tests {
 
     #[test]
     fn is_idempotent_across_repeated_calls() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let first = apply_all(&mut conn, MIGRATIONS, "2026-01-01T00:00:00Z").unwrap();
         assert_eq!(first.applied_versions.len(), 3);
@@ -146,6 +156,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_applied_at_before_touching_the_schema() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let err = apply_all(&mut conn, MIGRATIONS, "not-a-timestamp").unwrap_err();
         assert!(matches!(err, StorageError::InvalidTimestamp { .. }));
@@ -165,6 +176,7 @@ mod tests {
 
     #[test]
     fn broken_migration_rolls_back_completely() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let broken = [Migration {
             version: 1,
@@ -205,6 +217,7 @@ mod tests {
 
     #[test]
     fn earlier_committed_migration_survives_a_later_one_failing() {
+        crate::secure_memory::test_support::ensure_test_arena_ready();
         let mut conn = Connection::open_in_memory().unwrap();
         let mixed = [
             Migration {

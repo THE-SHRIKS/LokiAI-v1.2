@@ -19,6 +19,8 @@ use loki_monitoring::rule::{
 use loki_monitoring::rule_store::RuleStore;
 use loki_monitoring::sample::{RetentionClass, SampleQuality, TelemetrySample};
 
+mod common;
+
 fn epoch(secs: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
 }
@@ -68,6 +70,7 @@ fn sample(t: SystemTime, value: f64) -> TelemetrySample {
 
 #[test]
 fn a_rule_definition_durably_survives_a_simulated_process_restart() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("rules.sqlite3");
     let rule_id = RuleId::new("overheat").unwrap();
@@ -84,6 +87,7 @@ fn a_rule_definition_durably_survives_a_simulated_process_restart() {
 
 #[test]
 fn evaluation_history_durably_survives_a_simulated_process_restart() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("rules.sqlite3");
     let rule_id = RuleId::new("overheat").unwrap();
@@ -149,6 +153,7 @@ fn in_memory_debounce_state_honestly_resets_after_a_restart_it_is_not_fabricated
 
 #[test]
 fn a_disabled_rules_definition_still_persists_and_reloads_as_disabled() {
+    common::ensure_ready();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("rules.sqlite3");
     let rule_id = RuleId::new("overheat").unwrap();

@@ -615,6 +615,14 @@ mod tests {
         store: LocalSetupStore,
     }
     fn fixture() -> Fixture {
+        // Even the in-memory path shares this process-wide SQLite
+        // installation with `restart_resumes_exact_state`, which opens a
+        // real SqlCipher-backed store through the secure-memory arena
+        // (DAT-002-MEM-CODE-001). `sqlite3_config` can only run before
+        // SQLite's first implicit initialization, so every SQLite-touching
+        // test in this binary — in-memory or not — must bootstrap the arena
+        // first, regardless of which test happens to run first.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let a = LocalAuthority::open_in_memory().unwrap();
         let c = LocalContext::current("ipc-setup").unwrap();
         let installation = a.initialize_current(&c, 1000).unwrap();
@@ -788,6 +796,15 @@ mod tests {
     }
     #[test]
     fn restart_resumes_exact_state() {
+        // `LocalSetupStore::open` goes through `loki_storage::
+        // open_or_migrate_sqlcipher`, which now requires the process-global
+        // secure-memory arena to be ready first (DAT-002-MEM-CODE-001,
+        // ADR-0005). Production never embeds an accepted bounds profile at
+        // this revision (fail-closed by design), so this test bootstraps a
+        // disposable, non-production test-only arena instead — see
+        // `loki_storage::secure_memory::test_support` for why this bypass
+        // cannot reach a release build.
+        loki_storage::secure_memory::test_support::ensure_test_arena_ready();
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("setup.db");
         let key = d.path().join("setup.key.dpapi");

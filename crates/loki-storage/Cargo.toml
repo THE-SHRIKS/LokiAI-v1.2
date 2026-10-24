@@ -20,6 +20,20 @@ license.workspace = true
 publish.workspace = true
 description = "LokiAI Main v1.2 runtime-owned SQLite storage: schema, versioned migrations, repository pattern, outbox/inbox, and integrity/backup primitives (DAT-001)."
 
+[features]
+# Compiles a disposable, non-production secure-memory arena bootstrap
+# (`crate::secure_memory::test_support`) into the public API surface so this
+# crate's own separate-process integration test binaries (each an
+# independent `cargo test` target under `tests/`) can exercise real
+# SQLCipher opens without the production fail-closed no-embedded-profile
+# path ever accepting a caller-supplied or guessed bound
+# (DAT-002-MEM-CODE-001 acceptance criterion: "Connection/cache/arena/
+# working-set values have no guessed production default"). Off by default;
+# only enabled through the self-referential `[dev-dependencies]` entry
+# below, which applies solely to this crate's own `tests/*.rs` binaries, not
+# to any downstream consumer or release build.
+test-support = []
+
 [dependencies]
 # SQLite driver — Docs/TECH_STACK.md's "Local data" row: "SQLCipher
 # 4.16.x-compatible SQLite, runtime-owned." rusqlite is the de facto
@@ -56,10 +70,21 @@ rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled
 tracing = "=0.1.44"
 
 [target.'cfg(windows)'.dependencies]
-# Microsoft-maintained Win32 bindings for DPAPI and BCrypt. DAT-002 needs
-# these OS APIs for a non-exportable-at-rest database key; no extra wrapper
-# or plaintext secret file is introduced.
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+# Microsoft-maintained Win32 bindings already used for DPAPI and BCrypt.
+# ADR-0005 additionally requires the Memory, ProcessStatus,
+# SystemInformation, and Threading feature modules for current-process-only
+# working-set snapshot/restore, page-size discovery, VirtualAlloc/VirtualLock,
+# and per-page QueryWorkingSetEx attestation. This only expands generated
+# bindings from the same exact dependency; no new crate, service, privilege,
+# host-wide policy, or plaintext secret path is introduced.
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 # Creates auto-cleaned-up temporary files/directories for this crate's
@@ -72,3 +97,11 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 # have to reimplement correctly to match — effectively rebuilding this
 # crate. Dev-only: never compiled into the shipped library.
 tempfile = "=3.27.0"
+
+# Self-referential dev-dependency with `test-support` enabled: Cargo builds
+# separate `tests/*.rs` integration-test binaries against this crate as an
+# ordinary external dependency, so `#[cfg(test)]`-only code inside the
+# library is invisible to them. This is the standard, minimal-footprint way
+# to make a library-internal test fixture (here: the disposable secure-arena
+# bootstrap) reachable from those binaries without shipping it unconditionally.
+loki-storage = { path = ".", features = ["test-support"] }
