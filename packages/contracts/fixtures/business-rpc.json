@@ -136,7 +136,12 @@
         "observed_at": "2026-08-24T12:00:00Z",
         "correlation_id": "corr-3"
       },
-      "device": null
+      "device": {
+        "device_id": "dev-1",
+        "lifecycle_state": "ready",
+        "connector_id": "connector-1",
+        "last_seen_at": "2026-08-24T12:00:00Z"
+      }
     },
     {
       "kind": "device_health",
@@ -188,7 +193,12 @@
         "observed_at": "2026-08-24T12:00:00Z",
         "correlation_id": "corr-8"
       },
-      "incident": null
+      "incident": {
+        "incident_id": "inc-1",
+        "state": "open",
+        "severity": "high",
+        "updated_at": "2026-08-24T12:00:00Z"
+      }
     },
     {
       "kind": "job_get",
@@ -197,7 +207,12 @@
         "observed_at": "2026-08-24T12:00:00Z",
         "correlation_id": "corr-9"
       },
-      "job": null
+      "job": {
+        "job_id": "job-1",
+        "state": "queued",
+        "updated_at": "2026-08-24T12:00:00Z",
+        "error_code": null
+      }
     },
     {
       "kind": "agent_run",
@@ -225,9 +240,13 @@
       "outcome": "accepted",
       "correlation_id": "corr-12",
       "policy_reason": "accepted",
+      "idempotency_key": "idem-4",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": null,
       "job_id": "job-1",
-      "bound_request_digest": null
+      "bound_request_digest": null,
+      "scope_ids": ["device:dev-1"]
     },
     {
       "kind": "operation",
@@ -235,9 +254,13 @@
       "outcome": "accepted",
       "correlation_id": "corr-13",
       "policy_reason": "accepted",
+      "idempotency_key": "idem-5",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": null,
       "job_id": "job-1",
-      "bound_request_digest": null
+      "bound_request_digest": null,
+      "scope_ids": ["device:dev-1"]
     },
     {
       "kind": "operation",
@@ -245,9 +268,13 @@
       "outcome": "accepted",
       "correlation_id": "corr-14",
       "policy_reason": "accepted",
+      "idempotency_key": "idem-6",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": null,
       "job_id": "job-1",
-      "bound_request_digest": null
+      "bound_request_digest": null,
+      "scope_ids": ["job:job-1"]
     },
     {
       "kind": "operation",
@@ -255,9 +282,13 @@
       "outcome": "approval_required",
       "correlation_id": "corr-15",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-7",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["recipe:recipe-1", "source_snapshot:snap-1", "target:target-1"]
     },
     {
       "kind": "operation",
@@ -265,9 +296,13 @@
       "outcome": "approval_required",
       "correlation_id": "corr-16",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-8",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["device:dev-1"]
     },
     {
       "kind": "operation",
@@ -275,9 +310,13 @@
       "outcome": "approval_required",
       "correlation_id": "corr-17",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-9",
+      "artifact_digest": "0123456789abcdef0123456789abcdef",
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["artifact:art-1", "device:dev-1"]
     },
     {
       "kind": "operation",
@@ -285,9 +324,13 @@
       "outcome": "approval_required",
       "correlation_id": "corr-18",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-10",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["device:dev-1", "test_suite:suite-1"]
     },
     {
       "kind": "operation",
@@ -295,9 +338,18 @@
       "outcome": "approval_required",
       "correlation_id": "corr-19",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-11",
+      "artifact_digest": "0123456789abcdef0123456789abcdef",
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": [
+        "artifact:art-1",
+        "device:dev-1",
+        "rollback_plan:rollback-1",
+        "verification_plan:verify-1"
+      ]
     },
     {
       "kind": "operation",
@@ -305,9 +357,13 @@
       "outcome": "approval_required",
       "correlation_id": "corr-20",
       "policy_reason": "approval required",
+      "idempotency_key": "idem-12",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["deployment:dep-1", "device:dev-1", "recovery_policy:recovery-1"]
     },
     {
       "kind": "operation",
@@ -315,9 +371,13 @@
       "outcome": "accepted",
       "correlation_id": "corr-21",
       "policy_reason": "decision recorded",
+      "idempotency_key": "idem-13",
+      "artifact_digest": null,
+      "request_reason": null,
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["approval:approval-1"]
     },
     {
       "kind": "operation",
@@ -325,9 +385,13 @@
       "outcome": "accepted",
       "correlation_id": "corr-22",
       "policy_reason": "decision recorded",
+      "idempotency_key": "idem-14",
+      "artifact_digest": null,
+      "request_reason": "operator denied",
       "approval_id": "approval-1",
       "job_id": null,
-      "bound_request_digest": "fedcba9876543210fedcba9876543210"
+      "bound_request_digest": "fedcba9876543210fedcba9876543210",
+      "scope_ids": ["approval:approval-1"]
     }
   ],
   "streams": [
@@ -418,15 +482,113 @@
       "kind": "desktop_installation",
       "principal_id": "desktop-1",
       "workspace_id": "workspace-1",
-      "scope_ids": ["device-1", "runtime-1"],
+      "scope_ids": ["device:dev-1", "runtime:runtime-1"],
       "authority": ["read_runtime", "read_devices", "subscribe"]
     },
     {
       "kind": "agent_connection",
       "principal_id": "agent-1",
       "workspace_id": "workspace-1",
-      "scope_ids": ["job-1"],
+      "scope_ids": ["job:job-1"],
       "authority": ["read_jobs"]
+    }
+  ],
+  "invalid_results": [
+    {
+      "kind": "runtime_status",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-invalid-1"
+      },
+      "state": "connected",
+      "runtime_id": "runtime-1",
+      "unexpected": true
+    },
+    {
+      "kind": "devices_list",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-invalid-2",
+        "unexpected": true
+      },
+      "devices": [],
+      "next_cursor": null
+    },
+    {
+      "kind": "devices_list",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-invalid-3"
+      },
+      "devices": [
+        {
+          "device_id": "dev-1",
+          "lifecycle_state": "ready",
+          "connector_id": "connector-1",
+          "last_seen_at": "2026-08-24T12:00:00Z",
+          "unexpected": true
+        }
+      ],
+      "next_cursor": null
+    },
+    {
+      "kind": "device_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-missing-device"
+      }
+    },
+    {
+      "kind": "incident_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-missing-incident"
+      }
+    },
+    {
+      "kind": "job_get",
+      "meta": {
+        "source_runtime_id": "runtime-1",
+        "observed_at": "2026-08-24T12:00:00Z",
+        "correlation_id": "corr-missing-job"
+      }
+    }
+  ],
+  "binding_negatives": [
+    {
+      "method": "restart_request",
+      "field": "idempotency_key",
+      "value": "idem-changed"
+    },
+    {
+      "method": "flash_request",
+      "field": "artifact_digest",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "method": "deployment_request",
+      "field": "scope_ids",
+      "value": ["artifact:art-1", "device:dev-other"]
+    },
+    {
+      "method": "approval_grant",
+      "field": "bound_request_digest",
+      "value": null
+    },
+    {
+      "method": "approval_deny",
+      "field": "bound_request_digest",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "method": "approval_deny",
+      "field": "request_reason",
+      "value": "changed decision reason"
     }
   ]
 }

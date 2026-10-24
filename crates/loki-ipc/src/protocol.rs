@@ -258,6 +258,196 @@ pub fn business_result_matches_method(method: &Method, result: &BusinessRpcResul
     }
 }
 
+fn entity_scope(kind: &str, id: &str) -> String {
+    format!("{kind}:{id}")
+}
+
+pub fn required_method_scopes(method: &Method, workspace_id: &str) -> BTreeSet<String> {
+    let workspace = || entity_scope("workspace", workspace_id);
+    match method {
+        Method::Ping(_)
+        | Method::RuntimeGetStatus(_)
+        | Method::DevicesList(_)
+        | Method::IncidentsList(_) => BTreeSet::from([workspace()]),
+        Method::DeviceGet(v) => BTreeSet::from([entity_scope("device", &v.device_id)]),
+        Method::DeviceGetHealth(v) | Method::DeviceReadLogs(v) => {
+            BTreeSet::from([entity_scope("device", &v.device_id)])
+        }
+        Method::DeviceQueryTelemetry(v) => BTreeSet::from([entity_scope("device", &v.device_id)]),
+        Method::IncidentGet(v) => BTreeSet::from([entity_scope("incident", &v.incident_id)]),
+        Method::JobGet(v) => BTreeSet::from([entity_scope("job", &v.job_id)]),
+        Method::AgentRunRegister(v) => BTreeSet::from([v
+            .parent_run_id
+            .as_deref()
+            .map_or_else(workspace, |id| entity_scope("agent_run", id))]),
+        Method::AgentRunUpdate(v) => BTreeSet::from([entity_scope("agent_run", &v.run_id)]),
+        Method::WorkIntentAcknowledge(v) => BTreeSet::from([
+            entity_scope("work_intent", &v.work_intent_id),
+            entity_scope("agent_run", &v.run_id),
+        ]),
+        Method::HealthCheckRequest(v) | Method::PreflightRequest(v) | Method::RestartRequest(v) => {
+            BTreeSet::from([entity_scope("device", &v.device_id)])
+        }
+        Method::JobCancel(v) => BTreeSet::from([entity_scope("job", &v.job_id)]),
+        Method::BuildRequest(v) => BTreeSet::from([
+            entity_scope("source_snapshot", &v.source_snapshot_id),
+            entity_scope("target", &v.target_id),
+            entity_scope("recipe", &v.recipe_id),
+        ]),
+        Method::FlashRequest(v) => BTreeSet::from([
+            entity_scope("device", &v.device_id),
+            entity_scope("artifact", &v.artifact_id),
+        ]),
+        Method::TestOnDeviceRequest(v) => BTreeSet::from([
+            entity_scope("device", &v.device_id),
+            entity_scope("test_suite", &v.test_suite_id),
+        ]),
+        Method::DeploymentRequest(v) => BTreeSet::from([
+            entity_scope("device", &v.device_id),
+            entity_scope("artifact", &v.artifact_id),
+            entity_scope("verification_plan", &v.verification_plan_id),
+            entity_scope("rollback_plan", &v.rollback_plan_id),
+        ]),
+        Method::RollbackRequest(v) => BTreeSet::from([
+            entity_scope("device", &v.device_id),
+            entity_scope("deployment", &v.deployment_id),
+            entity_scope("recovery_policy", &v.recovery_policy_id),
+        ]),
+        Method::ApprovalGrant(v) => BTreeSet::from([entity_scope("approval", &v.approval_id)]),
+        Method::ApprovalDeny(v) => BTreeSet::from([entity_scope("approval", &v.approval_id)]),
+    }
+}
+
+struct ConsequentialRequestBinding<'a> {
+    idempotency_key: &'a str,
+    artifact_digest: Option<&'a str>,
+    required_bound_request_digest: Option<&'a str>,
+    request_reason: Option<&'a str>,
+}
+
+fn consequential_request_binding(method: &Method) -> Option<ConsequentialRequestBinding<'_>> {
+    let binding = match method {
+        Method::HealthCheckRequest(v) | Method::PreflightRequest(v) | Method::RestartRequest(v) => {
+            ConsequentialRequestBinding {
+                idempotency_key: &v.idempotency_key,
+                artifact_digest: None,
+                required_bound_request_digest: None,
+                request_reason: None,
+            }
+        }
+        Method::JobCancel(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::BuildRequest(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::FlashRequest(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: Some(&v.artifact_digest),
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::TestOnDeviceRequest(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::DeploymentRequest(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: Some(&v.artifact_digest),
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::RollbackRequest(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: None,
+            request_reason: None,
+        },
+        Method::ApprovalGrant(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: Some(&v.bound_request_digest),
+            request_reason: None,
+        },
+        Method::ApprovalDeny(v) => ConsequentialRequestBinding {
+            idempotency_key: &v.idempotency_key,
+            artifact_digest: None,
+            required_bound_request_digest: Some(&v.bound_request_digest),
+            request_reason: Some(&v.reason),
+        },
+        _ => return None,
+    };
+    Some(binding)
+}
+
+pub fn business_result_matches_request(
+    method: &Method,
+    result: &BusinessRpcResult,
+    workspace_id: &str,
+) -> bool {
+    if !business_result_matches_method(method, result) {
+        return false;
+    }
+    match (method, result) {
+        (Method::DeviceGet(request), BusinessRpcResult::DeviceGet { device, .. }) => device
+            .as_ref()
+            .is_none_or(|device| device.device_id == request.device_id),
+        (Method::DeviceGetHealth(request), BusinessRpcResult::DeviceHealth { device_id, .. })
+        | (Method::DeviceReadLogs(request), BusinessRpcResult::DeviceLogs { device_id, .. }) => {
+            *device_id == request.device_id
+        }
+        (
+            Method::DeviceQueryTelemetry(request),
+            BusinessRpcResult::DeviceTelemetry { device_id, .. },
+        ) => *device_id == request.device_id,
+        (Method::IncidentGet(request), BusinessRpcResult::IncidentGet { incident, .. }) => incident
+            .as_ref()
+            .is_none_or(|incident| incident.incident_id == request.incident_id),
+        (Method::JobGet(request), BusinessRpcResult::JobGet { job, .. }) => {
+            job.as_ref().is_none_or(|job| job.job_id == request.job_id)
+        }
+        (Method::AgentRunUpdate(request), BusinessRpcResult::AgentRun { run_id, .. }) => {
+            *run_id == request.run_id
+        }
+        (
+            Method::WorkIntentAcknowledge(request),
+            BusinessRpcResult::WorkIntentAcknowledged {
+                work_intent_id,
+                run_id,
+                ..
+            },
+        ) => *work_intent_id == request.work_intent_id && *run_id == request.run_id,
+        (
+            method,
+            BusinessRpcResult::Operation {
+                idempotency_key,
+                artifact_digest,
+                request_reason,
+                bound_request_digest,
+                scope_ids,
+                ..
+            },
+        ) => consequential_request_binding(method).is_some_and(|binding| {
+            *scope_ids == required_method_scopes(method, workspace_id)
+                && idempotency_key == binding.idempotency_key
+                && artifact_digest.as_deref() == binding.artifact_digest
+                && request_reason.as_deref() == binding.request_reason
+                && binding
+                    .required_bound_request_digest
+                    .is_none_or(|required| bound_request_digest.as_deref() == Some(required))
+        }),
+        _ => true,
+    }
+}
+
 /// One streamed item for a [`StreamMethod`] call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "item")]
@@ -295,6 +485,11 @@ pub enum RpcError {
         required: String,
     },
     PermissionDenied,
+    CredentialInvalidated,
+    DuplicateCorrelationId,
+    TooManyInFlight {
+        limit: u16,
+    },
     UnsupportedMethod {
         method: String,
     },
@@ -313,6 +508,11 @@ impl std::fmt::Display for RpcError {
             RpcError::InvalidRequest { message } => write!(f, "invalid request: {message}"),
             RpcError::MissingCapability { required } => write!(f, "missing capability: {required}"),
             RpcError::PermissionDenied => write!(f, "permission denied"),
+            RpcError::CredentialInvalidated => write!(f, "credential expired, revoked, or changed"),
+            RpcError::DuplicateCorrelationId => write!(f, "duplicate active correlation id"),
+            RpcError::TooManyInFlight { limit } => {
+                write!(f, "too many in-flight requests; limit={limit}")
+            }
             RpcError::UnsupportedMethod { method } => write!(f, "unsupported method: {method}"),
             RpcError::Internal { message } => write!(f, "internal error: {message}"),
         }

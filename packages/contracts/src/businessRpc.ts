@@ -424,13 +424,187 @@ export const BusinessRpcResultSchema = z.discriminatedUnion('kind', [
       outcome: z.enum(['rejected', 'approval_required', 'accepted', 'deduplicated']),
       correlation_id: CorrelationIdSchema,
       policy_reason: Utf8TextSchema(MAX_RPC_TEXT_BYTES),
+      idempotency_key: IdempotencyKeySchema,
+      artifact_digest: ArtifactDigestSchema.nullable(),
+      request_reason: Utf8TextSchema(MAX_RPC_TEXT_BYTES).nullable(),
       approval_id: ApprovalIdSchema.nullable().optional(),
       job_id: JobIdSchema.nullable().optional(),
       bound_request_digest: BoundRequestDigestSchema.nullable().optional(),
+      scope_ids: z
+        .array(SafeIdSchema)
+        .min(1)
+        .max(16)
+        .refine((values) => new Set(values).size === values.length, 'scope_ids must be unique'),
     })
     .strict(),
 ]);
 export type BusinessRpcResult = z.infer<typeof BusinessRpcResultSchema>;
+
+const entityScope = (kind: string, id: string) => `${kind}:${id}`;
+
+export function requiredBusinessRequestScopes(
+  request: BusinessRpcRequest,
+  workspaceId: string,
+): string[] {
+  switch (request.method) {
+    case 'runtime_get_status':
+    case 'devices_list':
+    case 'incidents_list':
+      return [entityScope('workspace', workspaceId)];
+    case 'device_get':
+    case 'device_get_health':
+    case 'device_read_logs':
+    case 'device_query_telemetry':
+    case 'health_check_request':
+    case 'preflight_request':
+    case 'restart_request':
+      return [entityScope('device', request.params.device_id)];
+    case 'incident_get':
+      return [entityScope('incident', request.params.incident_id)];
+    case 'job_get':
+    case 'job_cancel':
+      return [entityScope('job', request.params.job_id)];
+    case 'agent_run_register':
+      return [
+        request.params.parent_run_id == null
+          ? entityScope('workspace', workspaceId)
+          : entityScope('agent_run', request.params.parent_run_id),
+      ];
+    case 'agent_run_update':
+      return [entityScope('agent_run', request.params.run_id)];
+    case 'work_intent_acknowledge':
+      return [
+        entityScope('work_intent', request.params.work_intent_id),
+        entityScope('agent_run', request.params.run_id),
+      ];
+    case 'build_request':
+      return [
+        entityScope('source_snapshot', request.params.source_snapshot_id),
+        entityScope('target', request.params.target_id),
+        entityScope('recipe', request.params.recipe_id),
+      ];
+    case 'flash_request':
+      return [
+        entityScope('device', request.params.device_id),
+        entityScope('artifact', request.params.artifact_id),
+      ];
+    case 'test_on_device_request':
+      return [
+        entityScope('device', request.params.device_id),
+        entityScope('test_suite', request.params.test_suite_id),
+      ];
+    case 'deployment_request':
+      return [
+        entityScope('device', request.params.device_id),
+        entityScope('artifact', request.params.artifact_id),
+        entityScope('verification_plan', request.params.verification_plan_id),
+        entityScope('rollback_plan', request.params.rollback_plan_id),
+      ];
+    case 'rollback_request':
+      return [
+        entityScope('device', request.params.device_id),
+        entityScope('deployment', request.params.deployment_id),
+        entityScope('recovery_policy', request.params.recovery_policy_id),
+      ];
+    case 'approval_grant':
+    case 'approval_deny':
+      return [entityScope('approval', request.params.approval_id)];
+  }
+}
+
+const OPERATION_METHODS = new Set([
+  'health_check_request',
+  'preflight_request',
+  'job_cancel',
+  'build_request',
+  'restart_request',
+  'flash_request',
+  'test_on_device_request',
+  'deployment_request',
+  'rollback_request',
+  'approval_grant',
+  'approval_deny',
+]);
+
+export function businessResultMatchesRequest(
+  requestInput: unknown,
+  resultInput: unknown,
+  workspaceId: string,
+): boolean {
+  const parsedRequest = BusinessRpcRequestSchema.safeParse(requestInput);
+  const parsedResult = BusinessRpcResultSchema.safeParse(resultInput);
+  if (!parsedRequest.success || !parsedResult.success) return false;
+  const request = parsedRequest.data;
+  const result = parsedResult.data;
+
+  if (OPERATION_METHODS.has(request.method)) {
+    if (result.kind !== 'operation' || result.method !== request.method) return false;
+    const operationParams = request.params as { idempotency_key: string };
+    const expectedScopes = new Set(requiredBusinessRequestScopes(request, workspaceId));
+    if (
+      result.scope_ids.length !== expectedScopes.size ||
+      result.scope_ids.some((scope) => !expectedScopes.has(scope)) ||
+      result.idempotency_key !== operationParams.idempotency_key
+    ) {
+      return false;
+    }
+    const expectedArtifact =
+      request.method === 'flash_request' || request.method === 'deployment_request'
+        ? request.params.artifact_digest
+        : null;
+    if (result.artifact_digest !== expectedArtifact) return false;
+    const expectedReason = request.method === 'approval_deny' ? request.params.reason : null;
+    if (result.request_reason !== expectedReason) return false;
+    if (
+      (request.method === 'approval_grant' || request.method === 'approval_deny') &&
+      result.bound_request_digest !== request.params.bound_request_digest
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  switch (request.method) {
+    case 'runtime_get_status':
+      return result.kind === 'runtime_status';
+    case 'devices_list':
+      return result.kind === 'devices_list';
+    case 'device_get':
+      return (
+        result.kind === 'device_get' &&
+        (result.device === null || result.device.device_id === request.params.device_id)
+      );
+    case 'device_get_health':
+      return result.kind === 'device_health' && result.device_id === request.params.device_id;
+    case 'device_read_logs':
+      return result.kind === 'device_logs' && result.device_id === request.params.device_id;
+    case 'device_query_telemetry':
+      return result.kind === 'device_telemetry' && result.device_id === request.params.device_id;
+    case 'incidents_list':
+      return result.kind === 'incidents_list';
+    case 'incident_get':
+      return (
+        result.kind === 'incident_get' &&
+        (result.incident === null || result.incident.incident_id === request.params.incident_id)
+      );
+    case 'job_get':
+      return (
+        result.kind === 'job_get' &&
+        (result.job === null || result.job.job_id === request.params.job_id)
+      );
+    case 'agent_run_register':
+      return result.kind === 'agent_run';
+    case 'agent_run_update':
+      return result.kind === 'agent_run' && result.run_id === request.params.run_id;
+    case 'work_intent_acknowledge':
+      return (
+        result.kind === 'work_intent_acknowledged' &&
+        result.work_intent_id === request.params.work_intent_id &&
+        result.run_id === request.params.run_id
+      );
+  }
+  return false;
+}
 
 export const BUSINESS_STREAM_NAMES = [
   'runtime_status',

@@ -107,6 +107,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[derive(Clone)]
 pub struct CredentialRecord {
+    pub credential_id: String,
     token: AuthToken,
     pub principal: AuthenticatedPrincipal,
     pub expires_at_unix_millis: Option<u64>,
@@ -116,11 +117,17 @@ pub struct CredentialRecord {
 impl CredentialRecord {
     pub fn active(token: AuthToken, principal: AuthenticatedPrincipal) -> Self {
         Self {
+            credential_id: Uuid::new_v4().to_string(),
             token,
             principal,
             expires_at_unix_millis: None,
             revoked: false,
         }
+    }
+
+    pub fn with_credential_id(mut self, credential_id: impl Into<String>) -> Self {
+        self.credential_id = credential_id.into();
+        self
     }
 
     pub fn expiring_at(mut self, expires_at_unix_millis: u64) -> Self {
@@ -135,11 +142,19 @@ impl CredentialRecord {
 }
 
 pub trait CredentialResolver: Send + Sync {
-    fn resolve(
+    fn resolve(&self, presented_token: &str, now_unix_millis: u64) -> Option<ResolvedCredential>;
+
+    fn revalidate(
         &self,
-        presented_token: &str,
+        credential_id: &str,
         now_unix_millis: u64,
     ) -> Option<AuthenticatedPrincipal>;
+}
+
+#[derive(Clone)]
+pub struct ResolvedCredential {
+    pub credential_id: String,
+    pub principal: AuthenticatedPrincipal,
 }
 
 #[derive(Clone)]
@@ -158,12 +173,9 @@ impl CredentialSet {
 }
 
 impl CredentialResolver for CredentialSet {
-    fn resolve(
-        &self,
-        presented_token: &str,
-        now_unix_millis: u64,
-    ) -> Option<AuthenticatedPrincipal> {
+    fn resolve(&self, presented_token: &str, now_unix_millis: u64) -> Option<ResolvedCredential> {
         let mut resolved = None;
+        let mut active_matches = 0_u8;
         for record in &self.records {
             let token_matches = record.token == *presented_token;
             let active = !record.revoked
@@ -171,10 +183,34 @@ impl CredentialResolver for CredentialSet {
                     .expires_at_unix_millis
                     .is_none_or(|expiry| now_unix_millis < expiry);
             if token_matches && active {
-                resolved = Some(record.principal.clone());
+                active_matches = active_matches.saturating_add(1);
+                resolved = Some(ResolvedCredential {
+                    credential_id: record.credential_id.clone(),
+                    principal: record.principal.clone(),
+                });
             }
         }
-        resolved
+        (active_matches == 1).then_some(resolved).flatten()
+    }
+
+    fn revalidate(
+        &self,
+        credential_id: &str,
+        now_unix_millis: u64,
+    ) -> Option<AuthenticatedPrincipal> {
+        let mut matches = self
+            .records
+            .iter()
+            .filter(|record| record.credential_id == credential_id);
+        let record = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        (!record.revoked
+            && record
+                .expires_at_unix_millis
+                .is_none_or(|expiry| now_unix_millis < expiry))
+        .then(|| record.principal.clone())
     }
 }
 
@@ -241,11 +277,11 @@ pub fn evaluate_hello_with_resolver(
     credential_resolver: &dyn CredentialResolver,
     required_capability: &str,
     now_unix_millis: u64,
-) -> Result<(HandshakeAccept, AuthenticatedPrincipal), HandshakeRejectReason> {
+) -> Result<(HandshakeAccept, ResolvedCredential), HandshakeRejectReason> {
     if hello_nonce != expected_nonce {
         return Err(HandshakeRejectReason::StaleNonce);
     }
-    let principal = credential_resolver
+    let credential = credential_resolver
         .resolve(hello_token, now_unix_millis)
         .ok_or(HandshakeRejectReason::AuthenticationFailed)?;
     if !server_protocol_version.is_compatible_with(&client_protocol_version) {
@@ -269,7 +305,7 @@ pub fn evaluate_hello_with_resolver(
         HandshakeAccept {
             negotiated_capabilities,
         },
-        principal,
+        credential,
     ))
 }
 
@@ -565,6 +601,27 @@ mod tests {
         assert!(resolver.resolve("revoked", 500).is_none());
         assert!(resolver.resolve("expired", 1_000).is_none());
         assert!(resolver.resolve("unknown", 500).is_none());
+    }
+
+    #[test]
+    fn ambiguous_tokens_and_credential_ids_fail_closed() {
+        let principal = AuthenticatedPrincipal::runtime_service("runtime-1");
+        let token = AuthToken::new("duplicate-token");
+        let first = CredentialRecord::active(token.clone(), principal.clone())
+            .with_credential_id("duplicate-id");
+        let second = CredentialRecord::active(token, principal).with_credential_id("duplicate-id");
+        let resolver = CredentialSet::new(vec![first, second]);
+        assert!(resolver.resolve("duplicate-token", 500).is_none());
+        assert!(resolver.revalidate("duplicate-id", 500).is_none());
+    }
+
+    #[test]
+    fn generated_credential_ids_are_distinct_from_principal_identity() {
+        let principal = AuthenticatedPrincipal::runtime_service("runtime-1");
+        let first = CredentialRecord::active(AuthToken::new("token-a"), principal.clone());
+        let second = CredentialRecord::active(AuthToken::new("token-b"), principal);
+        assert_ne!(first.credential_id, second.credential_id);
+        assert_ne!(first.credential_id, "runtime-1");
     }
 
     #[test]

@@ -27,7 +27,7 @@ use crate::protocol::{
     CallOutcome, EchoStreamItem, EchoStreamParams, EchoStreamSummary, HandshakeRejectReason,
     Method, MethodResult, PROTOCOL_VERSION, PingParams, PongResult, ProtocolVersion, RpcError,
     StreamItemPayload, StreamMethod, StreamOutcome, StreamSummary, WireMessage,
-    baseline_capabilities, business_result_matches_method,
+    baseline_capabilities, business_result_matches_request,
 };
 use crate::time;
 
@@ -440,6 +440,10 @@ impl Client {
         if matches!(method, Method::Ping(_)) {
             return Err(CallError::ProtocolMismatch);
         }
+        let principal = self
+            .authenticated_principal
+            .as_ref()
+            .ok_or(CallError::ProtocolMismatch)?;
         let correlation_id = Uuid::new_v4();
         let (tx, rx) = oneshot::channel();
         self.pending
@@ -460,7 +464,7 @@ impl Client {
                 result: MethodResult::Business(result),
             })) if result.validate_contract()
                 && result.correlation_id() == correlation_id.to_string()
-                && business_result_matches_method(&method, &result) =>
+                && business_result_matches_request(&method, &result, &principal.workspace_id) =>
             {
                 Ok(result)
             }

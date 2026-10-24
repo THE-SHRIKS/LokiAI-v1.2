@@ -66,6 +66,14 @@ where
     Ok(values)
 }
 
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 impl AuthenticatedPrincipal {
     pub fn runtime_service(principal_id: impl Into<String>) -> Self {
         Self {
@@ -266,7 +274,7 @@ pub struct BusinessEvent {
     pub source_runtime_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BusinessStreamSummary {
     pub items_sent: u16,
@@ -448,7 +456,7 @@ pub enum OperationOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BusinessRpcResult {
     RuntimeStatus {
         meta: ReadMeta,
@@ -462,6 +470,7 @@ pub enum BusinessRpcResult {
     },
     DeviceGet {
         meta: ReadMeta,
+        #[serde(deserialize_with = "deserialize_required_nullable")]
         device: Option<DeviceSummary>,
     },
     DeviceHealth {
@@ -489,10 +498,12 @@ pub enum BusinessRpcResult {
     },
     IncidentGet {
         meta: ReadMeta,
+        #[serde(deserialize_with = "deserialize_required_nullable")]
         incident: Option<IncidentSummary>,
     },
     JobGet {
         meta: ReadMeta,
+        #[serde(deserialize_with = "deserialize_required_nullable")]
         job: Option<JobSummary>,
     },
     AgentRun {
@@ -510,9 +521,16 @@ pub enum BusinessRpcResult {
         outcome: OperationOutcome,
         correlation_id: String,
         policy_reason: String,
+        idempotency_key: String,
+        #[serde(deserialize_with = "deserialize_required_nullable")]
+        artifact_digest: Option<String>,
+        #[serde(deserialize_with = "deserialize_required_nullable")]
+        request_reason: Option<String>,
         approval_id: Option<String>,
         job_id: Option<String>,
         bound_request_digest: Option<String>,
+        #[serde(deserialize_with = "deserialize_unique_set")]
+        scope_ids: BTreeSet<String>,
     },
 }
 
@@ -752,18 +770,30 @@ impl BusinessRpcResult {
             Self::Operation {
                 correlation_id,
                 policy_reason,
+                idempotency_key,
+                artifact_digest,
+                request_reason,
                 approval_id,
                 job_id,
                 bound_request_digest,
+                scope_ids,
                 ..
             } => {
                 safe_id(correlation_id, 200)
                     && bounded_utf8(policy_reason, MAX_TEXT_BYTES, false)
+                    && safe_id(idempotency_key, 200)
+                    && artifact_digest.as_deref().is_none_or(safe_digest)
+                    && request_reason
+                        .as_deref()
+                        .is_none_or(|value| bounded_utf8(value, MAX_TEXT_BYTES, false))
                     && approval_id
                         .as_deref()
                         .is_none_or(|value| safe_id(value, 200))
                     && job_id.as_deref().is_none_or(|value| safe_id(value, 200))
                     && bound_request_digest.as_deref().is_none_or(safe_digest)
+                    && !scope_ids.is_empty()
+                    && scope_ids.len() <= 16
+                    && scope_ids.iter().all(|scope| safe_id(scope, 200))
             }
         }
     }

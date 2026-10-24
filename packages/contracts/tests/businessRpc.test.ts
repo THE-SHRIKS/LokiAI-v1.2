@@ -6,6 +6,7 @@ import {
   BusinessRpcRequestSchema,
   BusinessRpcResultSchema,
   BusinessStreamRequestSchema,
+  businessResultMatchesRequest,
 } from '../src/businessRpc.js';
 
 const fixture = JSON.parse(
@@ -16,6 +17,8 @@ const fixture = JSON.parse(
   streams: unknown[];
   events: unknown[];
   principals: unknown[];
+  invalid_results: unknown[];
+  binding_negatives: Array<{ method: string; field: string; value: unknown }>;
 };
 
 describe('canonical business RPC', () => {
@@ -160,6 +163,10 @@ describe('canonical business RPC', () => {
         outcome: 'rejected',
         correlation_id: 'corr-1',
         policy_reason: oversizedUtf8,
+        idempotency_key: 'idem-1',
+        artifact_digest: null,
+        request_reason: null,
+        scope_ids: ['device:dev-1'],
       }).success,
     ).toBe(false);
     expect(
@@ -183,7 +190,11 @@ describe('canonical business RPC', () => {
         outcome: 'accepted',
         correlation_id: 'corr-1',
         policy_reason: 'policy allows request',
+        idempotency_key: 'idem-1',
+        artifact_digest: null,
+        request_reason: null,
         job_id: 'job-1',
+        scope_ids: ['device:dev-1'],
       }).success,
     ).toBe(true);
   });
@@ -204,5 +215,61 @@ describe('canonical business RPC', () => {
     expect(
       fixture.principals.every((value) => AuthenticatedPrincipalSchema.safeParse(value).success),
     ).toBe(true);
+    expect(
+      fixture.requests.every((request) =>
+        fixture.results.some((result) =>
+          businessResultMatchesRequest(request, result, 'workspace-1'),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects unknown fields on every result variant and nested projection', () => {
+    for (const result of fixture.results) {
+      expect(
+        BusinessRpcResultSchema.safeParse({
+          ...(result as Record<string, unknown>),
+          unexpected: true,
+        }).success,
+      ).toBe(false);
+    }
+    const devices = structuredClone(fixture.results[1]) as {
+      meta: Record<string, unknown>;
+      devices: Record<string, unknown>[];
+    };
+    devices.meta.unexpected = true;
+    expect(BusinessRpcResultSchema.safeParse(devices).success).toBe(false);
+    delete devices.meta.unexpected;
+    devices.devices.push({
+      device_id: 'dev-1',
+      lifecycle_state: 'ready',
+      connector_id: 'connector-1',
+      last_seen_at: '2026-08-24T12:00:00Z',
+    });
+    devices.devices[0]!.unexpected = true;
+    expect(BusinessRpcResultSchema.safeParse(devices).success).toBe(false);
+    expect(
+      fixture.invalid_results.every((value) => !BusinessRpcResultSchema.safeParse(value).success),
+    ).toBe(true);
+  });
+
+  it('rejects shared changed-request and approval-digest binding negatives', () => {
+    for (const negative of fixture.binding_negatives) {
+      const request = fixture.requests.find(
+        (candidate) => (candidate as { method?: unknown }).method === negative.method,
+      );
+      const result = structuredClone(
+        fixture.results.find(
+          (candidate) =>
+            (candidate as { kind?: unknown; method?: unknown }).kind === 'operation' &&
+            (candidate as { method?: unknown }).method === negative.method,
+        ),
+      ) as Record<string, unknown>;
+      expect(request).toBeDefined();
+      expect(result).toBeDefined();
+      result[negative.field] = negative.value;
+      expect(BusinessRpcResultSchema.safeParse(result).success).toBe(true);
+      expect(businessResultMatchesRequest(request, result, 'workspace-1')).toBe(false);
+    }
   });
 });
