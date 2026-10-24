@@ -23,6 +23,7 @@ members = [
   "crates/loki-agent-delivery",
   "crates/loki-mutation-contract",
   "crates/loki-build-executor",
+  "crates/loki-connector-esp32-s3",
 ]
 
 [workspace.package]
