@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "candidate": {
+    "schema_version": "1.0.0",
+    "candidate_id": "candidate_fixture_001",
+    "candidate_id_stability": "ephemeral",
+    "connector_id": "com.lokiai.fixture",
+    "connector_version": "1.2.3",
+    "transport_kind": "fixture_transport",
+    "locator": {
+      "value": "fixture-locator-not-a-real-device",
+      "sensitivity": "sensitive",
+      "stability": "unstable"
+    },
+    "discovered_at": "2026-08-24T12:00:00.000Z"
+  },
+  "status": "verified",
+  "evidence": [
+    {
+      "evidence_type": "hardware_uid",
+      "fingerprint_method": "hmac_sha256_device_material_v1",
+      "raw_material_handling": "consumed_not_persisted",
+      "fingerprint_digest": "0e927b8518601ba3581e981263bcac140a64c219f397e8ce328f352cbc37f1e7",
+      "confidence": "strong",
+      "connector_id": "com.lokiai.fixture",
+      "connector_version": "1.2.3",
+      "observed_at": "2026-08-24T12:00:01.000Z",
+      "evidence_digest": "0e927b8518601ba3581e981263bcac140a64c219f397e8ce328f352cbc37f1e7"
+    }
+  ],
+  "public_identity": {
+    "scheme": "lokiai_device_hmac_sha256_v1",
+    "device_id": "dev1_0e927b8518601ba3581e981263bcac140a64c219f397e8ce328f352cbc37f1e7",
+    "fingerprint_digest": "0e927b8518601ba3581e981263bcac140a64c219f397e8ce328f352cbc37f1e7"
+  },
+  "reason_code": "device_evidence_verified"
+}
