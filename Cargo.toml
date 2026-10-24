@@ -21,6 +21,7 @@ members = [
   "crates/loki-local-setup",
   "crates/loki-local-notifications",
   "crates/loki-agent-delivery",
+  "crates/loki-build-executor",
 ]
 
 [workspace.package]
