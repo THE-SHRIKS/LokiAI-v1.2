@@ -81,14 +81,14 @@ pub fn evaluate_approval_reference(
 /// does not match its own bound fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationAcceptanceRequest {
-    pub principal_sid: String,
-    pub grant_generation: u64,
-    pub method: MutationMethod,
-    pub target_id: String,
-    pub artifact_digest: Option<String>,
-    pub request_digest: RequestDigest,
-    pub idempotency_key: IdempotencyKey,
-    pub approval_reference: Option<ApprovalReference>,
+    principal_sid: String,
+    grant_generation: u64,
+    method: MutationMethod,
+    target_id: String,
+    artifact_digest: Option<String>,
+    request_digest: RequestDigest,
+    idempotency_key: IdempotencyKey,
+    approval_reference: Option<ApprovalReference>,
 }
 
 impl MutationAcceptanceRequest {
@@ -127,6 +127,68 @@ impl MutationAcceptanceRequest {
             idempotency_key,
             approval_reference,
         })
+    }
+
+    pub fn principal_sid(&self) -> &str {
+        &self.principal_sid
+    }
+    pub fn grant_generation(&self) -> u64 {
+        self.grant_generation
+    }
+    pub fn method(&self) -> MutationMethod {
+        self.method
+    }
+    pub fn target_id(&self) -> &str {
+        &self.target_id
+    }
+    pub fn artifact_digest(&self) -> Option<&str> {
+        self.artifact_digest.as_deref()
+    }
+    pub fn request_digest(&self) -> &RequestDigest {
+        &self.request_digest
+    }
+    pub fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+    pub fn approval_reference(&self) -> Option<&ApprovalReference> {
+        self.approval_reference.as_ref()
+    }
+
+    /// Returns an otherwise-identical request with the server-derived approval
+    /// reference. Approval metadata is not part of the canonical operation
+    /// digest; the operation fields remain immutable.
+    pub fn with_approval_reference(&self, approval_reference: Option<ApprovalReference>) -> Self {
+        Self {
+            principal_sid: self.principal_sid.clone(),
+            grant_generation: self.grant_generation,
+            method: self.method,
+            target_id: self.target_id.clone(),
+            artifact_digest: self.artifact_digest.clone(),
+            request_digest: self.request_digest.clone(),
+            idempotency_key: self.idempotency_key.clone(),
+            approval_reference,
+        }
+    }
+
+    /// Defence in depth at a serialization/acceptance boundary. Safe Rust
+    /// callers cannot mutate the bound fields after construction, but this
+    /// check keeps any future deserialization or FFI boundary fail-closed.
+    pub fn verify_digest_binding(&self) -> Result<(), MutationContractError> {
+        let derived = compute_request_digest(
+            &self.principal_sid,
+            self.grant_generation,
+            self.method,
+            &self.target_id,
+            self.artifact_digest.as_deref(),
+            &self.idempotency_key,
+        )?;
+        if derived != self.request_digest {
+            return Err(MutationContractError::InvalidInput {
+                field: "request_digest",
+                reason: "does not match immutable canonical request fields".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 

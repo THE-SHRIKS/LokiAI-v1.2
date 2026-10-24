@@ -164,7 +164,7 @@ pub fn evaluate_replay(
     existing: &AcceptanceRecordView,
     incoming: &MutationAcceptanceRequest,
 ) -> ReplayDecision {
-    if existing.request_digest == incoming.request_digest {
+    if existing.request_digest == *incoming.request_digest() {
         ReplayDecision::Identical
     } else {
         ReplayDecision::DigestConflict
@@ -210,8 +210,8 @@ pub fn construct_accepted(
     correlation_id: CorrelationId,
     accepted_at_ms: i64,
 ) -> Result<AcceptanceResult, MutationContractError> {
-    if request.method.requires_approval() {
-        match &request.approval_reference {
+    if request.method().requires_approval() {
+        match request.approval_reference() {
             None => {
                 return Err(MutationContractError::InvalidInput {
                     field: "approval_reference",
@@ -220,7 +220,7 @@ pub fn construct_accepted(
             }
             Some(reference) => {
                 if let Err(rejection) =
-                    evaluate_approval_reference(reference, &request.request_digest, accepted_at_ms)
+                    evaluate_approval_reference(reference, request.request_digest(), accepted_at_ms)
                 {
                     return Ok(AcceptanceResult::Rejected(rejection));
                 }
