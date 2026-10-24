@@ -45,3 +45,7 @@
 
 # Excluded working note (not part of the tracked engineering document set)
 /PromptForYou.md
+
+# Additional generated Rust build directories
+**/target-*/
+**/target_scratch/
