@@ -15,6 +15,7 @@ use std::fmt;
 use std::time::SystemTime;
 
 use crate::error::{ConnectorError, ValidationError};
+use crate::identity::DeviceIdentityEvidence;
 use crate::operation::OperationStage;
 use crate::validate::non_empty_bounded;
 
@@ -26,6 +27,31 @@ pub struct StageEvidence {
     pub summary: String,
     pub observed_at: SystemTime,
     pub evidence_ref: Option<String>,
+    /// Optional structured identity evidence a connector's `identify`
+    /// capability can attach to a stage's outcome, added for
+    /// `Docs/graph/tasks/CON-SDK-IDENTITY-EVIDENCE-001.md` to unblock
+    /// `CON-002-R1` (`Docs/graph/handoffs/CON-002-R1-1.md`): that node found
+    /// no typed channel existed for a connector to report device-derived
+    /// identity evidence (`evidence_type`, a fingerprint digest, and an
+    /// [`crate::identity::IdentityConfidence`]) — only the free-text
+    /// `summary` above, which Section 3 of that packet explicitly forbids
+    /// overloading for this purpose.
+    ///
+    /// This carries [`DeviceIdentityEvidence`] — the already-validated,
+    /// digest-only type produced by [`DeviceIdentityEvidence::new`] — and
+    /// never the raw [`crate::identity::DeviceIdentityEvidenceInput`]: the
+    /// input type borrows the caller's installation secret and raw
+    /// fingerprint material, neither of which may be persisted into stage
+    /// evidence (`raw_material_handling: "consumed_not_persisted"` in
+    /// `identity.rs`), and it carries a lifetime parameter that would force
+    /// a lifetime onto every `StageOutcome`/`LifecycleOutcome` in this crate
+    /// — a breaking change this additive node must not make. A connector
+    /// that constructs a `DeviceIdentityEvidence` from its own probe still
+    /// does so through `identity.rs`'s existing validated constructor; this
+    /// field is purely the payload-shape hook to attach that already-safe
+    /// result to a stage's evidence. `None` by default: every existing
+    /// connector and construction site is unaffected.
+    pub identity_evidence: Option<DeviceIdentityEvidence>,
 }
 
 impl StageEvidence {
@@ -39,12 +65,23 @@ impl StageEvidence {
             summary,
             observed_at,
             evidence_ref: None,
+            identity_evidence: None,
         })
     }
 
     #[must_use]
     pub fn with_evidence_ref(mut self, evidence_ref: impl Into<String>) -> Self {
         self.evidence_ref = Some(evidence_ref.into());
+        self
+    }
+
+    /// Attaches structured identity evidence to this stage's outcome. See
+    /// the [`StageEvidence::identity_evidence`] field doc comment for why
+    /// this takes the already-validated [`DeviceIdentityEvidence`] rather
+    /// than raw probe input.
+    #[must_use]
+    pub fn with_identity_evidence(mut self, identity_evidence: DeviceIdentityEvidence) -> Self {
+        self.identity_evidence = Some(identity_evidence);
         self
     }
 }
