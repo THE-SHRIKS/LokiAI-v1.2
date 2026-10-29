@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LokiAI Guard</title>
+<style>
+  :root {
+    --bg: #12140e; --panel: #1a1d14; --line: #2b3020; --text: #e9e7d8; --mute: #8f927e;
+    --olive: #a3b03d; --ok: #7fbf5a; --warn: #e0b341; --bad: #e0624d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .04em; }
+  h1 span { color: var(--olive); }
+  .chip { padding: 2px 10px; border: 1px solid var(--line); border-radius: 99px; font-size: 12px; color: var(--mute); }
+  .chip.ok { color: var(--ok); border-color: var(--ok); } .chip.bad { color: var(--bad); border-color: var(--bad); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); }
+  main { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; padding: 16px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--mute); margin: 0 0 12px; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .tile b { display: block; font-size: 22px; } .tile small { color: var(--mute); }
+  canvas { width: 100%; height: 190px; display: block; }
+  button { font: inherit; border: 1px solid var(--line); background: #232717; color: var(--text); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+  button:hover { border-color: var(--olive); }
+  button.primary { background: var(--olive); color: #12140e; border-color: var(--olive); font-weight: 600; }
+  button.danger { color: var(--bad); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .state { display: inline-block; padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+  .kv { margin: 10px 0 0; } .kv dt { color: var(--mute); font-size: 12px; margin-top: 8px; } .kv dd { margin: 2px 0 0; }
+  .audit { font: 12px/1.6 ui-monospace, Consolas, monospace; color: var(--mute); max-height: 230px; overflow: auto; }
+  .audit div b { color: var(--text); font-weight: 500; }
+  .full { grid-column: 1 / -1; }
+  .empty { color: var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Loki<span>AI</span> Guard</h1>
+  <span id="link" class="chip">connecting…</span>
+  <span id="analyst" class="chip"></span>
+  <span class="chip">agent proposes · human approves · gateway verifies</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Live telemetry · ESP32-S3 (no external sensors)</h2>
+    <div class="tiles">
+      <div class="tile"><b id="t-free">–</b><small>free heap</small></div>
+      <div class="tile"><b id="t-temp">–</b><small>chip temp</small></div>
+      <div class="tile"><b id="t-up">–</b><small>uptime</small></div>
+      <div class="tile"><b id="t-reset">–</b><small>last reset</small></div>
+    </div>
+    <canvas id="chart" width="900" height="380"></canvas>
+    <div class="row">
+      <button id="inject">Demo: inject memory leak</button>
+      <span class="empty" style="align-self:center">starts a deliberate leak on the real board</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Incident</h2>
+    <div id="incident"><span class="empty">No incident. Device is being watched.</span></div>
+  </section>
+
+  <section class="card full">
+    <h2>Audit trail (hash-chained)</h2>
+    <div id="audit" class="audit"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = { analyzing: "#e0b341", awaiting_approval: "#e0b341", executing: "#a3b03d", verifying: "#a3b03d",
+                 resolved: "#7fbf5a", failed: "#e0624d", dismissed: "#8f927e" };
+
+function el(tag, props = {}, ...kids) {
+  const e = Object.assign(document.createElement(tag), props);
+  kids.forEach(k => e.append(k));
+  return e;
+}
+function kv(dl, k, v) { dl.append(el("dt", { textContent: k }), el("dd", { textContent: v })); }
+
+function drawChart(hist, rule) {
+  const c = $("chart"), g = c.getContext("2d"), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = "#2b3020"; g.fillStyle = "#8f927e"; g.font = "20px system-ui"; g.lineWidth = 1;
+  const y = p => H - 24 - (p / 100) * (H - 40);
+  for (const p of [0, 50, 100]) { g.beginPath(); g.moveTo(50, y(p)); g.lineTo(W, y(p)); g.stroke(); g.fillText(p + "%", 2, y(p) + 6); }
+  g.strokeStyle = "#e0624d88"; g.setLineDash([8, 8]); g.beginPath(); g.moveTo(50, y(rule.low_pct)); g.lineTo(W, y(rule.low_pct)); g.stroke(); g.setLineDash([]);
+  if (hist.length < 2) return;
+  g.strokeStyle = "#a3b03d"; g.lineWidth = 3; g.beginPath();
+  hist.forEach((h, i) => { const x = 50 + (i / (hist.length - 1)) * (W - 56); i ? g.lineTo(x, y(h[1])) : g.moveTo(x, y(h[1])); });
+  g.stroke();
+}
+
+function renderIncident(s) {
+  const box = $("incident"), inc = s.incident;
+  box.replaceChildren();
+  if (!inc) { box.append(el("span", { className: "empty", textContent: "No incident. Device is being watched." })); return; }
+  const st = el("span", { className: "state", textContent: inc.state.replace("_", " ") });
+  st.style.background = COLORS[inc.state] + "33"; st.style.color = COLORS[inc.state];
+  box.append(el("div", {}, st, el("span", { className: "empty", textContent: "  " + inc.id })));
+  const dl = el("dl", { className: "kv" });
+  kv(dl, "Rule", inc.evidence.rule);
+  if (inc.state === "analyzing") kv(dl, "Analyst", "Asking Nemotron on Nebius Token Factory…");
+  if (inc.analysis_error) kv(dl, "AI analysis unavailable", inc.analysis_error);
+  if (inc.analysis) {
+    const a = inc.analysis;
+    kv(dl, "Diagnosis (" + inc.model + ")", a.diagnosis);
+    kv(dl, "Hypothesis", a.root_cause_hypothesis);
+    kv(dl, "Severity / confidence", a.severity + " / " + (a.confidence == null ? "n/a" : Math.round(a.confidence * 100) + "%"));
+    kv(dl, "Reasoning", a.reasoning);
+    kv(dl, "Risks", a.risks);
+    kv(dl, "Proposed action", a.proposed_action);
+  }
+  box.append(dl);
+  if (inc.state === "awaiting_approval") {
+    if (inc.proposal) {
+      const left = Math.max(0, Math.round(inc.proposal.expires_at - s.now));
+      box.append(el("p", { className: "empty", textContent: `Proposed by: ${inc.proposal.source}. Restart reboots the board (brief outage, no flash change). Approval expires in ${left}s and is bound to digest ${inc.proposal.digest.slice(0, 12)}…` }));
+      const ok = el("button", { className: "primary", textContent: "Approve restart" });
+      ok.onclick = () => decide("approve", inc.proposal.digest);
+      const no = el("button", { className: "danger", textContent: "Deny" });
+      no.onclick = () => decide("deny");
+      box.append(el("div", { className: "row" }, ok, no));
+    } else {
+      const no = el("button", { textContent: "Dismiss (model advised monitor only)" });
+      no.onclick = () => decide("deny");
+      box.append(el("div", { className: "row" }, no));
+    }
+  }
+  if (inc.state === "verifying") box.append(el("p", { className: "empty", textContent: `Verifying on the real device: rebooted=${inc.verification.rebooted}, healthy samples ${inc.verification.healthy}/6` }));
+  if (inc.state === "resolved") box.append(el("p", { textContent: "Closed only after the device was observed rebooted and healthy again." }));
+  if (inc.state === "failed") box.append(el("p", { textContent: "Verification timed out. Outcome is unknown; needs operator attention." }));
+}
+
+async function decide(decision, digest) {
+  const r = await fetch("/api/decision", { method: "POST", body: JSON.stringify({ decision, digest }) });
+  const j = await r.json();
+  if (!j.ok) alert(j.message);
+}
+
+$("inject").onclick = async () => {
+  const r = await fetch("/api/inject-leak", { method: "POST", body: "{}" });
+  const j = await r.json();
+  if (!j.ok) alert(j.message);
+};
+
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    const l = $("link");
+    l.textContent = s.link.connected ? (s.link.stale ? "device silent" : "device connected · " + s.link.port) : "device disconnected";
+    l.className = "chip " + (s.link.connected && !s.link.stale ? "ok" : "bad");
+    const a = $("analyst");
+    a.textContent = s.analyst.configured ? "AI analyst: Nemotron · Nebius Token Factory" + (s.analyst.model ? " · " + s.analyst.model : "") : "AI analyst not configured";
+    a.className = "chip " + (s.analyst.configured ? "ok" : "warn");
+    if (s.latest) {
+      $("t-free").textContent = (s.latest.heap_free / 1048576).toFixed(2) + " MB (" + s.latest.free_pct + "%)";
+      $("t-temp").textContent = s.latest.temp_c + " °C";
+      $("t-up").textContent = s.latest.uptime_s + " s";
+      $("t-reset").textContent = s.latest.reset_cause;
+    }
+    drawChart(s.history, s.rule);
+    renderIncident(s);
+    $("audit").replaceChildren(...s.audit.slice().reverse().map(r =>
+      el("div", {}, el("b", { textContent: new Date(r.ts * 1000).toLocaleTimeString() + "  " + r.event }),
+        document.createTextNode("  " + JSON.stringify(r.details) + "  #" + r.hash.slice(0, 8)))));
+  } catch (e) {
+    $("link").textContent = "gateway unreachable"; $("link").className = "chip bad";
+  }
+}
+refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>
