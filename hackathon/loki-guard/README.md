@@ -45,13 +45,19 @@ python -m mpremote fs cp firmware/main.py :main.py
 python -m mpremote reset
 
 # 2. Configure the analyst
-cp .env.example gateway/.env      # then put your NEBIUS_API_KEY in gateway/.env
+cp .env.example .env              # then put your NEBIUS_API_KEY in .env (gateway/.env also works)
 
 # 3. Run the gateway and open http://127.0.0.1:8765
 python gateway/gateway.py
 ```
 
 The board is auto-detected by its Espressif USB id (`303A`); set `LOKI_PORT` to override. Try it: click **Demo: inject memory leak**, wait ~15 s for the incident, read the diagnosis, click **Approve restart**, and watch the verification complete.
+
+## Re-record the demo video
+
+```bash
+python tools/record_demo.py demo_video   # needs: pip install playwright && playwright install ffmpeg, Chrome installed, gateway running
+```
 
 ## Tests
 

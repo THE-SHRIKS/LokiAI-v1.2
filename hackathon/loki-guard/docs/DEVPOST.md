@@ -19,7 +19,10 @@ Making "success" mean observed recovery rather than "command sent"; treating dev
 ## What's next
 Jetson Orin Nano as the always-on gateway, MCP tools for coding agents, and the full LokiAI Rust runtime for real flash/rollback.
 
-## Feedback on Token Factory and NVIDIA models (fill in after running)
-- Model(s) used and latency:
-- What worked well:
-- What was hard / missing:
+## Feedback on Token Factory and the NVIDIA models (from real runs)
+- **Model used:** `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, found by listing `/v1/models` (30 models, 5 Nemotron variants). I did not find the Nemotron IDs in the docs pages I searched; the model list endpoint was the reliable way. A documented "NVIDIA models on Token Factory" page would help.
+- **Integration effort:** the OpenAI-compatible `/v1/chat/completions` worked with plain `urllib` and a bearer key, no SDK needed.
+- **Latency:** roughly 14-21 s per diagnosis for a ~270-token prompt, because the reasoning model spends most of its ~830 completion tokens thinking before the JSON. Fine for incident analysis, too slow for a tight control loop.
+- **Token budget gotcha:** with `max_tokens=900` one call returned no JSON because reasoning consumed the budget. Raising to 3000 fixed it. The `reasoning` text comes back in a separate field, which made this easy to debug.
+- **Instruction following:** with only a schema in the prompt the model chose `monitor_only` for a leak that was still falling. After adding an explicit decision policy it chose `restart_device` in every later run, citing real numbers from the evidence (e.g. "8.29 MB -> 2.19 MB, 99.6% -> 27.1%"). It returned clean JSON every time, with only a `<think>`-style tolerance needed in the parser.
+- **Credits:** the promo coupon had not arrived by submission time; the account's existing balance covered about six completions.

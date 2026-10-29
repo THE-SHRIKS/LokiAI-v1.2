@@ -41,16 +41,19 @@ Reply with ONE JSON object and nothing else:
  "proposed_action": "restart_device"|"monitor_only",
  "reasoning": str (max 400 chars citing numbers from the evidence), "risks": str (max 200 chars)}
 restart_device reboots the board (brief outage, clears RAM, no flash change).
-monitor_only means no action is justified yet."""
+monitor_only means no action is justified yet.
+Decision policy: the monitoring rule has already fired. Choose restart_device when free heap fell
+steadily with no sign of recovery (a leak does not fix itself and the device will eventually fail).
+Choose monitor_only only if the heap is stable or recovering. Keep every field short."""
 
 
 def load_env():
-    f = HERE / ".env"
-    if f.exists():
-        for ln in f.read_text().splitlines():
-            if "=" in ln and not ln.lstrip().startswith("#"):
-                k, v = ln.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"'))
+    for f in (HERE / ".env", HERE.parent / ".env"):
+        if f.exists():
+            for ln in f.read_text().splitlines():
+                if "=" in ln and not ln.lstrip().startswith("#"):
+                    k, v = ln.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"'))
 
 
 def now():
@@ -104,7 +107,7 @@ class Nemotron:
             {
                 "model": model,
                 "temperature": 0.2,
-                "max_tokens": 900,
+                "max_tokens": 3000,  # reasoning models spend tokens thinking before the JSON
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": "<evidence>\n" + json.dumps(evidence) + "\n</evidence>"},

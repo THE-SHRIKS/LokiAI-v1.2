@@ -13,3 +13,7 @@ Setup before recording: board on USB, `python gateway/gateway.py` running, brows
 | 2:00 | Board LED blue, chart recovers, "resolved" | "The gateway doesn't trust 'command sent'. It waits for a real reboot and six healthy samples, then closes the incident." |
 | 2:20 | Audit trail | "Every step is in a hash-chained audit log." |
 | 2:30 | Roadmap slide | "Next: a Jetson Orin Nano as the always-on gateway, and MCP so any coding agent can request the same bounded actions." |
+
+
+## Re-recording
+`python gateway/gateway.py` in one terminal, then `python tools/record_demo.py demo_video` records a captioned ~95 s screen recording (no voiceover needed) against the real board and the real Nemotron call. Upload the resulting `.webm` to YouTube as public.
