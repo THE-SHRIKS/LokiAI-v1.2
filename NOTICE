@@ -1,0 +1,14 @@
+LokiAI v1.2
+Copyright 2026 THE SHRIKS
+
+This project is licensed under the Apache License, Version 2.0.
+See the repository-root LICENSE file for the complete terms.
+
+Third-party components, dependencies, assets, trademarks, and embedded
+materials remain subject to their respective licenses and ownership rights.
+The Apache-2.0 license for LokiAI does not replace those licenses.
+
+For distributable binaries and installers, preserve applicable upstream
+copyright notices, license texts, and attributions. Consult Docs/RELEASE.md
+for release-specific third-party notice and software bill of materials
+requirements, including SQLCipher, SQLite, rusqlite, and OpenSSL.
