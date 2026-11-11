@@ -2,6 +2,7 @@
   "name": "@lokiai/mcp-server",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "LokiAI Main v1.2 provider-neutral MCP server foundation (MCP-001): standalone Node stdio server on the official MCP TypeScript SDK v2, speaking protocol revision 2026-07-28 (modern era) plus the SDK's bounded 2025-era legacy adapter. Protocol shell only: initialize handshake, server/discover capability negotiation, structured error/diagnostic logging. No tools/resources (MCP-002), no auth/session state (AUTH-001/RUN-002), no device/connector access.",
   "type": "module",
   "bin": {
