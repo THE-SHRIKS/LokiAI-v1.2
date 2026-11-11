@@ -2,6 +2,7 @@
   "name": "lokiai-main",
   "private": true,
   "version": "1.2.0",
+  "license": "Apache-2.0",
   "description": "LokiAI Main v1.2 — root workspace (FND-002). See AGENTS.md and Docs/ before changing anything here.",
   "type": "module",
   "packageManager": "pnpm@11.21.0",
